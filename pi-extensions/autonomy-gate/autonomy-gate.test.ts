@@ -6,7 +6,9 @@
 // branch default en `autonomy-resolve` (idéntico tras la normalización de
 // docs/harness-interaction-differences.md) y la forma del contrato en
 // `autonomy-contract` (chiche-init × 5). El comando canónico de
-// `autonomy-resolve` se ejecuta con bash y con sh en repos git temporales.
+// `autonomy-resolve` se ejecuta con bash, sh y zsh en repos git temporales
+// (issue #120: zsh leía `$stage[[:space:]]` como subíndice y todo nivel ≥ A2
+// caía a A1; sin `zsh` ejecutable esa iteración se saltea con una nota).
 // Es solo-tests (sin index.ts), como events-gate: el package censa exactamente
 // 11 factories. Que un agente honre el nivel en una sesión real es prueba
 // humana (CA-18, CA-19).
@@ -17,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import type { Harness } from "../harness-gate/interaction.ts";
 import { HARNESSES, escapeRegExp, fencedBlocks, firstDifference, normalizeInvocations, parseInteractionTable } from "../harness-gate/interaction.ts";
@@ -319,12 +321,59 @@ function contract(autonomy: string | null, limites = false): string {
 	].join("\n");
 }
 
-function runResolve(command: string, cwd: string, stage: string, flag: string, shell: "bash" | "sh" = "bash"): { status: number | null; stdout: string; stderr: string } {
+function runResolve(command: string, cwd: string, stage: string, flag: string, shell: string = "bash", extraEnv: Record<string, string> = {}): { status: number | null; stdout: string; stderr: string } {
 	const script = command.replace("'<stage>'", `'${stage}'`).replace("'<flag>'", `'${flag}'`);
-	const env = { ...process.env };
-	for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
-	const result = spawnSync(shell, ["-c", script], { cwd, encoding: "utf8", env });
+	const result = spawnSync(shell, ["-c", script], { cwd, encoding: "utf8", env: shellEnv(extraEnv) });
 	return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+// Issue #120: el comando canónico se prueba con bash, con dash (o sh) y con zsh, el shell default de macOS y de la
+// tool Bash de Claude Code ahí, donde `$stage[[:space:]]` se leía como subíndice. Sin `zsh` ejecutable (ni /bin/zsh
+// ni en PATH) la iteración se saltea con una nota visible, como la suite con `pi` ausente, y bash y sh corren igual.
+const DASH = existsSync("/bin/dash") ? "/bin/dash" : "sh";
+const ZSH = existsSync("/bin/zsh") ? "/bin/zsh" : spawnSync("zsh", ["-c", "true"]).status === 0 ? "zsh" : null;
+const ZSH_SKIP_NOTE = "zsh no está en PATH: se saltea";
+// Review #121-1: el job `tests` de CI exporta AUTONOMY_GATE_REQUIRE_ZSH=1 y ahí la falta de zsh falla en vez de
+// saltear, para que la iteración no desaparezca en silencio si cambia la imagen o el paso que la instala.
+const REQUIRE_ZSH_VAR = "AUTONOMY_GATE_REQUIRE_ZSH";
+const REQUIRE_ZSH = process.env[REQUIRE_ZSH_VAR] === "1";
+
+function resolveShells(zsh: string | null, required: boolean): string[] {
+	if (zsh) return ["bash", DASH, zsh];
+	if (required) throw new Error(`zsh no está en PATH y ${REQUIRE_ZSH_VAR}=1 lo exige`);
+	return ["bash", DASH];
+}
+
+const SHELLS: readonly string[] = resolveShells(ZSH, false);
+const notedSkip = new WeakSet<TestContext>();
+
+function shells(t: TestContext): readonly string[] {
+	if (!ZSH && !notedSkip.has(t)) {
+		resolveShells(ZSH, REQUIRE_ZSH);
+		notedSkip.add(t);
+		t.diagnostic(ZSH_SKIP_NOTE);
+	}
+	return SHELLS;
+}
+
+// Para los tests que solo tienen sentido con zsh: lo devuelve, o saltea el test con la nota (falla si CI lo exige).
+function zshOrSkip(t: TestContext): string | null {
+	if (ZSH) return ZSH;
+	resolveShells(ZSH, REQUIRE_ZSH);
+	t.skip(ZSH_SKIP_NOTE);
+	return null;
+}
+
+// Review #121-2: `zsh -c` lee $ZDOTDIR/.zshenv (o ~/.zshenv) aunque no sea interactivo; bash y dash no leen rc alguno.
+// Un ZDOTDIR vacío deja la iteración hermética sin cambiar `zsh -c` (/etc/zshenv se sigue leyendo; macOS no lo trae).
+// Las GIT_* del entorno del runner tampoco pasan, para que el comando lea el repo temporal y no el del test.
+const EMPTY_ZDOTDIR = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-zdotdir-")));
+process.on("exit", () => rmSync(EMPTY_ZDOTDIR, { recursive: true, force: true }));
+
+function shellEnv(extraEnv: Record<string, string> = {}): Record<string, string | undefined> {
+	const env: Record<string, string | undefined> = { ...process.env, ...extraEnv, ZDOTDIR: EMPTY_ZDOTDIR };
+	for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
+	return env;
 }
 
 // Repo con remote local: `main` publicado con el contrato `base`, y un branch
@@ -354,7 +403,7 @@ test("CA-4: el comando lee el nivel de origin/<default>, no del branch: base A1 
 	const branch = contract(LEVELS_TABLE("| grill | supervised | 2026-11-05 | — |\n| run | unattended | 2026-11-05 | rehearsed 2026-11-05 |"));
 	const { root, work } = repoWithRemote("adversarial", base, branch);
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	for (const shell of ["bash", "sh"] as const) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, work, "run", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
 		assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `${shell}: ${run.stdout}`);
@@ -373,7 +422,7 @@ test("CA-4: el flag manda sobre el contrato y la stop list igual se lee; A0/A4/A
 	const base = contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |"));
 	const { root, work } = repoWithRemote("flag", base, base);
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	for (const shell of ["bash", "sh"] as const) {
+	for (const shell of shells(t)) {
 		for (const [flag, expected] of [["A3", "unattended (A3)"], ["a2", "plan-approved (A2)"], ["Supervised", "supervised (A1)"], ["plan-approved", "plan-approved (A2)"]] as const) {
 			const run = runResolve(command, work, "run", flag, shell);
 			assert.equal(run.status, 0, `${shell} ${flag}: ${run.stderr}`);
@@ -401,7 +450,7 @@ test("CA-4: sin remote lee el working tree y avisa; una fila FAILED o unrehearse
 	writeFileSync(join(root, ".chiche/project.md"), contract(LEVELS_TABLE("| spec | plan-approved | 2026-11-05 | rehearsed 2026-11-05 |\n| run | unattended | 2026-11-05 | FAILED (2 preguntas) |\n| grill | plan-approved | 2026-11-05 | unrehearsed |")));
 	git(root, "add", "-A");
 	git(root, "commit", "-q", "-m", "contrato local");
-	for (const shell of ["bash", "sh"] as const) {
+	for (const shell of shells(t)) {
 		const spec = runResolve(command, root, "spec", "", shell);
 		assert.equal(spec.status, 0, `${shell}: ${spec.stderr}`);
 		assert.match(spec.stdout, /^nivel efectivo: plan-approved \(A2\), leído de working tree$/m, `${shell}: ${spec.stdout}`);
@@ -430,7 +479,7 @@ test("CA-4: un contrato que sigue en .sdd/ se lee desde el branch default; uno c
 	t.after(() => {
 		for (const repo of [legacy, limites, empty]) rmSync(repo.root, { recursive: true, force: true });
 	});
-	for (const shell of ["bash", "sh"] as const) {
+	for (const shell of shells(t)) {
 		const fromSdd = runResolve(command, legacy.work, "spec", "", shell);
 		assert.equal(fromSdd.status, 0, `${shell}: ${fromSdd.stderr}`);
 		assert.match(fromSdd.stdout, /^nivel efectivo: plan-approved \(A2\), leído de origin\/main$/m, `${shell}: ${fromSdd.stdout}`);
@@ -897,7 +946,7 @@ async function stopListCommand(): Promise<string> {
 	return fences[0]?.content ?? "";
 }
 
-test("CA-15: el ensayo de la stop list corre cada Pattern contra su Action y contra echo ok, con bash y con sh: un patrón bueno pasa, uno vacío y uno que matchea todo quedan FAILED", async (t) => {
+test("CA-15: el ensayo de la stop list corre cada Pattern contra su Action y contra echo ok, con bash, sh y zsh: un patrón bueno pasa, uno vacío y uno que matchea todo quedan FAILED", async (t) => {
 	const command = await stopListCommand();
 	assert.match(command, /contract='<contrato>'/);
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-stoplist-")));
@@ -908,8 +957,8 @@ test("CA-15: el ensayo de la stop list corre cada Pattern contra su Action y con
 	writeFileSync(mixed, contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |", rows)));
 	const good = join(dir, "good.md");
 	writeFileSync(good, contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |", "| git push origin main | git push .* main | solo via PR |\n| npm run deploy | npm run deploy | sin confirmacion humana |")));
-	for (const shell of ["bash", "sh"] as const) {
-		const run = spawnSync(shell, ["-c", command.replace("'<contrato>'", `'${mixed}'`)], { cwd: dir, encoding: "utf8" });
+	for (const shell of shells(t)) {
+		const run = spawnSync(shell, ["-c", command.replace("'<contrato>'", `'${mixed}'`)], { cwd: dir, encoding: "utf8", env: shellEnv() });
 		assert.equal(run.status, 1, `${shell}: ${run.stderr}`);
 		assert.deepEqual(run.stdout.trim().split("\n"), [
 			"ok: git push origin main",
@@ -918,7 +967,7 @@ test("CA-15: el ensayo de la stop list corre cada Pattern contra su Action y con
 			"FAILED: echo ok de verdad (el Pattern no matchea su Action)",
 			"FAILED: npm publish (Pattern entre backticks)",
 		], shell);
-		const ok = spawnSync(shell, ["-c", command.replace("'<contrato>'", `'${good}'`)], { cwd: dir, encoding: "utf8" });
+		const ok = spawnSync(shell, ["-c", command.replace("'<contrato>'", `'${good}'`)], { cwd: dir, encoding: "utf8", env: shellEnv() });
 		assert.equal(ok.status, 0, `${shell}: ${ok.stderr}`);
 		assert.deepEqual(ok.stdout.trim().split("\n"), ["ok: git push origin main", "ok: npm run deploy"], shell);
 	}
@@ -996,9 +1045,6 @@ test("CA-17: el caso autonomy-stop-list-a3 existe con su fixture y graders, eval
 
 // ---------------------------------------------------------------------------
 // Reviews del stack #117, grupo A: seguridad del dial
-
-const DASH = existsSync("/bin/dash") ? "/bin/dash" : "sh";
-const SHELLS = ["bash", DASH] as const;
 
 function runHostAsync(args: string[], env: Record<string, string>, cwd: string) {
 	return spawn(process.execPath, [repoPath(HOST), ...args], { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -1090,7 +1136,7 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 		mkdirSync(join(repo, ".chiche"), { recursive: true });
 		git(repo, "init", "-q", "-b", "main");
 		writeFileSync(join(repo, ".chiche/project.md"), contract(autonomy));
-		for (const shell of SHELLS) {
+		for (const shell of shells(t)) {
 			const run = runResolve(command, repo, "run", "", shell);
 			assert.equal(run.status, 0, `${name} ${shell}: ${run.stderr}`);
 			assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m, `${name} ${shell}: sin stop list legible el nivel del contrato cae a A1 (${run.stdout})`);
@@ -1099,7 +1145,7 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 			const flagged = runResolve(command, repo, "run", "A3", shell);
 			assert.match(flagged.stdout, /^nivel efectivo: unattended \(A3\), leído de --autonomy$/m, `${name} ${shell}: el flag manda`);
 			assert.match(flagged.stderr, /## Autonomy sin stop list legible/, `${name} ${shell}: con flag solo se avisa`);
-			const rehearsal = spawnSync(shell, ["-c", ensayo.replace("'<contrato>'", `'${join(repo, ".chiche/project.md")}'`)], { cwd: dir, encoding: "utf8" });
+			const rehearsal = spawnSync(shell, ["-c", ensayo.replace("'<contrato>'", `'${join(repo, ".chiche/project.md")}'`)], { cwd: dir, encoding: "utf8", env: shellEnv() });
 			assert.equal(rehearsal.status, 1, `${name} ${shell}: el ensayo falla`);
 			assert.match(rehearsal.stdout, /^FAILED: stop list \(sin filas\)$/m, `${name} ${shell}: ${rehearsal.stdout}`);
 		}
@@ -1109,7 +1155,7 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 	mkdirSync(join(third, ".chiche"), { recursive: true });
 	git(third, "init", "-q", "-b", "main");
 	writeFileSync(join(third, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n| npm publish | npm publish | no |\n\nOtra tabla:\n| Col | Col |\n|---|---|\n| no es parada | x |\n`));
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, third, "run", "", shell);
 		assert.match(run.stdout, /^parada: \| npm publish \|/m, shell);
 		assert.doesNotMatch(run.stdout, /no es parada/, `${shell}: la tercera tabla no se lee`);
@@ -1138,7 +1184,7 @@ test("review #113-2: el flag se valida antes del fetch; con origin, fetch y desp
 	git(work, "checkout", "-q", "-b", "feature");
 	writeFileSync(join(work, ".chiche/project.md"), branch);
 	git(work, "commit", "-q", "-am", "sube la autonomia en el branch");
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, work, "run", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
 		assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/develop$/m, `${shell}: ${run.stdout} ${run.stderr}`);
@@ -1154,7 +1200,7 @@ test("review #113-2: el flag se valida antes del fetch; con origin, fetch y desp
 	git(orphan, "add", "-A");
 	git(orphan, "commit", "-q", "-m", "local");
 	git(orphan, "remote", "add", "origin", emptyBare);
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, orphan, "run", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
 		assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de origin \(default sin resolver\)$/m, `${shell}: ${run.stdout}`);
@@ -1186,7 +1232,7 @@ test("review #113-2: el flag se valida antes del fetch; con origin, fetch y desp
 	git(seed, "push", "-q", "origin", ":main");
 	git(dangling, "fetch", "-q", "--prune", "origin");
 	assert.equal(git(dangling, "symbolic-ref", "refs/remotes/origin/HEAD").trim(), "refs/remotes/origin/main", "origin/HEAD quedó colgado");
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const online = runResolve(command, dangling, "run", "A3", shell);
 		assert.equal(online.status, 0, `${shell}: ${online.stderr}`);
 		assert.match(online.stdout, /^nivel efectivo: unattended \(A3\), leído de --autonomy$/m, `${shell} colgado con red: ${online.stdout}`);
@@ -1196,7 +1242,7 @@ test("review #113-2: el flag se valida antes del fetch; con origin, fetch y desp
 		assert.match(plain.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/trunk$/m, `${shell} colgado con red sin flag: ${plain.stdout}`);
 	}
 	git(dangling, "remote", "set-url", "origin", join(dir, "no-existe.git"));
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const offline = runResolve(command, dangling, "run", "A3", shell);
 		assert.equal(offline.status, 0, `${shell}: ${offline.stderr}`);
 		assert.match(offline.stdout, /^nivel efectivo: supervised \(A1\), leído de origin \(default sin resolver\)$/m, `${shell} colgado sin red: ${offline.stdout}`);
@@ -1210,7 +1256,7 @@ test("review #113-2: el flag se valida antes del fetch; con origin, fetch y desp
 	mkdirSync(unreachable);
 	git(unreachable, "init", "-q", "-b", "main");
 	git(unreachable, "remote", "add", "origin", join(dir, "no-existe.git"));
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, unreachable, "run", "A4", shell);
 		assert.equal(run.status, 2, shell);
 		assert.equal(run.stderr.trim(), UNSUPPORTED.replace("<nivel>", "A4"), `${shell}: solo el diagnóstico del flag, sin fetch`);
@@ -1288,7 +1334,7 @@ function grepMatches(pattern: string, command: string): boolean {
 	return result.status === 0;
 }
 
-test("review #116-1/2/3/5/6, #113-6: la stop list del contrato frena force corto, refspec, main con sufijo, release/tags, servicios pagos e install.sh por subcomando, pasa el ensayo con bash y dash y no frena bash -n ni shellcheck", async (t) => {
+test("review #116-1/2/3/5/6, #113-6: la stop list del contrato frena force corto, refspec, main con sufijo, release/tags, servicios pagos e install.sh por subcomando, pasa el ensayo con bash, dash y zsh y no frena bash -n ni shellcheck", async (t) => {
 	const contractText = await readRepoFile(".chiche/project.md");
 	const autonomy = section(contractText, /^Autonomy$/);
 	const rows = stopListRows(autonomy);
@@ -1325,8 +1371,8 @@ test("review #116-1/2/3/5/6, #113-6: la stop list del contrato frena force corto
 	for (const row of rows) if (/gh stack push/.test(row.reason)) problems.push("la Reason de force nombra gh stack push, que no tiene fila");
 	assert.deepEqual(problems, []);
 	const ensayo = await stopListCommand();
-	for (const shell of SHELLS) {
-		const run = spawnSync(shell, ["-c", ensayo.replace("'<contrato>'", `'${repoPath(".chiche/project.md")}'`)], { cwd: repoPath(""), encoding: "utf8" });
+	for (const shell of shells(t)) {
+		const run = spawnSync(shell, ["-c", ensayo.replace("'<contrato>'", `'${repoPath(".chiche/project.md")}'`)], { cwd: repoPath(""), encoding: "utf8", env: shellEnv() });
 		assert.equal(run.status, 0, `${shell}: ${run.stdout}${run.stderr}`);
 		assert.doesNotMatch(run.stdout, /^FAILED/m, shell);
 		assert.equal(run.stdout.trim().split("\n").length, rows.length, `${shell}: una línea ok por fila`);
@@ -1450,7 +1496,7 @@ test("review #115-8: el ensayo de la stop list corre en la Fase 4 sobre el archi
 	assert.deepEqual(problems, []);
 });
 
-test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fuera de la historia, el README del fixture nombra su caso, el host cita el pedido, y parada: imprime los patrones con barras invertidas intactos en bash y dash", async (t) => {
+test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fuera de la historia, el README del fixture nombra su caso, el host cita el pedido, y parada: imprime los patrones con barras invertidas intactos en bash, dash y zsh", async (t) => {
 	const contractText = await readRepoFile(".chiche/project.md");
 	assert.doesNotMatch(section(contractText, /^Gaps$/), /## Limites/, "## Gaps ya no cita ## Limites");
 	assert.doesNotMatch(contractText, /\(por limite\)/, "la fila de pi-clean ya no dice (por limite)");
@@ -1483,7 +1529,7 @@ test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fu
 	mkdirSync(join(repo, ".chiche"), { recursive: true });
 	git(repo, "init", "-q", "-b", "main");
 	writeFileSync(join(repo, ".chiche/project.md"), contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |")));
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, repo, "run", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
 		assert.ok(run.stdout.includes("parada: | ./deploy.sh staging | \\bdeploy\\.sh\\b | receta con barras invertidas |"), `${shell}: ${JSON.stringify(run.stdout)}`);
@@ -1638,7 +1684,7 @@ test("review #113-3, #116-11: la fila land solo acepta supervised (unattended re
 	mkdirSync(join(word, ".chiche"), { recursive: true });
 	git(word, "init", "-q", "-b", "main");
 	writeFileSync(join(word, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n| run | supervised | 2026-11-05 | — |\n`));
-	for (const shell of SHELLS) {
+	for (const shell of shells(t)) {
 		const run = runResolve(command, land, "land", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
 		assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m, `${shell} land: ${run.stdout}`);
@@ -1849,7 +1895,7 @@ test("review #116-14, #116-16: el host nombra withinCap con el comentario correc
 });
 
 // Ronda 3 (#116-28 y #116-3 son el mismo hueco por dos caminos): invariante del resolver sobre toda la matriz de refs.
-test("ronda 3: invariante del resolver — si el default tiene stop list, un nivel ≥ A2 nunca sale sin parada:, en bash y sh, para cada camino de ref", async (t) => {
+test("ronda 3: invariante del resolver — si el default tiene stop list, un nivel ≥ A2 nunca sale sin parada:, en bash, sh y zsh, para cada camino de ref", async (t) => {
 	const command = await canonicalCommand();
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-matrix-")));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -1907,7 +1953,7 @@ test("ronda 3: invariante del resolver — si el default tiene stop list, un niv
 	cases.push({ name: "sin red con ref local válida", cwd: offline.work, expect: { "": "supervised (A1)", A2: "plan-approved (A2)", A3: "unattended (A3)" }, source: "origin/main", parada: true });
 	const problems: string[] = [];
 	for (const item of cases) {
-		for (const shell of SHELLS) {
+		for (const shell of shells(t)) {
 			for (const flag of ["", "A2", "A3"]) {
 				const run = runResolve(command, item.cwd, "run", flag, shell);
 				const label = `${item.name} · ${shell} · flag='${flag}'`;
@@ -1941,4 +1987,148 @@ test("ronda 3 (#116-31, #116-32, #116-34, #116-35, #116-36): pins cosméticos de
 	const init = await skillFile("claude", "chiche-init");
 	if (!/y queda lo que imprime el host \(`rehearsed <fecha>`, `FAILED \(<n> preguntas\)`, `FAILED \(stop list: <Pattern>\)` o `unrehearsed`\), porque sin ensayo rige `supervised`/.test(init)) problems.push("claude/chiche-init: la Fase 3 no nombra los cuatro veredictos del host (#116-36)");
 	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #120: el resolver de nivel efectivo funciona en zsh
+
+// Contratos del issue: `grill` en unattended y ensayada, `spec` sin ensayo y sin fila `land`; y el par base A1 + branch A3.
+const ZSH_HIGH = contract(LEVELS_TABLE("| grill | unattended | 2026-11-05 | rehearsed 2026-11-05 |\n| spec | plan-approved | 2026-11-05 | unrehearsed |\n| run | supervised | 2026-11-05 | — |"));
+const ZSH_BASE = contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |"));
+const ZSH_BRANCH = contract(LEVELS_TABLE("| run | unattended | 2026-11-05 | rehearsed 2026-11-05 |"));
+const ZSH_ERROR = /bad output format specification/;
+
+test("#120 CA-2: el comando canónico imprime el mismo stdout y stderr en zsh que en bash y sh: A3 ensayado, base A1 + branch A3, --autonomy A3, unrehearsed, sin fila y una parada por fila", async (t) => {
+	if (!zshOrSkip(t)) return;
+	const command = await canonicalCommand();
+	const high = repoWithRemote("zsh-high", ZSH_HIGH, ZSH_HIGH);
+	const adversarial = repoWithRemote("zsh-adversarial", ZSH_BASE, ZSH_BRANCH);
+	t.after(() => {
+		for (const repo of [high, adversarial]) rmSync(repo.root, { recursive: true, force: true });
+	});
+	const cases: Array<{ name: string; cwd: string; stage: string; flag: string; stdout: RegExp; stderr: RegExp | null }> = [
+		{ name: "fila grill unattended y rehearsed", cwd: high.work, stage: "grill", flag: "", stdout: /^nivel efectivo: unattended \(A3\), leído de origin\/main$/m, stderr: null },
+		{ name: "base A1 + branch A3", cwd: adversarial.work, stage: "run", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: null },
+		{ name: "--autonomy A3 sobre un contrato A1", cwd: adversarial.work, stage: "run", flag: "A3", stdout: /^nivel efectivo: unattended \(A3\), leído de --autonomy$/m, stderr: null },
+		{ name: "fila spec unrehearsed", cwd: high.work, stage: "spec", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: /^aviso: fila spec sin ensayo \(unrehearsed\): rige supervised \(A1\)$/m },
+		{ name: "contrato sin la fila land", cwd: high.work, stage: "land", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: /^aviso: ## Autonomy sin fila land: rige supervised \(A1\)$/m },
+	];
+	const problems: string[] = [];
+	for (const item of cases) {
+		const bash = runResolve(command, item.cwd, item.stage, item.flag, "bash");
+		for (const shell of SHELLS) {
+			const run = shell === "bash" ? bash : runResolve(command, item.cwd, item.stage, item.flag, shell);
+			const label = `${item.name} · ${shell}`;
+			if (run.status !== 0) problems.push(`${label}: exit ${run.status} ${run.stderr}`);
+			if (!item.stdout.test(run.stdout)) problems.push(`${label}: traza ${JSON.stringify(run.stdout)}`);
+			if (item.stderr && !item.stderr.test(run.stderr)) problems.push(`${label}: stderr ${JSON.stringify(run.stderr)}`);
+			if (!item.stderr && /sin fila/.test(run.stderr)) problems.push(`${label}: aviso «sin fila» con la fila presente: ${run.stderr}`);
+			const paradas = (run.stdout.match(/^parada: /gm) ?? []).length;
+			if (paradas !== 3) problems.push(`${label}: ${paradas} paradas, esperadas 3 (las filas de la stop list con Pattern)`);
+			if (ZSH_ERROR.test(run.stderr)) problems.push(`${label}: zsh leyó un subíndice: ${run.stderr}`);
+			if (run.stdout !== bash.stdout) problems.push(`${label}: stdout distinto de bash: ${firstDifference(bash.stdout, run.stdout)}`);
+			if (run.stderr !== bash.stderr) problems.push(`${label}: stderr distinto de bash: ${firstDifference(bash.stderr, run.stderr)}`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#120 CA-4: el bloque de 5.2.0, reconstruido con `$stage[[:space:]]`, cae a A1 en zsh con el aviso falso «sin fila» y el error de zsh; el bloque real da A3 en los tres shells", async (t) => {
+	const zsh = zshOrSkip(t);
+	if (!zsh) return;
+	const command = await canonicalCommand();
+	const fixed = "${stage}[[:space:]]";
+	const broken = "$stage[[:space:]]";
+	assert.equal(command.split(fixed).length, 2, "el comando canónico busca la fila con ${stage}[[:space:]] exactamente una vez");
+	const old = command.replace(fixed, broken);
+	assert.notEqual(old, command);
+	const { root, work } = repoWithRemote("zsh-regression", ZSH_HIGH, ZSH_HIGH);
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const buggy = runResolve(old, work, "grill", "", zsh);
+	assert.equal(buggy.status, 0, buggy.stderr);
+	assert.match(buggy.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `el bloque viejo en zsh cae a A1: ${buggy.stdout}`);
+	assert.match(buggy.stderr, /aviso: ## Autonomy sin fila grill: rige supervised \(A1\)/, `con el aviso falso: ${buggy.stderr}`);
+	assert.match(buggy.stderr, ZSH_ERROR, `zsh explica el subíndice: ${buggy.stderr}`);
+	const bashOld = runResolve(old, work, "grill", "", "bash");
+	assert.match(bashOld.stdout, /^nivel efectivo: unattended \(A3\), leído de origin\/main$/m, "bash no veía el bug: por eso el gate itera zsh");
+	for (const shell of SHELLS) {
+		const real = runResolve(command, work, "grill", "", shell);
+		assert.equal(real.status, 0, `${shell}: ${real.stderr}`);
+		assert.match(real.stdout, /^nivel efectivo: unattended \(A3\), leído de origin\/main$/m, `${shell}: ${real.stdout}`);
+		assert.doesNotMatch(real.stderr, ZSH_ERROR, shell);
+		assert.doesNotMatch(real.stderr, /sin fila/, shell);
+	}
+});
+
+// `$var[` es un subíndice en zsh y `$var:<letra>` un modificador (`:h`, `:l`, `:s`…): dentro de comillas dobles hay que
+// escribir `${var}[` y `${var}:`. La guarda cubre los cuatro bloques autonomy-* de los 35 archivos; los demás fences bash
+// de los skills quedan fuera (spec #120, fuera de alcance). Los modificadores los sumó el review #121-3 (`[DEVIATION]`).
+function unbracedExpansions(block: string): string[] {
+	return block.match(/\$[A-Za-z_][A-Za-z0-9_]*(?:\[|:[A-Za-z&])/g) ?? [];
+}
+
+test("#120 CA-1 y CA-4: ningún bloque autonomy-* de los 35 archivos expande `$<identificador>[` sin llaves ni un modificador `$<identificador>:<letra>`, git grep no encuentra `$stage[[:space:]]`, y la guarda distingue el texto viejo del corregido", async () => {
+	assert.deepEqual(unbracedExpansions('row=$(printf \'%s\\n\' "$section" | grep -E "^\\|[[:space:]]*$stage[[:space:]]*\\|" | head -n 1)'), ["$stage["], "autotest: el texto de 5.2.0 se diagnostica");
+	assert.deepEqual(unbracedExpansions('row=$(printf \'%s\\n\' "$section" | grep -E "^\\|[[:space:]]*${stage}[[:space:]]*\\|" | head -n 1)'), [], "autotest: el texto corregido pasa");
+	assert.deepEqual(unbracedExpansions('[ ${#line} -lt 1024 ] && echo "$1" "$(cat x)" "${arr[0]}" "$dir/chiche"'), [], "autotest: llaves, posicionales, sustituciones y rutas no cuentan");
+	// Review #121-3: zsh también aplica modificadores sin llaves (`$ref:src/x` dispara `:s`, `$ref:lib/x` dispara `:l`); `:` seguido de punto o espacio no.
+	assert.deepEqual(unbracedExpansions('contract=$(git show "$ref:src/project.md") && echo "$x:h"'), ["$ref:s", "$x:h"], "autotest: un modificador de zsh sin llaves se diagnostica");
+	assert.deepEqual(unbracedExpansions('git show "$ref:.chiche/project.md"; echo "--autonomy $flag: no soportado"; echo "$stage: x"; echo "${ref:h}"'), [], "autotest: `:` seguido de punto o espacio, y las llaves, no cuentan");
+	const problems: string[] = [];
+	for (const skill of SKILLS) {
+		for (const harness of HARNESSES) {
+			const markdown = await skillFile(harness, skill);
+			for (const name of ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-a2"]) {
+				const block = delimitedBlock(markdown, name);
+				if (block === null) continue;
+				for (const hit of unbracedExpansions(block)) problems.push(`${harness}/${skill} bloque ${name}: ${hit} es un subíndice o un modificador en zsh; va con llaves`);
+			}
+		}
+	}
+	const grep = spawnSync("git", ["grep", "-c", "\\$stage\\[\\[:space:\\]\\]", "--", "claude/*/SKILL.md", "codex/*/SKILL.md", "opencode/*/SKILL.md", "pi/*/SKILL.md", "antigravity/*/SKILL.md"], { cwd: repoPath(""), encoding: "utf8" });
+	assert.equal(grep.status, 1, `git grep de $stage[[:space:]] sobre los cinco harnesses tiene que no encontrar nada (exit 1): exit ${grep.status}, ${grep.stdout}${grep.stderr}`);
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Review del PR #121 (fix zsh)
+
+test("review #121-1: el job tests de CI instala zsh antes de node --test y exporta AUTONOMY_GATE_REQUIRE_ZSH=1; con esa variable la falta de zsh falla en vez de saltear", async () => {
+	const workflow = await readRepoFile(".github/workflows/ci.yml");
+	const start = workflow.indexOf("\n  tests:\n");
+	const end = workflow.indexOf("\n  harness-gate:\n");
+	assert.ok(start !== -1 && end > start, "el job tests está delimitado antes de harness-gate");
+	const job = workflow.slice(start, end);
+	const install = job.indexOf("- name: Garantizar zsh para la matriz del resolver");
+	const run = job.indexOf("- name: node --test\n");
+	assert.ok(install !== -1 && run !== -1 && install < run, "el paso que garantiza zsh va antes de node --test");
+	assert.match(job, /- name: Garantizar zsh para la matriz del resolver\n\s+run: command -v zsh >\/dev\/null 2>&1 \|\| \{ sudo apt-get update -qq && sudo apt-get install -y -qq zsh; \}\n/, "el paso instala zsh solo si falta");
+	assert.match(job, /- name: node --test\n\s+run: node --test pi-extensions\/\*\/\*\.test\.ts\n\s+env:\n(?:\s+#[^\n]*\n)*\s+AUTONOMY_GATE_REQUIRE_ZSH: "1"\n/, "node --test corre con AUTONOMY_GATE_REQUIRE_ZSH=1: en CI la iteración de zsh no se saltea en silencio");
+	assert.deepEqual(resolveShells("/bin/zsh", true), ["bash", DASH, "/bin/zsh"]);
+	assert.deepEqual(resolveShells(null, false), ["bash", DASH]);
+	assert.throws(() => resolveShells(null, true), /zsh no está en PATH y AUTONOMY_GATE_REQUIRE_ZSH=1 lo exige/);
+});
+
+test("review #121-2: un ~/.zshenv que imprime y activa KSH_ARRAYS no contamina la iteración de zsh: stdout y stderr siguen iguales a bash y el bloque viejo sigue cayendo a A1", async (t) => {
+	const zsh = zshOrSkip(t);
+	if (!zsh) return;
+	const command = await canonicalCommand();
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-zshenv-")));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const home = join(dir, "home");
+	mkdirSync(home);
+	writeFileSync(join(home, ".zshenv"), "echo contaminado\nsetopt KSH_ARRAYS\n");
+	const { root, work } = repoWithRemote("zshenv", ZSH_HIGH, ZSH_HIGH);
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const bash = runResolve(command, work, "grill", "", "bash", { HOME: home });
+	const dirty = runResolve(command, work, "grill", "", zsh, { HOME: home });
+	assert.equal(dirty.status, 0, dirty.stderr);
+	assert.doesNotMatch(dirty.stdout, /contaminado/, "~/.zshenv no se lee: la iteración es hermética");
+	assert.equal(dirty.stdout, bash.stdout, `stdout contaminado por ~/.zshenv: ${firstDifference(bash.stdout, dirty.stdout)}`);
+	assert.equal(dirty.stderr, bash.stderr, `stderr contaminado por ~/.zshenv: ${firstDifference(bash.stderr, dirty.stderr)}`);
+	// KSH_ARRAYS apaga el subíndice sin llaves: sin hermeticidad, el test dinámico de CA-4 dejaría de ver el bug.
+	const old = command.replace("${stage}[[:space:]]", "$stage[[:space:]]");
+	const buggy = runResolve(old, work, "grill", "", zsh, { HOME: home });
+	assert.match(buggy.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `el bloque viejo sigue cayendo en zsh aunque ~/.zshenv active KSH_ARRAYS: ${buggy.stdout}`);
+	assert.match(buggy.stderr, ZSH_ERROR);
 });

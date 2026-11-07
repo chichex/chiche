@@ -76,8 +76,16 @@ jobs:
       # install..."): están acoplados a esta version exacta de Pi.
       - name: Instalar Pi 0.85.1 para probes del paquete
         run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.85.1
+      # Issue #120: autonomy-gate ejecuta el comando canónico del resolver también con zsh (el shell
+      # default de macOS y de la tool Bash de Claude Code ahí). Sin zsh esa iteración se saltea con la
+      # nota «zsh no está en PATH: se saltea»; este paso garantiza que en CI no se saltee.
+      - name: Garantizar zsh para la matriz del resolver
+        run: command -v zsh >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
       - name: node --test
         run: node --test pi-extensions/*/*.test.ts
+        env:
+          # Con la variable, autonomy-gate falla si zsh falta en vez de saltear la iteración.
+          AUTONOMY_GATE_REQUIRE_ZSH: "1"
 
   harness-gate:
     name: Gate anti-drift de productores SDD
