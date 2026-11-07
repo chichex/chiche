@@ -2366,3 +2366,73 @@ test("#119 CA-4: el contrato de este repo lleva Umbral 80 en grill y spec y — 
 		}
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Issue #119, capa 3: `--until pr` encadena grill → spec → run sin menú
+
+const UNTIL_REQUIRES_A3 = "--until pr exige --autonomy A3";
+const UNTIL_FLAG_SKILLS = ["grill", "chiche-spec"] as const;
+const UNTIL_FLAGLESS_SKILLS = ["chiche-run", "chiche-init", "chiche-land", "design-system", "issue-triage"] as const;
+
+test("#119 CA-12: grill y chiche-spec de los cinco harnesses aceptan [--until pr] (el grill lo propaga con --autonomy A3 al encadenar la spec; la spec lo exige con A3, aprueba sin menú y lanza el run sin el flag); otro valor aborta listando pr; los otros cinco skills no lo ganan", async () => {
+	const table = await interactionTable();
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const prefix = escapeRegExp(table.prefixes[harness]);
+		for (const skill of UNTIL_FLAG_SKILLS) {
+			const markdown = await skillFile(harness, skill);
+			const args = section(markdown, /^(Argumentos|Argumentos Pi)$/);
+			const signature = fencedBlocks(args)[0]?.content ?? "";
+			if (!new RegExp(`^${prefix}${skill} .*\\[--autonomy <level>\\] \\[--until pr\\]`, "m").test(signature)) problems.push(`${harness}/${skill}: la firma no lleva [--until pr] después de [--autonomy <level>]`);
+			if (!/^- `--until pr` — /m.test(args)) problems.push(`${harness}/${skill}: ## Argumentos no describe --until pr`);
+			if (!/`--until` con cualquier otro valor aborta listando el único válido \(`pr`\)/.test(args)) problems.push(`${harness}/${skill}: --until con otro valor no aborta listando pr`);
+		}
+		const grill = await skillFile(harness, "grill");
+		const closing = section(grill, /^(Cierre|Fase 3: cierre)$/);
+		if (!/`--autonomy A3 --until pr`/.test(closing)) problems.push(`${harness}/grill: el Cierre no propaga --autonomy A3 --until pr al encadenar la spec`);
+		if (!/sea cual sea el nivel/.test(closing)) problems.push(`${harness}/grill: el Cierre no dice que el nivel del grill no importa con --until pr`);
+		if (harness === "pi" && !/`until: "pr"`/.test(closing)) problems.push("pi/grill: el finalize no lleva until: \"pr\"");
+		const spec = await skillFile(harness, "chiche-spec");
+		const specArgs = section(spec, /^Argumentos$/);
+		if (!specArgs.includes(`\`${UNTIL_REQUIRES_A3}\``)) problems.push(`${harness}/chiche-spec: falta el diagnóstico literal ${UNTIL_REQUIRES_A3}`);
+		if (!/aborta antes de escribir/.test(specArgs)) problems.push(`${harness}/chiche-spec: --until pr sin A3 no aborta antes de escribir`);
+		const flow = delimitedBlock(spec, "chiche-spec-flow") ?? "";
+		problems.push(...missing(flow, [
+			/Con A3 y `--until pr`: sin fugas, la spec se publica `draft`, pasa a `state=approved` bajo el mismo gate de publicación, registra `spec\.published` y `spec\.approved`, y la corrida lanza `chiche-run <target> --autonomy A3` exactamente como la opción `chiche-run --autonomy A3` del menú, sin preguntar y sin `--until pr`/,
+			/con fugas aborta antes de publicar con el diagnóstico de la fuga/,
+			/Sin `--until pr`, A3 termina en `Spec lista`/,
+		]).map((problem) => `${harness}/chiche-spec chiche-spec-flow: ${problem}`));
+		if (!/o, con `--autonomy A3 --until pr`, al publicarse sin fugas/.test(flow)) problems.push(`${harness}/chiche-spec: **Estado** no nombra la transición de --until pr`);
+		if (!/o la de `--until pr` en A3\)/.test(delimitedBlock(spec, "chiche-spec-publication-gate") ?? "")) problems.push(`${harness}/chiche-spec: el gate de publicación no nombra la transición de --until pr`);
+		if (harness !== "pi" && !/también en la de `--until pr`, que es la de la propia corrida en A3/.test(spec)) problems.push(`${harness}/chiche-spec: el evento spec.approved no nombra --until pr`);
+		// Fase 0: el atajo repite la firma (issue-triage-gate lo exige) y por eso también lleva [--until pr].
+		if (!/^Atajo: .*\[--until pr\] saltea este menu\.$/m.test(spec)) problems.push(`${harness}/chiche-spec: el atajo de la Fase 0 no lleva [--until pr]`);
+		for (const skill of UNTIL_FLAGLESS_SKILLS) {
+			const markdown = await skillFile(harness, skill);
+			const args = section(markdown, /^(Argumentos|Argumentos Pi|Invocación)$/);
+			if (/--until/.test(fencedBlocks(args)[0]?.content ?? "")) problems.push(`${harness}/${skill}: la firma no gana --until`);
+			if (/^- `--until/m.test(markdown)) problems.push(`${harness}/${skill}: describe --until como flag propio`);
+			if (skill !== "chiche-run" && /--until/.test(markdown)) problems.push(`${harness}/${skill}: nombra --until`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-13: lanzado desde chiche-spec --until pr, chiche-run no vuelve a encadenar la spec y su traza repite until: pr, en los cinco harnesses", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-run");
+		const phase1 = section(markdown, /^Fase 1 — /);
+		problems.push(...missing(phase1, [
+			/^2\. \*\*Spec\*\*: [^\n]*Lanzado desde `[^`]*chiche-spec --until pr`[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `nivel efectivo:`/m,
+			/^2\. \*\*Spec\*\*: [^\n]*[Ee]ste skill no acepta `--until`/m,
+		]).map((problem) => `${harness}/chiche-run Fase 1: ${problem}`));
+		if (harness === "claude" || harness === "antigravity" || harness === "pi") {
+			const launcher = section(markdown, /^Precondiciones del lanzador$/);
+			if (!/Lanzado desde `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(launcher)) problems.push(`${harness}/chiche-run: las precondiciones del lanzador no cierran el doble encadenado`);
+			const traza = section(markdown, /^Traza$/);
+			if (!/^- Lanzado desde `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `nivel efectivo:`/m.test(traza)) problems.push(`${harness}/chiche-run: la traza del lanzador no suma until: pr`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
