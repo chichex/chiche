@@ -2083,3 +2083,62 @@ test("#84 CA-20: chiche-init, coding-policies y design-system cierran con Commit
 	}
 	assert.deepEqual(problems, []);
 });
+
+// --- Issue #119, capa 2: confianza numérica en la spec, menú que sugiere el nivel y README ---------
+
+const SPEC_CONFIDENCE_TABLE = /^\| 1 \| ¿El toggle persiste entre sesiones\? \| Si, en localStorage \| Solo en memoria \/ en el perfil del user \| 70 % \|\n\| 2 \| ¿Aplica a paginas de admin\? \| No, solo app publica \| Tambien admin \| 95 % \|$/m;
+const SPEC_RESOLUTION_VALUES = /^<la tabla de Fase 3 \+ columna Resolucion: confirmada \| \[ASSUMED NN %\] \| \[NEEDS-INPUT\]>$/m;
+const SPEC_REPORT_THRESHOLD = /^- umbral spec: <n> · debajo del umbral: <k> · fugas: <f>$/m;
+const SPEC_REPORT_REVIEW_FIRST = /^- revisar primero: <inferencias con confianza ≤ umbral spec y fugas \[NEEDS-INPUT\] \| ninguna>$/m;
+const SPEC_MENU_SUGGESTION = /\*\*Nivel sugerido\.\*\* En A1 la primera opción del menú, marcada `\(Recomendado\)`, es `chiche-run --autonomy A3` cuando `k = 0` y `f = 0`[^\n]*y `chiche-run` en cualquier otro caso; el texto de la pregunta dice el motivo \(`debajo del umbral: <k>, fugas: <f>`\)\. Las demás opciones no cambian\./;
+
+test("#119 CA-8: en los cinco chiche-spec la tabla de inferencias lleva la confianza como `NN %`, Resolucion vale confirmada | [ASSUMED NN %] | [NEEDS-INPUT], el reporte suma la línea de umbral y lista lo que queda debajo, y MUST DO dice «también las que superan el umbral»", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-spec/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		for (const [label, pattern] of [
+			["tabla de la Fase 3 con NN %", SPEC_CONFIDENCE_TABLE],
+			["valores de Resolucion", SPEC_RESOLUTION_VALUES],
+			["línea de umbral del reporte", SPEC_REPORT_THRESHOLD],
+			["revisar primero", SPEC_REPORT_REVIEW_FIRST],
+			["MUST DO", /^- Listar TODAS las inferencias nuevas en la spec, también las que superan el umbral, marcadas `\[ASSUMED NN %\]`/m],
+			["Fase 3: confianza entera", /`Confianza` es un entero `NN %`: la probabilidad de que la elección propuesta sea la correcta/],
+			["Fase 3: ≤ umbral y fugas a riesgos", /confianza `≤ umbral spec`[^\n]*fuga[^\n]*`## Riesgos y gaps`[^\n]*reporte/],
+		] as const) {
+			if (!pattern.test(markdown)) problems.push(`${file}: falta ${label} ${pattern}`);
+		}
+		for (const stale of [/\| media \|$/m, /\| alta \|$/m, /también las de confianza alta/, /inferencias de confianza baja que definen alcance/, /elegida por usuario: <x>/]) {
+			if (stale.test(markdown)) problems.push(`${file}: sobra ${stale}`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-9: el menú final de chiche-spec sugiere el nivel en los cinco harnesses (chiche-run --autonomy A3 primero y Recomendado solo con k = 0 y f = 0) y docs/harness-interaction-differences.md lo lleva a los menús en texto plano", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const flow = delimitedDoctrine(await readRepoFile(`${harness}/chiche-spec/SKILL.md`), "chiche-spec-flow");
+		if (!SPEC_MENU_SUGGESTION.test(flow)) problems.push(`${harness}/chiche-spec: chiche-spec-flow no fija la regla del nivel sugerido`);
+		if (!/`k` = inferencias técnicas con confianza `≤ umbral spec`[^\n]*`f` = fugas/.test(flow)) problems.push(`${harness}/chiche-spec: el bloque no define k y f`);
+	}
+	const docs = await readRepoFile("docs/harness-interaction-differences.md");
+	if (!/menú final de `chiche-spec`[^\n]*texto plano[^\n]*primera opción numerada lleva `\(Recomendado\)`[^\n]*`chiche-run --autonomy A3`[^\n]*`debajo del umbral: 0` y `fugas: 0`[^\n]*`chiche-run` en cualquier otro caso/.test(docs)) problems.push("docs/harness-interaction-differences.md: no refleja el nivel sugerido para los menús en texto plano");
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-10: las filas grill y chiche-spec de los dos README nombran la confianza numérica y el umbral, y no hablan de impacto alto", async () => {
+	const problems: string[] = [];
+	for (const [path, grill, spec] of [
+		["README.md", [/confianza numérica `NN %`/, /umbral/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/], [/`NN %`/, /umbral/, /`\[ASSUMED NN %\]`/, /`plan-approved`[^|]*debajo del umbral[^|]*tampoco muestra el menú/]],
+		["README.en.md", [/numeric confidence `NN %`/, /threshold/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/], [/`NN %`/, /threshold/, /`\[ASSUMED NN %\]`/, /`plan-approved`[^|]*below the threshold[^|]*skips the final menu/]],
+	] as const) {
+		const markdown = await readRepoFile(path);
+		const grillRow = markdown.split("\n").find((line) => line.startsWith("| **`grill`** |")) ?? "";
+		const specRow = markdown.split("\n").find((line) => line.startsWith("| **`chiche-spec`** |")) ?? "";
+		for (const pattern of grill) if (!pattern.test(grillRow)) problems.push(`${path} fila grill: falta ${pattern}`);
+		for (const pattern of spec) if (!pattern.test(specRow)) problems.push(`${path} fila chiche-spec: falta ${pattern}`);
+		if (/impacto alto|high-impact/.test(`${grillRow}\n${specRow}`)) problems.push(`${path}: las filas siguen hablando de impacto alto`);
+	}
+	assert.deepEqual(problems, []);
+});
