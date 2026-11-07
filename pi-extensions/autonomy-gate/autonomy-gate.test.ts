@@ -148,7 +148,7 @@ test("CA-1: el template de la Fase 4 de chiche-init lleva ## Autonomy con sus do
 		const template = fence.content;
 		if (!/^## Autonomy$/m.test(template)) problems.push(`${harness}/chiche-init: el template no tiene ## Autonomy`);
 		if (/^## Limites$/m.test(template)) problems.push(`${harness}/chiche-init: el template todavía tiene ## Limites`);
-		if (!/^\| Stage \| Level \| Since \| Rehearsed \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de niveles`);
+		if (!/^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de niveles con la columna Umbral (#119 CA-1)`);
 		if (!/^\| Action \| Pattern \| Reason \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de paradas`);
 		const autonomyIndex = template.indexOf("## Autonomy");
 		const policiesIndex = template.indexOf("## Politicas de generacion");
@@ -164,7 +164,7 @@ test("CA-1: el bloque autonomy-contract es idéntico en los cinco chiche-init tr
 	assert.equal(blocks.size, 5);
 	const block = await referenceBlock("autonomy-contract", "chiche-init");
 	assert.deepEqual(missing(block, [
-		/`\| Stage \| Level \| Since \| Rehearsed \|`/,
+		/`\| Stage \| Level \| Since \| Rehearsed \| Umbral \|`/,
 		/`\| Action \| Pattern \| Reason \|`/,
 		/filas fijas `grill`, `spec`, `run`, `review` y `land`, más una por ambiente de `## Ambientes`/,
 		/`land`, `review` y los ambientes solo aceptan `supervised`/,
@@ -292,7 +292,9 @@ function git(cwd: string, ...args: string[]): string {
 
 // Review #115-6: desde la capa 3, `Action` es el comando de prueba del patrón, no un rótulo.
 const DEFAULT_STOP = "| git push origin main | git push .* main | solo via PR |\n| npm run deploy | npm run deploy | sin confirmacion humana |\n| ./deploy.sh staging | \\bdeploy\\.sh\\b | receta con barras invertidas |\n| sin patron |  | fila invalida |";
-const LEVELS_TABLE = (rows: string, stopRows = DEFAULT_STOP) => `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${rows}\n\n| Action | Pattern | Reason |\n|---|---|---|\n${stopRows}\n`;
+// Issue #119, CA-1: la tabla de niveles gana la columna `Umbral`; las filas sin esa celda valen 80 (CA-2).
+const LEVELS_HEADER = "| Stage | Level | Since | Rehearsed | Umbral |\n|---|---|---|---|---|";
+const LEVELS_TABLE = (rows: string, stopRows = DEFAULT_STOP) => `## Autonomy\n${LEVELS_HEADER}\n${rows}\n\n| Action | Pattern | Reason |\n|---|---|---|\n${stopRows}\n`;
 
 function contract(autonomy: string | null, limites = false): string {
 	return [
@@ -988,7 +990,7 @@ test("CA-16: las recetas de deploy son filas `deploy <ambiente>` de ## Comandos 
 		if (!/\*\*Recetas de deploy\*\*[^\n]*`deploy <ambiente>`[^\n]*`verificado`[^\n]*`unrehearsed`/.test(section(markdown, /^Fase 2 — /))) problems.push(`${harness}/chiche-init: la Fase 2 no documenta las recetas de deploy`);
 		// Reviews #113-7, #115-6, #115-17: el ejemplo no muestra rehearsed, staging queda unrehearsed y la stop list frena su propia receta.
 		if (/rehearsed 20/.test(template)) problems.push(`${harness}/chiche-init: el ejemplo muestra rehearsed, que esta capa no puede producir sin ensayo`);
-		if (!/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no queda unrehearsed con su deploy no probado`);
+		if (!/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no queda unrehearsed con su deploy no probado (y Umbral —, #119 CA-1)`);
 		if (!/^\| \.\/deploy\.sh staging \| deploy\\\.sh \|/m.test(template)) problems.push(`${harness}/chiche-init: la fila de deploy del ejemplo no frena ./deploy.sh staging`);
 		if (!/una fila `supervised` lleva `—`, salvo una fila de ambiente cuyo `deploy <ambiente>` no está `verificado`, que lleva `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no dice cuál de las dos reglas de Rehearsed manda`);
 		if (!/Una fila de ambiente cuyo `deploy <ambiente>` de `## Comandos` no está `verificado` queda `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no fija la regla del ambiente`);
@@ -1127,9 +1129,9 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const levels = "| run | unattended | 2026-11-05 | rehearsed 2026-11-05 |";
 	const variants: Array<[string, string]> = [
-		["traducido", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Accion | Patron | Motivo |\n|---|---|---|\n| npm publish | npm publish | no |\n`],
-		["sin-tabla", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n`],
-		["vacia", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n`],
+		["traducido", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Accion | Patron | Motivo |\n|---|---|---|\n| npm publish | npm publish | no |\n`],
+		["sin-tabla", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n`],
+		["vacia", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n`],
 	];
 	for (const [name, autonomy] of variants) {
 		const repo = join(dir, name);
@@ -1154,7 +1156,7 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 	const third = join(dir, "tercera");
 	mkdirSync(join(third, ".chiche"), { recursive: true });
 	git(third, "init", "-q", "-b", "main");
-	writeFileSync(join(third, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n| npm publish | npm publish | no |\n\nOtra tabla:\n| Col | Col |\n|---|---|\n| no es parada | x |\n`));
+	writeFileSync(join(third, ".chiche/project.md"), contract(`## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n| npm publish | npm publish | no |\n\nOtra tabla:\n| Col | Col |\n|---|---|\n| no es parada | x |\n`));
 	for (const shell of shells(t)) {
 		const run = runResolve(command, third, "run", "", shell);
 		assert.match(run.stdout, /^parada: \| npm publish \|/m, shell);
@@ -1683,7 +1685,7 @@ test("review #113-3, #116-11: la fila land solo acepta supervised (unattended re
 	const word = join(dir, "word");
 	mkdirSync(join(word, ".chiche"), { recursive: true });
 	git(word, "init", "-q", "-b", "main");
-	writeFileSync(join(word, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n| run | supervised | 2026-11-05 | — |\n`));
+	writeFileSync(join(word, ".chiche/project.md"), contract(`## Autonomy\n${LEVELS_HEADER}\n| run | supervised | 2026-11-05 | — |\n`));
 	for (const shell of shells(t)) {
 		const run = runResolve(command, land, "land", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
@@ -2131,4 +2133,174 @@ test("review #121-2: un ~/.zshenv que imprime y activa KSH_ARRAYS no contamina l
 	const buggy = runResolve(old, work, "grill", "", zsh, { HOME: home });
 	assert.match(buggy.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `el bloque viejo sigue cayendo en zsh aunque ~/.zshenv active KSH_ARRAYS: ${buggy.stdout}`);
 	assert.match(buggy.stderr, ZSH_ERROR);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #119, capa 1: umbrales de confianza en el contrato y en el resolver
+
+const UMBRAL_INVALID = (stage: string, value: string): RegExp => new RegExp(`aviso: umbral ${stage} inválido \\(${escapeRegExp(value)}\\): rige 80`);
+
+// Las dos líneas de umbral van inmediatamente después de `nivel efectivo:` y antes de toda `parada:`.
+function thresholdLines(stdout: string): { grill: string | null; spec: string | null; ordered: boolean } {
+	const lines = stdout.split("\n");
+	const level = lines.findIndex((line) => line.startsWith("nivel efectivo: "));
+	const grill = lines.find((line) => line.startsWith("umbral grill: ")) ?? null;
+	const spec = lines.find((line) => line.startsWith("umbral spec: ")) ?? null;
+	const ordered = level !== -1 && lines[level + 1] === grill && lines[level + 2] === spec && lines.slice(0, level + 1).every((line) => !line.startsWith("parada: "));
+	return { grill: grill && grill.slice("umbral grill: ".length), spec: spec && spec.slice("umbral spec: ".length), ordered };
+}
+
+test("#119 CA-1: el template de la Fase 4 de los cinco chiche-init lleva la columna Umbral (80 en grill y spec, — en las demás) y autonomy-contract fija la regla 0–100 / — / 80", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-init");
+		const template = fencedBlocks(section(markdown, /^Fase 4 — /)).find((fence) => /^# Contrato de autonomia/m.test(fence.content))?.content ?? "";
+		problems.push(...missing(template, [
+			/^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|\n\|---\|---\|---\|---\|---\|$/m,
+			/^\| grill \| supervised \| 2026-07-02 \| — \| 80 \|$/m,
+			/^\| spec \| plan-approved \| 2026-07-02 \| unrehearsed \| 80 \|$/m,
+			/^\| run \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| review \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| land \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m,
+			/Umbral: entero de 0 a 100 en grill y spec \(80 recomendado\), — en las demas/,
+		]).map((problem) => `${harness}/chiche-init template: ${problem}`));
+		const block = delimitedBlock(markdown, "autonomy-contract") ?? "";
+		problems.push(...missing(block, [
+			/`Umbral` es un entero de 0 a 100 en las filas `grill` y `spec`[^\n]*y `—` en las demás/,
+			/una columna ausente o un `—` en `grill` o `spec` equivale a 80/,
+			/confianza `> umbral`/,
+		]).map((problem) => `${harness}/chiche-init autonomy-contract: ${problem}`));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-2: el bloque autonomy-resolve documenta las dos líneas de umbral, el default 80 y el aviso literal del valor inválido", async () => {
+	const block = await referenceBlock("autonomy-resolve");
+	assert.deepEqual(missing(block, [
+		/después de `nivel efectivo:`[^\n]*`umbral grill: <n>` y `umbral spec: <n>`/,
+		/`80 \(default\)`/,
+		/`umbral <stage> inválido \(<valor>\): rige 80`/,
+		/`grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos/,
+	]), []);
+	const command = await canonicalCommand();
+	assert.match(command, /printf 'umbral grill: %s\\n' "\$ug"\n\s*printf 'umbral spec: %s\\n' "\$us"/, "las dos líneas se imprimen con printf, en orden, después de la traza");
+	assert.ok(command.indexOf('echo "nivel efectivo: $nivel, leído de $src"') < command.indexOf("printf 'umbral grill: %s\\n'"), "umbral va después de nivel efectivo");
+	assert.ok(command.indexOf("printf 'umbral spec: %s\\n'") < command.indexOf("parada: %s"), "umbral va antes de las paradas");
+});
+
+test("#119 CA-2: el resolver imprime los dos umbrales en bash, sh y zsh: 70/90 de la columna, 80 (default) sin columna, con — o sin contrato, y 80 (default) con aviso ante abc, 120, -1 y 7.5", async (t) => {
+	const command = await canonicalCommand();
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-umbral-")));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const repo = (name: string, text: string | null): string => {
+		const root = join(dir, name);
+		mkdirSync(join(root, ".chiche"), { recursive: true });
+		git(root, "init", "-q", "-b", "main");
+		if (text !== null) writeFileSync(join(root, ".chiche/project.md"), text);
+		return root;
+	};
+	const column = repo("columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | plan-approved | 2026-11-07 | rehearsed 2026-11-07 | 90 |\n| run | supervised | 2026-11-07 | — | — |")));
+	const edges = repo("bordes", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 0 |\n| spec | supervised | 2026-11-07 | — | 100 |")));
+	const absent = repo("sin-columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — |\n| spec | supervised | 2026-11-07 | — |\n| run | supervised | 2026-11-07 | — |")));
+	const dash = repo("guion", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | — |\n| spec | supervised | 2026-11-07 | — | — |")));
+	const noRows = repo("sin-filas", contract(LEVELS_TABLE("| run | supervised | 2026-11-07 | — | — |")));
+	const noAutonomy = repo("sin-autonomy", contract(null));
+	const noContract = repo("sin-contrato", null);
+	const problems: string[] = [];
+	for (const shell of shells(t)) {
+		for (const stage of ["run", "none", "grill", "spec"]) {
+			const run = runResolve(command, column, stage, "", shell);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${stage}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "70" || spec !== "90") problems.push(`${shell} ${stage}: umbrales ${grill}/${spec}, esperados 70/90 (${JSON.stringify(run.stdout)})`);
+			if (!ordered) problems.push(`${shell} ${stage}: las líneas de umbral no van justo después de nivel efectivo y antes de las paradas (${JSON.stringify(run.stdout)})`);
+			if (/umbral/.test(run.stderr)) problems.push(`${shell} ${stage}: aviso de umbral sin motivo: ${run.stderr}`);
+			if (!/^parada: \| git push origin main \|/m.test(run.stdout)) problems.push(`${shell} ${stage}: la stop list se sigue imprimiendo`);
+		}
+		const flagged = runResolve(command, column, "run", "A3", shell);
+		if (thresholdLines(flagged.stdout).grill !== "70") problems.push(`${shell}: con --autonomy los umbrales siguen saliendo del contrato (${flagged.stdout})`);
+		const edge = thresholdLines(runResolve(command, edges, "run", "", shell).stdout);
+		if (edge.grill !== "0" || edge.spec !== "100") problems.push(`${shell}: 0 y 100 son válidos (${edge.grill}/${edge.spec})`);
+		for (const [name, cwd] of [["sin columna", absent], ["con —", dash], ["sin filas grill/spec", noRows], ["sin ## Autonomy", noAutonomy], ["sin contrato", noContract]] as const) {
+			const run = runResolve(command, cwd, "run", "", shell);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${name}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "80 (default)" || spec !== "80 (default)") problems.push(`${shell} ${name}: umbrales ${grill}/${spec}, esperados 80 (default) (${JSON.stringify(run.stdout)})`);
+			if (!ordered) problems.push(`${shell} ${name}: líneas de umbral fuera de lugar (${JSON.stringify(run.stdout)})`);
+			if (/umbral/.test(run.stderr)) problems.push(`${shell} ${name}: un default no avisa: ${run.stderr}`);
+		}
+		for (const value of ["abc", "120", "-1", "7.5", "80 %"]) {
+			const bad = repo(`invalido-${shell.replace(/\W/g, "_")}-${value.replace(/\W/g, "_")}`, contract(LEVELS_TABLE(`| grill | supervised | 2026-11-07 | — | ${value} |\n| spec | supervised | 2026-11-07 | — | 75 |`)));
+			const run = runResolve(command, bad, "run", "", shell);
+			const { grill, spec } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${value}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "80 (default)") problems.push(`${shell} ${value}: umbral grill ${grill}, esperado 80 (default)`);
+			if (spec !== "75") problems.push(`${shell} ${value}: el umbral spec válido no se toca (${spec})`);
+			if (!UMBRAL_INVALID("grill", value).test(run.stderr)) problems.push(`${shell} ${value}: falta el aviso literal: ${JSON.stringify(run.stderr)}`);
+			if (/umbral spec/.test(run.stderr)) problems.push(`${shell} ${value}: avisa por spec sin motivo: ${run.stderr}`);
+		}
+		const badSpec = repo(`invalido-spec-${shell.replace(/\W/g, "_")}`, contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 60 |\n| spec | supervised | 2026-11-07 | — | 101 |")));
+		const run = runResolve(command, badSpec, "spec", "", shell);
+		const { grill, spec } = thresholdLines(run.stdout);
+		if (grill !== "60" || spec !== "80 (default)") problems.push(`${shell}: 101 en spec cae a 80 (default) sin tocar grill (${grill}/${spec})`);
+		if (!UMBRAL_INVALID("spec", "101").test(run.stderr)) problems.push(`${shell}: falta el aviso literal de spec: ${JSON.stringify(run.stderr)}`);
+	}
+	assert.deepEqual(problems, []);
+	for (const root of [column, absent, noAutonomy]) assert.equal(git(root, "status", "--porcelain").trim().replace(/^\?\? \.chiche\/$/m, ""), "", "el comando no toca el working tree");
+});
+
+test("#119 CA-3: la Fase 3 de chiche-init pregunta los umbrales de grill y spec con la tool del harness (80 Recomendado / 70 / 90), con --autonomy ≥ A2 escribe 80, y la checklist gana la fila Umbrales de confianza", async () => {
+	const table = await interactionTable();
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-init");
+		const tool = escapeRegExp(table.questionTools[harness] ?? "");
+		const phase = section(markdown, /^Fase 3 — /);
+		problems.push(...missing(phase, [
+			/\*\*Umbrales de confianza\.\*\*/,
+			new RegExp(`\\*\\*Umbrales de confianza\\.\\*\\* Después de los niveles, preguntar el umbral de \`grill\` y el de \`spec\` con \`${tool}\`, una pregunta por stage`),
+			/`80 \(Recomendado\)` \/ `70` \/ `90`/,
+			/la respuesta libre \(Other\) para otro entero de 0 a 100/,
+			/\*\*Umbrales de confianza\.\*\*[^\n]*`run`, `review`, `land` y los ambientes llevan `—`/,
+			/\*\*Umbrales de confianza\.\*\*[^\n]*Con `--autonomy` ≥ A2 no se pregunta: escribe 80 en `grill` y `spec`/,
+		]).map((problem) => `${harness}/chiche-init Fase 3: ${problem}`));
+		const levelsAt = phase.indexOf("**Nivel de autonomía por etapa.**");
+		const thresholdsAt = phase.indexOf("**Umbrales de confianza.**");
+		if (!(levelsAt !== -1 && thresholdsAt > levelsAt)) problems.push(`${harness}/chiche-init Fase 3: los umbrales se preguntan después de los niveles`);
+		const upgrade = section(markdown, /^Upgrade de contrato/);
+		problems.push(...missing(upgrade, [
+			/^\| Umbrales de confianza \| existe `## Autonomy` sin la columna `Umbral`[^\n]*agrega la columna con 80 en `grill` y `spec` y `—` en las demás filas, sin tocar ninguna otra celda[^\n]*con `--autonomy` ≥ A2 queda `mejora disponible` \|$/m,
+		]).map((problem) => `${harness}/chiche-init Upgrade: ${problem}`));
+		const phase4 = section(markdown, /^Fase 4 — /);
+		if (!/`## Autonomy` \(preservar verbatim[^\n]*la columna `Umbral` que agrega la fila `Umbrales de confianza`/.test(phase4)) problems.push(`${harness}/chiche-init Fase 4: la columna Umbral no es excepción declarada al verbatim de --update`);
+		if (!/Preservar `## Decisiones humanas`, `## Politicas de generacion`, `## Autonomy` \(salvo[^\n]*la columna `Umbral`/.test(section(markdown, /^MUST DO$/))) problems.push(`${harness}/chiche-init MUST DO: no nombra la columna Umbral como excepción`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-4: el contrato de este repo lleva Umbral 80 en grill y spec y — en run, review y land, con su decisión fechada; sembrado como origin/main, el resolver imprime umbral grill: 80 y umbral spec: 80 en bash, sh y zsh", async (t) => {
+	const contractText = await readRepoFile(".chiche/project.md");
+	const autonomy = section(contractText, /^Autonomy$/);
+	assert.match(autonomy, /^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|\n\|---\|---\|---\|---\|---\|$/m);
+	for (const stage of ["grill", "spec"]) assert.match(autonomy, new RegExp(`^\\| ${stage} \\| [a-z-]+ \\| \\d{4}-\\d{2}-\\d{2} \\| [^|]+ \\| 80 \\|$`, "m"), `fila ${stage} con Umbral 80`);
+	for (const stage of ["run", "review", "land"]) assert.match(autonomy, new RegExp(`^\\| ${stage} \\| supervised \\| \\d{4}-\\d{2}-\\d{2} \\| — \\| — \\|$`, "m"), `fila ${stage} con Umbral —`);
+	const decision = section(contractText, /^Decisiones humanas$/).split("\n").find((line) => /^- \d{4}-\d{2}-\d{2}: .*`Umbral`/.test(line)) ?? "";
+	assert.ok(decision, "## Decisiones humanas tiene una entrada fechada sobre la columna Umbral");
+	assert.match(decision, /issue #119/);
+	const command = await canonicalCommand();
+	const { root, work } = repoWithRemote("contrato-real", contractText, contractText);
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	for (const shell of shells(t)) {
+		for (const stage of ["run", "none"]) {
+			const run = runResolve(command, work, stage, "", shell);
+			assert.equal(run.status, 0, `${shell} ${stage}: ${run.stderr}`);
+			assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `${shell} ${stage}: ${run.stdout}`);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			assert.equal(grill, "80", `${shell} ${stage}: umbral grill del contrato real`);
+			assert.equal(spec, "80", `${shell} ${stage}: umbral spec del contrato real`);
+			assert.ok(ordered, `${shell} ${stage}: ${run.stdout}`);
+			assert.doesNotMatch(run.stderr, /umbral/, `${shell} ${stage}: ${run.stderr}`);
+		}
+	}
 });

@@ -31,13 +31,13 @@ Tres ideas fuerza:
 <!-- autonomy-levels:end -->
 
 <!-- autonomy-resolve:start -->
-**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, o la fila está `unrehearsed` o `FAILED`, rige `supervised (A1)` con aviso. Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>`. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
+**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, o la fila está `unrehearsed` o `FAILED`, rige `supervised (A1)` con aviso. Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>` y, después de `nivel efectivo:`, dos líneas con los umbrales de confianza: `umbral grill: <n>` y `umbral spec: <n>`, la columna `Umbral` de las filas `grill` y `spec` de la tabla de niveles, leída de la misma fuente que el nivel (también con `--autonomy`), un entero de 0 a 100; sin la columna, con `—`, sin la fila, sin `## Autonomy` o sin contrato imprime `80 (default)`; un valor que no es un entero de 0 a 100 imprime `80 (default)` y avisa por stderr `umbral <stage> inválido (<valor>): rige 80`, con `<stage>` la fila (`grill` o `spec`). `grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos; los demás skills las imprimen y no las usan. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
 
 ```bash
 (
   stage='<stage>' flag='<flag>'
   export LC_ALL=C
-  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1
+  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1; ug='80 (default)'; us='80 (default)'
   case $pick in
     ''|a1|supervised|a2|plan-approved|a3|unattended) ;;
     a0|manual|a4|auto-land|a5|auto-deploy) echo "--autonomy $flag: no soportado todavía (v1 honra A1–A3)" >&2; exit 2 ;;
@@ -73,6 +73,14 @@ Tres ideas fuerza:
   else
     stop=$(printf '%s\n' "$section" | sed -n '/^| *Action *| *Pattern *| *Reason *|/,$p' | sed -n '3,$p' | sed -n '/^|/!q;p')
     if [ -z "$stop" ]; then legible=0; aviso="$aviso aviso: ## Autonomy sin stop list legible (sin el header | Action | Pattern | Reason | o sin filas);"; fi
+    for th in grill spec; do
+      tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f6 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      case $tval in
+        ''|—) tval='80 (default)' ;;
+        *) if ! printf '%s\n' "$tval" | grep -Eq '^(0|[1-9][0-9]?|100)$'; then aviso="$aviso aviso: umbral ${th} inválido (${tval}): rige 80;"; tval='80 (default)'; fi ;;
+      esac
+      if [ "$th" = grill ]; then ug=$tval; else us=$tval; fi
+    done
     if [ -z "$pick" ] && [ "$stage" = none ]; then pick=a1
     elif [ -z "$pick" ]; then
       row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${stage}[[:space:]]*\|" | head -n 1)
@@ -94,6 +102,8 @@ Tres ideas fuerza:
   esac
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
   echo "nivel efectivo: $nivel, leído de $src"
+  printf 'umbral grill: %s\n' "$ug"
+  printf 'umbral spec: %s\n' "$us"
   [ -z "$stop" ] || printf '%s\n' "$stop" | while IFS= read -r fila; do
     pat=$(printf '%s\n' "$fila" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     if [ -z "$pat" ]; then printf 'aviso: fila de la stop list sin Pattern, ignorada: %s\n' "$fila" >&2; else printf 'parada: %s\n' "$fila"; fi
@@ -101,7 +111,7 @@ Tres ideas fuerza:
 )
 ```
 
-El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
+El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza, las dos líneas de umbral y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
 <!-- autonomy-resolve:end -->
 
 <!-- chiche-run-flow:start -->
