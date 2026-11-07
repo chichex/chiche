@@ -35,6 +35,12 @@ const LIMITES_FALLBACK = "contrato sin ## Autonomy: rigen sus ## Limites; corré
 const WORKING_TREE_NOTICE = "nivel leído del working tree: sin remote";
 const APTITUDE = "ninguna fila de la stop list matchea `git push -u origin <branch>`";
 const GREP_DIRS = ["claude", "codex", "opencode", "pi", "antigravity", "agents", "pi-extensions/subagent/agents"] as const;
+// Issue #119, CA-6: `autonomy-confidence` reemplaza a `autonomy-a2` en grill y chiche-spec.
+const AUTONOMY_BLOCKS = ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-confidence"] as const;
+const CONFIDENCE_SKILLS = ["grill", "chiche-spec"] as const;
+const A3_UNAUTONOMIZABLE = "pedido no autonomizable en A3: bajá a A2 o partilo";
+const PRODUCT_LEAK = "decisión de producto sin cerrar en la spec: <decisión>; volvé al grill";
+const BELOW_THRESHOLD_A2 = "pregunta solo lo que queda debajo del umbral";
 
 function repoPath(path: string): string {
 	return new URL(`../../${path}`, import.meta.url).pathname;
@@ -273,7 +279,7 @@ test("CA-4: ningún bloque autonomy-* contiene parámetros posicionales ni $ARGU
 	for (const skill of SKILLS) {
 		for (const harness of HARNESSES) {
 			const markdown = await skillFile(harness, skill);
-			for (const name of ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-a2"]) {
+			for (const name of AUTONOMY_BLOCKS) {
 				const block = delimitedBlock(markdown, name);
 				if (block === null) continue;
 				const hit = block.match(/\$(?:[0-9]|ARGUMENTS|@|\*)/);
@@ -663,24 +669,78 @@ test("CA-9: issue-triage agrega --autonomy a toda ruta encadenada, chiche-spec/c
 	assert.deepEqual(problems, []);
 });
 
-test("CA-10: el bloque autonomy-a2 está en grill y chiche-spec de los cinco harnesses, byte a byte, con la definición de impacto alto, la regla 0 / 1–3 / >3 de A3 y la conducta de chiche-spec por nivel", async () => {
-	const { problems, blocks } = await sharedBlocks("autonomy-a2", ["grill", "chiche-spec"], { normalized: false });
+test("#102 CA-10 → #119 CA-6: el bloque autonomy-confidence reemplaza a autonomy-a2 en grill y chiche-spec de los cinco harnesses, byte a byte, con los ocho puntos (tipo, confianza, umbral, grill por nivel, spec por nivel, fuga, stop list, anclas) y en ningún otro skill", async () => {
+	const { problems, blocks } = await sharedBlocks("autonomy-confidence", CONFIDENCE_SKILLS, { normalized: false });
 	assert.deepEqual(problems, []);
 	assert.equal(blocks.size, 10);
-	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-a2") ?? "";
+	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-confidence") ?? "";
 	assert.deepEqual(missing(block, [
-		/define el alcance entero, o roza la stop list, datos o migraciones, o un contrato externo \(API, formato, evento\)/,
-		/el resto queda `\[ASSUMED\]` en el handoff o en la tabla de inferencias/,
-		/`grill` corre el reconocimiento siempre/,
-		/con 0 sigue sin preguntar; con 1 a 3 las deja `\[ASSUMED\]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
-		/con `supervised` \(A1\) no se pregunta antes de publicar y la corrida termina en el menú final/,
-		/con A2 se preguntan las de impacto alto y no hay menú: responderlas es la aprobación/,
-		/con A3 no se pregunta nada ni hay menú/,
+		// (1) tipo
+		/\(1\)[^\n]*?tipo[^\n]*?`producto` \(define el qué[^\n]*?`técnica` \(define el cómo/,
+		/`grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata solo las técnicas/,
+		// (2) confianza
+		/\(2\)[^\n]*?opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta/,
+		// (3) umbral
+		/\(3\)[^\n]*?`umbral grill` en `grill` y `umbral spec` en `chiche-spec`/,
+		/confianza `> umbral` la decisión se asume y se muestra como `\[ASSUMED NN %\]` con su recomendada; con confianza `≤ umbral` se pregunta/,
+		// (4) grill por nivel
+		/\(4\)[^\n]*?`supervised` \(A1\) y `plan-approved` \(A2\) preguntan las mismas decisiones, las de producto con confianza `≤ umbral`; A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite/,
+		/`grill` corre el reconocimiento siempre y cuenta las decisiones de producto con confianza `≤ umbral`: con 0 sigue sin preguntar; con 1 a 3 las deja `\[ASSUMED NN %\]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
+		// (5) spec por nivel
+		/\(5\)[^\n]*?con A1 no se pregunta antes de publicar y la corrida termina en el menú final/,
+		/con A2 se preguntan las técnicas con confianza `≤ umbral` y no hay menú: responderlas es la aprobación/,
+		/con A3 no se pregunta nada ni hay menú: las técnicas con confianza `≤ umbral` quedan `\[ASSUMED NN %\]` y se listan en `## Riesgos y gaps`/,
+		// (6) fuga
+		/\(6\)[^\n]*?decisión de producto que aparece en la spec es una fuga: A1 la marca `\[NEEDS-INPUT\]` en la tabla de inferencias y en `## Riesgos y gaps`[^\n]*?A2 la pregunta; A3 aborta antes de publicar con el diagnóstico `decisión de producto sin cerrar en la spec: <decisión>; volvé al grill`/,
+		// (7) stop list
+		/\(7\) La stop list frena en todo nivel, sin excepción nueva/,
+		// (8) anclas
+		/\(8\)[^\n]*?`¿aplica a juegos 2D, 3D o todos\?`[^\n]*?producto[^\n]*?se pregunta \(≈35 %\)/,
+		/`¿se puede ordenar\?`[^\n]*?nice-to-have de producto \(≈60 %\)/,
+		/`¿parametrizable: tecla con que se abre, tamaño\?`[^\n]*?obvio, se asume \(≈95 %\)/,
+		/`¿usa el store existente o uno propio\?`[^\n]*?técnica, va a la spec \(≈90 %\)/,
 	]), []);
+	for (let point = 1; point <= 8; point += 1) assert.ok(block.includes(`(${point})`), `el bloque numera el punto (${point})`);
+	assert.doesNotMatch(block, /impacto alto|atajo liviano/, "la regla de impacto alto se retiró y el atajo liviano pregunta: no va en A3");
 	for (const skill of ["chiche-init", "chiche-run", "chiche-land", "design-system", "issue-triage"]) {
 		for (const harness of HARNESSES) {
-			if (delimitedBlock(await skillFile(harness, skill), "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 es solo de grill y chiche-spec`);
+			const markdown = await skillFile(harness, skill);
+			if (delimitedBlock(markdown, "autonomy-confidence") !== null) problems.push(`${harness}/${skill}: autonomy-confidence es solo de grill y chiche-spec`);
+			if (delimitedBlock(markdown, "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 se retiró`);
 		}
+	}
+	for (const skill of CONFIDENCE_SKILLS) {
+		for (const harness of HARNESSES) {
+			if (delimitedBlock(await skillFile(harness, skill), "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 se retiró en favor de autonomy-confidence`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-6 y CA-10: «impacto alto» no aparece en ningún SKILL.md de los cinco harnesses ni en agents; la descripción de --autonomy de grill y chiche-spec dice que A2 pregunta solo lo que queda debajo del umbral y es idéntica entre harnesses", async () => {
+	const grep = spawnSync("git", ["grep", "-n", "impacto alto", "--", "claude/*/SKILL.md", "codex/*/SKILL.md", "opencode/*/SKILL.md", "pi/*/SKILL.md", "antigravity/*/SKILL.md", "agents", "pi-extensions/subagent/agents"], { cwd: repoPath(""), encoding: "utf8" });
+	assert.equal(grep.status, 1, `git grep de «impacto alto» tiene que no encontrar nada (exit 1): exit ${grep.status}\n${grep.stdout}${grep.stderr}`);
+	const problems: string[] = [];
+	for (const skill of SKILLS) {
+		const bullets = new Map<Harness, string>();
+		for (const harness of HARNESSES) {
+			const args = section(await skillFile(harness, skill), /^(Argumentos|Argumentos Pi|Invocación)$/);
+			const bullet = args.split("\n").find((line) => line.startsWith("- `--autonomy <level>` — ")) ?? "";
+			if (!bullet) {
+				problems.push(`${harness}/${skill}: sin bullet --autonomy`);
+				continue;
+			}
+			if (/impacto alto/.test(bullet)) problems.push(`${harness}/${skill}: la descripción de --autonomy sigue hablando de impacto alto`);
+			if ((CONFIDENCE_SKILLS as readonly string[]).includes(skill) && !bullet.includes(BELOW_THRESHOLD_A2)) problems.push(`${harness}/${skill}: la descripción de --autonomy no dice «${BELOW_THRESHOLD_A2}»`);
+			if ((CONFIDENCE_SKILLS as readonly string[]).includes(skill) && !/«Tipo y confianza»/.test(bullet)) problems.push(`${harness}/${skill}: la descripción de --autonomy no apunta a «Tipo y confianza»`);
+			bullets.set(harness, await normalize(bullet, harness));
+		}
+		// Cross-harness: la descripción es la misma doctrina en los cinco, salvo la capa de interacción que ya divergía antes de #119:
+		// chiche-run en Codex y opencode (A3 corre inline) e issue-triage en Pi (el flag llega por `/issues` y despacha el orquestador).
+		if (skill === "chiche-run" || skill === "issue-triage") continue;
+		const [reference, ...rest] = [...bullets.entries()];
+		if (!reference) continue;
+		for (const [harness, bullet] of rest) if (bullet !== reference[1]) problems.push(`${reference[0]} vs ${harness}/${skill}: la descripción de --autonomy diverge — ${firstDifference(reference[1], bullet)}`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -1395,15 +1455,16 @@ test("review #113-6: la plantilla de chiche-init trae en los cinco harnesses los
 	assert.deepEqual(problems, []);
 });
 
-test("review #114-3, #115-10: en A3 grill deja [ASSUMED] las 1 a 3 decisiones abiertas sin atajo liviano, y A2/A3 no preguntan configuración, frontera ni cierre", async () => {
-	const { problems, blocks } = await sharedBlocks("autonomy-a2", ["grill", "chiche-spec"], { normalized: false });
+test("review #114-3, #115-10 (reescrito por #119 CA-6): en A3 grill deja [ASSUMED NN %] las 1 a 3 decisiones de producto debajo del umbral sin atajo liviano, y A2 omite configuración, frontera y cierre", async () => {
+	const { problems, blocks } = await sharedBlocks("autonomy-confidence", CONFIDENCE_SKILLS, { normalized: false });
 	assert.deepEqual(problems, []);
 	assert.equal(blocks.size, 10);
-	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-a2") ?? "";
+	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-confidence") ?? "";
 	assert.deepEqual(missing(block, [
-		/con 1 a 3 las deja `\[ASSUMED\]` en el handoff, sin preguntar/,
-		/con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
-		/En A2 y A3 no hay preguntas de configuración, de frontera de bloque ni de confirmación de cierre/,
+		/con 1 a 3 las deja `\[ASSUMED NN %\]` en el handoff, sin preguntar/,
+		new RegExp(`con más de 3 aborta con el listado y el diagnóstico \`${escapeRegExp(A3_UNAUTONOMIZABLE)}\``),
+		/A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite/,
+		new RegExp(escapeRegExp(`\`${PRODUCT_LEAK}\``)),
 	]), []);
 	assert.doesNotMatch(block, /atajo liviano/, "el atajo liviano pregunta: no va en A3");
 });
@@ -1712,12 +1773,13 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 		const spec = await skillFile(harness, "chiche-spec");
 		problems.push(...missing(spec, [
 			// #114-1, opción A: en A2 responder es aprobar, y la aprobación se escribe bajo el mismo gate.
-			/en A2, responder las preguntas de impacto alto es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
-			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta de impacto alto/,
-			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta de impacto alto/,
+			// Issue #119, CA-6: «impacto alto» pasa a «debajo del umbral».
+			/en A2, responder las preguntas debajo del umbral es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
+			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta debajo del umbral/,
+			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta debajo del umbral/,
 		]).map((problem) => `${harness}/chiche-spec: ${problem}`));
 		if (harness !== "pi" && !/`spec\.approved` en la transición a `aprobada`, la del menú o la de A2 \(una republicación/.test(spec)) problems.push(`${harness}/chiche-spec: el evento spec.approved no nombra la transición de A2`);
-		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas de impacto alto se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
+		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas debajo del umbral se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
 		const init = await skillFile(harness, "chiche-init");
 		// #116-2: la confirmación del costo autoriza el comando del host y nada más.
 		// El ensayo pago vive solo en Claude Code (review #115-16): los otros harnesses mandan ahí con el aviso literal.
@@ -2080,7 +2142,7 @@ test("#120 CA-1 y CA-4: ningún bloque autonomy-* de los 35 archivos expande `$<
 	for (const skill of SKILLS) {
 		for (const harness of HARNESSES) {
 			const markdown = await skillFile(harness, skill);
-			for (const name of ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-a2"]) {
+			for (const name of AUTONOMY_BLOCKS) {
 				const block = delimitedBlock(markdown, name);
 				if (block === null) continue;
 				for (const hit of unbracedExpansions(block)) problems.push(`${harness}/${skill} bloque ${name}: ${hit} es un subíndice o un modificador en zsh; va con llaves`);

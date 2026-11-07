@@ -21,7 +21,7 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 - `#NN` inicia el reconocimiento desde ese issue del repositorio actual.
 - `owner/repo#NN` o una URL canónica `https://github.com/owner/repo/issues/NN` pueden apuntar a otro proyecto. Si NO recibiste un envelope `workflow-launch`, invocá inmediatamente `launch_grill` usando sólo esa referencia calificada como target exacto y terminá el turno: la tool localiza un único checkout entre los proyectos conocidos por Pi, pide autorización y abre allí una sesión hija. No explores, no crees una sesión de grill y no interpretes la URL como path. Si la tool no está disponible, frená con el comando manual `/grill <target>`; no continúes en el cwd equivocado.
 - `--resume <sessionId>` viene de un selector o del orquestador: cargá directamente el snapshot autoritativo con `grill_session` (`action: "get"`), sin volver a abrir `select_grill_session`, y continuá en esta misma conversación.
-- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta todo, `plan-approved` (A2) solo lo de impacto alto y `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Autonomía por nivel».
+- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta las decisiones de producto que quedan debajo del umbral y además la configuración, la frontera de bloque y el cierre; `plan-approved` (A2) pregunta solo lo que queda debajo del umbral; `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Tipo y confianza».
 
 <!-- autonomy-levels:start -->
 **Niveles de autonomía.** La escala es `manual (A0)`, `supervised (A1)`, `plan-approved (A2)`, `unattended (A3)`, `auto-land (A4)` y `auto-deploy (A5)`. `--autonomy <level>` acepta el código o la palabra, sin distinguir mayúsculas (`A2`, `a2` y `plan-approved` son el mismo nivel). Esta versión honra A1 a A3: con A0, A4 o A5 el skill aborta antes de cualquier mutación con el diagnóstico literal `--autonomy <nivel>: no soportado todavía (v1 honra A1–A3)`, y cualquier otro token aborta listando los valores válidos. `--autonomy` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. Sin flag rige lo que resuelve «Nivel efectivo»; el default es `supervised (A1)`.
@@ -111,9 +111,9 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza, las dos líneas de umbral y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
 <!-- autonomy-resolve:end -->
 
-<!-- autonomy-a2:start -->
-**Autonomía por nivel.** Con `plan-approved` (A2) se preguntan solo las decisiones de impacto alto: una decisión es de impacto alto si define el alcance entero, o roza la stop list, datos o migraciones, o un contrato externo (API, formato, evento); el resto queda `[ASSUMED]` en el handoff o en la tabla de inferencias. Con `unattended` (A3), `grill` corre el reconocimiento siempre y cuenta las decisiones de alcance abiertas: con 0 sigue sin preguntar; con 1 a 3 las deja `[ASSUMED]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`. En A2 y A3 no hay preguntas de configuración, de frontera de bloque ni de confirmación de cierre: el handoff se congela con lo decidido y lo asumido. En `chiche-spec`, con `supervised` (A1) no se pregunta antes de publicar y la corrida termina en el menú final, donde se revisa la spec entera; con A2 se preguntan las de impacto alto y no hay menú: responderlas es la aprobación; con A3 no se pregunta nada ni hay menú.
-<!-- autonomy-a2:end -->
+<!-- autonomy-confidence:start -->
+**Tipo y confianza.** (1) Toda decisión lleva un tipo: `producto` (define el qué: alcance, comportamiento visible, prioridades) o `técnica` (define el cómo: implementación, estructura, herramientas). `grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata solo las técnicas. (2) Toda decisión tratada lleva una opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta. (3) El umbral es el que imprime el resolver de «Nivel efectivo»: `umbral grill` en `grill` y `umbral spec` en `chiche-spec`. Con confianza `> umbral` la decisión se asume y se muestra como `[ASSUMED NN %]` con su recomendada; con confianza `≤ umbral` se pregunta. (4) En `grill`, `supervised` (A1) y `plan-approved` (A2) preguntan las mismas decisiones, las de producto con confianza `≤ umbral`; A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite: el handoff se congela con lo decidido y lo asumido. Con `unattended` (A3), `grill` corre el reconocimiento siempre y cuenta las decisiones de producto con confianza `≤ umbral`: con 0 sigue sin preguntar; con 1 a 3 las deja `[ASSUMED NN %]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`. (5) En `chiche-spec`, con A1 no se pregunta antes de publicar y la corrida termina en el menú final, donde se revisa la spec entera; con A2 se preguntan las técnicas con confianza `≤ umbral` y no hay menú: responderlas es la aprobación; con A3 no se pregunta nada ni hay menú: las técnicas con confianza `≤ umbral` quedan `[ASSUMED NN %]` y se listan en `## Riesgos y gaps`. (6) Una decisión de producto que aparece en la spec es una fuga: A1 la marca `[NEEDS-INPUT]` en la tabla de inferencias y en `## Riesgos y gaps` y publica igual, para revisarla desde el menú; A2 la pregunta; A3 aborta antes de publicar con el diagnóstico `decisión de producto sin cerrar en la spec: <decisión>; volvé al grill`. (7) La stop list frena en todo nivel, sin excepción nueva. (8) Anclas de calibración, para no inflar la confianza: `¿aplica a juegos 2D, 3D o todos?` es de producto y central, se pregunta (≈35 %); `¿se puede ordenar?` es un nice-to-have de producto (≈60 %); `¿parametrizable: tecla con que se abre, tamaño?` es obvio, se asume (≈95 %); `¿usa el store existente o uno propio?` es técnica, va a la spec (≈90 %).
+<!-- autonomy-confidence:end -->
 
 
 ### Lanzamiento orquestado de Pi
@@ -384,7 +384,8 @@ El handoff es el artefacto interoperable del grill: los cuatro harnesses lo escr
 ...
 
 ## Decisiones resueltas
-1. ...
+1. <decisión y lo acordado> — preguntada
+2. <decisión y su recomendada> — asumida NN %
 
 ## Ramas pendientes
 ...
@@ -393,10 +394,12 @@ El handoff es el artefacto interoperable del grill: los cuatro harnesses lo escr
 <solo si la rama de diseño se activó; ausente mientras esté paused, cuando las decisiones de diseño van a Decisiones resueltas con prefijo "Diseño:": superficies y su estado; pantallas, flujos y estados; componentes a reusar o crear por nombre del inventario; dirección visual si la superficie está sin sistema; requisitos de webview, plataforma y accesibilidad; capturas de referencia por ruta relativa>
 
 ## Handoff
-<vacío mientras esté paused; contrato completo cuando esté finalized>
+<vacío mientras esté paused; contrato completo cuando esté finalized, con el párrafo **Para la spec.** y las decisiones técnicas anotadas, o `ninguna`>
 ```
 
 Si tu marker difiere del estado real de la sesión, la tool lo corrige: siempre queda exactamente un marker con la identidad autoritativa.
+
+`— preguntada` y `— asumida NN %` van en el texto de cada decisión del `handoffMarkdown`; en una sesión pausada, `— asumida NN %` viaja en el texto de `agreement` de cada decisión (`grill_session` no cambia de esquema).
 
 `## Diseño` no cambia el esquema de `grill_session`: `pause` arma el Markdown desde el snapshot con sus cuatro secciones fijas, así que en una sesión pausada las decisiones de diseño viajan en `## Decisiones resueltas` con prefijo `Diseño:`; `finalize` escribe el `handoffMarkdown` verbatim, con `## Diseño` cuando la rama se activó. Las capturas se copian a la carpeta derivada de la ruta del handoff que devuelve la tool, nunca del slug calculado. Si hay capturas, hacé `pause` antes de `finalize`: `pause` escribe el handoff y devuelve su ruta real, la misma que después usa `finalize`, y de ahí salen el nombre de la carpeta y las rutas relativas del `handoffMarkdown`. En una sesión importada, la tool no escribe el `handoffMarkdown` verbatim: lo anida bajo `### Handoff de la revisión`, después del handoff fuente, así que el `## Diseño` vigente es el último del archivo.
 
@@ -425,12 +428,13 @@ Primero escribí en el chat el entendimiento compartido completo. Debe incluir:
 
 1. tema y alcance;
 2. hechos comprobados;
-3. decisiones resueltas, agrupadas por bloque y enumeradas una por una;
+3. decisiones resueltas, agrupadas por bloque y enumeradas una por una, cada una cerrada con `— preguntada` o `— asumida NN %`;
 4. restricciones y no-objetivos;
 5. dependencias y consecuencias importantes;
 6. supuestos `[ASSUMED]`, cada uno con su evidencia y el impacto si fuera incorrecto;
 7. riesgos o preguntas deliberadamente diferidas;
-8. contexto recomendado para la sesión que escribirá el spec.
+8. contexto recomendado para la sesión que escribirá el spec;
+9. el párrafo `**Para la spec.**` con las decisiones técnicas anotadas para la spec, o `ninguna`.
 
 Este texto es el contrato de handoff. Tiene que estar renderizado en el chat; no puede vivir solamente en una tool o archivo. La confirmación final aprueba tanto las decisiones como los `[ASSUMED]` enumerados, sin un gate separado por cada supuesto.
 
