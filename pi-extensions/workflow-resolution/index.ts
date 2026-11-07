@@ -391,6 +391,43 @@ export interface EvidenceRef {
 	detail: string;
 }
 
+// Issue #119, CA-17: el veredicto del triage para una ruta nueva (grill, spec, join-grill, join-spec).
+// `until` sale de `k` (técnicas ≤ umbral spec): "pr" con k = 0, "spec" con k > 0. `accepted` es true
+// solo cuando el humano eligió `Confirmar <ruta> → hasta <el PR | la spec>` ([DEVIATION] de la spec:
+// el despacho de Pi necesita saber qué opción se eligió y el protocolo no lo lleva en otro lado).
+export interface VerdictItem {
+	text: string;
+	confidence: number;
+}
+
+export interface WorkflowVerdict {
+	until: "pr" | "spec";
+	accepted: boolean;
+	thresholds: { grill: number; spec: number };
+	questions: VerdictItem[];
+	assumed: VerdictItem[];
+	forSpec: VerdictItem[];
+	warnings: string[];
+}
+
+export const VERDICT_ROUTES = ["grill", "spec", "join-grill", "join-spec"] as const satisfies readonly NewWorkRoute[];
+
+export function routeCarriesVerdict(route: WorkflowRoute | null): route is (typeof VERDICT_ROUTES)[number] {
+	return route !== null && (VERDICT_ROUTES as readonly string[]).includes(route);
+}
+
+function cloneVerdict(verdict: WorkflowVerdict): WorkflowVerdict {
+	return {
+		until: verdict.until,
+		accepted: verdict.accepted,
+		thresholds: { ...verdict.thresholds },
+		questions: verdict.questions.map((item) => ({ ...item })),
+		assumed: verdict.assumed.map((item) => ({ ...item })),
+		forSpec: verdict.forSpec.map((item) => ({ ...item })),
+		warnings: [...verdict.warnings],
+	};
+}
+
 export interface WorkflowResolutionInput {
 	repository: string;
 	cwd: string;
@@ -418,6 +455,8 @@ export interface WorkflowResolutionInput {
 	evidence: EvidenceRef[];
 	risks: string[];
 	artifacts: ArtifactCandidate[];
+	/** Issue #119, CA-17: el veredicto que el agente estimó; el resolver lo copia solo en una ruta nueva con outcome start. */
+	verdict?: WorkflowVerdict | null;
 }
 
 interface WorkflowResolutionBaseV1 {
@@ -437,6 +476,7 @@ interface WorkflowResolutionBaseV1 {
 	evidence: EvidenceRef[];
 	risks: string[];
 	artifacts: ArtifactRef[];
+	verdict: WorkflowVerdict | null;
 }
 
 export type WorkflowResolutionV1 =
@@ -523,6 +563,7 @@ function baseResolution(
 		evidence: input.evidence.map((item) => ({ ...item })),
 		risks: [...input.risks],
 		artifacts,
+		verdict: dispatch.outcome === "start" && routeCarriesVerdict(route) && input.verdict ? cloneVerdict(input.verdict) : null,
 	};
 }
 
@@ -535,6 +576,7 @@ function canonicalizationError(input: WorkflowResolutionInput): WorkflowResoluti
 		selectedRoute: null,
 		stage: null,
 		mode: null,
+		verdict: null,
 	};
 }
 
@@ -1225,6 +1267,7 @@ export function selectWorkflowRoute(
 			selectedRoute: null,
 			stage: null,
 			mode: null,
+			verdict: null,
 		};
 	}
 	if (resolution.outcome !== "start" || resolution.recommendedRoute === null) return { ...resolution };
@@ -1242,5 +1285,7 @@ export function selectWorkflowRoute(
 		selectedRoute: route,
 		stage: dispatch.stage,
 		mode: dispatch.mode,
+		// Issue #119, CA-17: el veredicto viaja solo con una ruta nueva en start; el despacho decide con `accepted`.
+		verdict: dispatch.outcome === "start" && routeCarriesVerdict(route) ? resolution.verdict : null,
 	};
 }

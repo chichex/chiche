@@ -51,6 +51,7 @@ function resolution(overrides: Record<string, unknown> = {}) {
 		evidence: [],
 		risks: [],
 		artifacts: [],
+		verdict: null,
 		...overrides,
 	};
 }

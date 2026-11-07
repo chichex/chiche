@@ -51,3 +51,9 @@ test("withAutonomy agrega el flag canónico al final de los args y no toca los a
 	assert.equal(withAutonomy("", "A3"), "--autonomy A3");
 	assert.equal(withAutonomy("--from-grill \"id\"", "A1"), "--from-grill \"id\" --autonomy A1");
 });
+
+// Issue #119, CA-18: `/issues` no gana flags nuevos; `--until pr` se rechaza como token desconocido.
+test("#119 CA-18: parseIssuesCommandArgs no gana --until: lo rechaza como argumento desconocido", () => {
+	assert.deepEqual(parseIssuesCommandArgs("--until pr"), { ok: false, message: "/issues no acepta argumentos además de --autonomy <level>: --until pr" });
+	assert.deepEqual(parseIssuesCommandArgs("--autonomy A2 --until pr"), { ok: false, message: "/issues no acepta argumentos además de --autonomy <level>: --until pr" });
+});

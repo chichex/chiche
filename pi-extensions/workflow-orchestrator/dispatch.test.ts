@@ -30,6 +30,7 @@ function resolution(overrides: Record<string, unknown> = {}) {
 		evidence: [],
 		risks: [],
 		artifacts: [],
+		verdict: null,
 		...overrides,
 	};
 }
@@ -368,4 +369,54 @@ test("#102 CA-9: dispatch agrega --autonomy <código> a los args de cada ruta cu
 	const invalid = orchestrator.resolveWorkflowDispatch(handoff, undefined, { autonomy: "extreme" });
 	assert.equal(invalid.ok, false);
 	if (!invalid.ok) assert.equal(invalid.code, "invalid-autonomy");
+});
+
+// Issue #119, CA-18: el despacho arma los argumentos de la tabla stage-chain a partir de `verdict` y de la
+// opción elegida (`accepted`): grill + hasta el PR → --autonomy A2 --until pr; grill + hasta la spec → --autonomy A2;
+// spec + hasta el PR → --autonomy A3 --until pr; spec + hasta la spec → --autonomy A2; supervisado (accepted: false)
+// y fallback (selectedRoute ≠ recommendedRoute) → los argumentos de hoy. `/issues --autonomy` gana sobre el nivel.
+function verdict(until: "pr" | "spec", accepted: boolean) {
+	return { until, accepted, thresholds: { grill: 80, spec: 80 }, questions: [], assumed: [], forSpec: [], warnings: [] };
+}
+
+test("#119 CA-18: dispatch construye los args del veredicto aceptado por ruta y destino, deja los de hoy con supervisado o fallback, y el --autonomy de /issues gana sobre el nivel del veredicto", () => {
+	const cases: Array<[string, "pr" | "spec", string]> = [
+		["grill", "pr", "#14 --autonomy A2 --until pr"],
+		["join-grill", "pr", "#14 --autonomy A2 --until pr"],
+		["grill", "spec", "#14 --autonomy A2"],
+		["spec", "pr", "#14 --autonomy A3 --until pr"],
+		["join-spec", "pr", "#14 --autonomy A3 --until pr"],
+		["spec", "spec", "#14 --autonomy A2"],
+	];
+	for (const [route, until, expected] of cases) {
+		const stage = route.endsWith("grill") ? "grill" : "spec";
+		const accepted = resolution({ code: route, recommendedClassification: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict(until, true) });
+		const result = orchestrator.resolveWorkflowDispatch(accepted);
+		assert.ok(result.ok, `${route} ${until}: ${JSON.stringify(result)}`);
+		assert.equal(result.request.skill.args, expected, `${route} + hasta ${until}`);
+		assert.equal(result.request.skill.name, stage === "grill" ? "grill" : "chiche-spec");
+		// Supervisado: el veredicto se emitió pero no se aceptó → los argumentos de hoy.
+		const supervised = orchestrator.resolveWorkflowDispatch(resolution({ code: route, recommendedClassification: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict(until, false) }));
+		assert.ok(supervised.ok, `${route} supervisado`);
+		assert.equal(supervised.request.skill.args, "#14", `${route} supervisado: sin flags`);
+		const supervisedWithFlag = orchestrator.resolveWorkflowDispatch(resolution({ code: route, recommendedClassification: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict(until, false) }), undefined, { autonomy: "A2" });
+		assert.ok(supervisedWithFlag.ok);
+		assert.equal(supervisedWithFlag.request.skill.args, "#14 --autonomy A2", `${route} supervisado con /issues --autonomy A2`);
+		// /issues --autonomy gana sobre el nivel del veredicto; --until pr sigue al veredicto aceptado.
+		const flagged = orchestrator.resolveWorkflowDispatch(accepted, undefined, { autonomy: "A1" });
+		assert.ok(flagged.ok);
+		assert.equal(flagged.request.skill.args, `#14 --autonomy A1${until === "pr" ? " --until pr" : ""}`, `${route} ${until}: el flag de /issues gana`);
+	}
+	// Fallback: la ruta elegida no es la recomendada → argumentos de hoy aunque el veredicto esté aceptado.
+	const fallback = orchestrator.resolveWorkflowDispatch(resolution({ code: "spec", recommendedClassification: "grill", fallbackClassification: "spec", recommendedRoute: "grill", selectedRoute: "spec", stage: "spec", verdict: verdict("pr", true) }));
+	assert.ok(fallback.ok);
+	assert.equal(fallback.request.skill.args, "#14", "fallback: sin flags del veredicto");
+	// Sin veredicto (null) nada cambia respecto de hoy.
+	const plain = orchestrator.resolveWorkflowDispatch(resolution({ code: "grill", recommendedClassification: "grill", recommendedRoute: "grill", selectedRoute: "grill", stage: "grill", verdict: null }));
+	assert.ok(plain.ok);
+	assert.equal(plain.request.skill.args, "#14");
+	// Un veredicto en una ruta artifact-aware es inválido para el protocolo y el despacho lo rechaza.
+	const invalid = orchestrator.resolveWorkflowDispatch(resolution({ code: "run-existing-spec", recommendedRoute: "run-existing-spec", selectedRoute: "run-existing-spec", stage: "run-existing-spec", mode: null, artifacts: [artifact("spec")], verdict: verdict("pr", true) }));
+	assert.equal(invalid.ok, false);
+	if (!invalid.ok) assert.equal(invalid.code, "invalid-resolution");
 });
