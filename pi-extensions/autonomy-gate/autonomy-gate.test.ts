@@ -649,7 +649,8 @@ test("CA-9: issue-triage agrega --autonomy a toda ruta encadenada, chiche-spec/c
 		const block = delimitedBlock(await skillFile(harness, "issue-triage"), "stage-chain") ?? "";
 		const rows = block.split("\n").filter((line) => line.startsWith("|")).slice(2);
 		if (rows.length < 6) problems.push(`${harness}/issue-triage: tabla stage-chain con ${rows.length} rutas`);
-		for (const row of rows) if (!/`--autonomy <level>` si vino \|$/.test(row)) problems.push(`${harness}/issue-triage: la ruta ${row.slice(0, 40)}… no propaga --autonomy`);
+		// Issue #119, CA-16: las filas grill y spec suman los argumentos del veredicto y terminan con la regla del flag recibido.
+		for (const row of rows) if (!/`--autonomy <level>` si vino \|$/.test(row) && !/`--autonomy <level>` si vino; un `--autonomy <level>` recibido gana sobre el nivel del veredicto \|$/.test(row)) problems.push(`${harness}/issue-triage: la ruta ${row.slice(0, 40)}… no propaga --autonomy`);
 	}
 	for (const harness of HARNESSES) {
 		const spec = section(await skillFile(harness, "chiche-spec"), /^Argumentos$/);
@@ -2412,7 +2413,8 @@ test("#119 CA-12: grill y chiche-spec de los cinco harnesses aceptan [--until pr
 			const args = section(markdown, /^(Argumentos|Argumentos Pi|Invocación)$/);
 			if (/--until/.test(fencedBlocks(args)[0]?.content ?? "")) problems.push(`${harness}/${skill}: la firma no gana --until`);
 			if (/^- `--until/m.test(markdown)) problems.push(`${harness}/${skill}: describe --until como flag propio`);
-			if (skill !== "chiche-run" && /--until/.test(markdown)) problems.push(`${harness}/${skill}: nombra --until`);
+			// chiche-run lo nombra para no volver a encadenar la spec (CA-13) e issue-triage para encadenar con él desde el veredicto (capa 4, CA-16).
+			if (skill !== "chiche-run" && skill !== "issue-triage" && /--until/.test(markdown)) problems.push(`${harness}/${skill}: nombra --until`);
 		}
 	}
 	assert.deepEqual(problems, []);

@@ -117,6 +117,7 @@ const REQUIRED_SCHEMA_FIELDS = [
 	"evidence",
 	"risks",
 	"artifacts",
+	"verdict",
 ] as const;
 
 test("issue-triage has one equivalent artifact-aware contract in all existing harnesses", async () => {
@@ -363,5 +364,92 @@ test("autotest: question normalization only replaces the exact backticked tool i
 			`Gate: \`«question-tool»\`\n${literal}`,
 			`${harness}: preserva prosa y otros identificadores`,
 		);
+	}
+});
+
+// Issue #119, CA-15, CA-16 y CA-19: el triage imprime un veredicto para las rutas nuevas y el gate ofrece
+// confirmarlo (→ hasta el PR | la spec) o seguir supervisado; la tabla stage-chain lleva los argumentos.
+const ALL_HARNESSES = [...HARNESSES, "antigravity"] as const;
+const VERDICT_BLOCK = [
+	"Veredicto: <n> pregunta(s) de producto y después sigo solo hasta <el PR | la spec>.",
+	"- Te pregunto: <decisión> (<NN> %)        ← una línea por decisión de producto ≤ umbral grill",
+	"- Asumo: <decisión> (<NN> %)              ← una línea por decisión de producto > umbral grill",
+	"- Para la spec: <decisión> (<NN> %)       ← una línea por decisión técnica",
+	"- Aviso: <riesgo de ejecución>            ← archivos tocados, tests del área; no suma preguntas",
+].join("\n");
+
+export function triageVerdictBlock(markdown: string): string {
+	const match = markdown.match(/<!-- triage-verdict:start -->\n([\s\S]*?)\n<!-- triage-verdict:end -->/);
+	assert.ok(match?.[1], "bloque triage-verdict presente");
+	return match[1];
+}
+
+test("#119 CA-15 y CA-16: issue-triage imprime el bloque Veredicto literal para grill, spec y join-* antes del gate, lee los umbrales del resolver, y ofrece las cuatro opciones en orden, en los cinco harnesses con el bloque equivalente", async () => {
+	const interaction = parseInteractionDifferences(await readRepoFile("docs/harness-interaction-differences.md"));
+	const blocks = new Map<string, string>();
+	for (const harness of ALL_HARNESSES) {
+		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
+		const block = triageVerdictBlock(markdown);
+		assert.ok(block.includes(VERDICT_BLOCK), `${harness}: el bloque Veredicto no es el literal de la spec`);
+		for (const rule of [
+			/`grill`, `spec`, `join-grill` o `join-spec`/,
+			/`umbral grill:` y `umbral spec:`/,
+			/`hasta el PR` cuando `k = 0`; `hasta la spec` cuando `k > 0`/,
+			/`grill` cuando `n > 0`, `spec` cuando `n = 0`/,
+			/Las rutas de rechazo y las artifact-aware no llevan veredicto/,
+			/`verdict`/,
+			/`accepted`/,
+		]) assert.match(block, rule, `${harness}: ${rule}`);
+		const actionable = markdown.split("### Rutas accionables\n")[1]?.split("## Fase 5")[0] ?? "";
+		const options = ["`Confirmar <ruta> → hasta <el PR | la spec> (Recomendado)`", "`Confirmar <ruta> supervisado`", "`Usar fallback: <ruta>`", "`Cancelar`"];
+		let cursor = -1;
+		for (const option of options) {
+			const at = actionable.indexOf(option);
+			assert.ok(at > cursor, `${harness}: la opción ${option} falta o está fuera de orden`);
+			cursor = at;
+		}
+		assert.match(actionable, /sin veredicto[^\n]*`Confirmar <ruta recomendada> \(Recomendado\)`/, `${harness}: las rutas artifact-aware conservan el gate de hoy`);
+		assert.match(actionable, /`--autonomy` recibido[^\n]*gana sobre el nivel del veredicto/, `${harness}: el flag recibido gana`);
+		assert.match(actionable, /`accepted`[^\n]*`Confirmar <ruta> → hasta/, `${harness}: accepted true solo con → hasta`);
+		blocks.set(harness, harness === "antigravity" ? block : normalizeArtifactAwareBlock(block, harness as Harness, interaction));
+	}
+	for (const harness of HARNESSES.slice(1)) assert.equal(blocks.get(harness), blocks.get("claude"), `${harness} diverge de claude en triage-verdict`);
+});
+
+test("#119 CA-16: la tabla stage-chain lleva los cinco casos del veredicto en los harnesses que encadenan, y WorkflowResolutionV1 declara verdict en el contrato de los cinco", async () => {
+	for (const harness of CHAINING_HARNESSES) {
+		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
+		const args = stageChainArguments(stageChainBlock(markdown));
+		const grill = args.get("grill") ?? "";
+		const spec = args.get("spec") ?? "";
+		assert.match(grill, /`Confirmar → hasta el PR`[^|]*`--autonomy A2 --until pr`/, `${harness}: grill + hasta el PR`);
+		assert.match(grill, /`Confirmar → hasta la spec`[^|]*`--autonomy A2`/, `${harness}: grill + hasta la spec`);
+		assert.match(spec, /`Confirmar → hasta el PR`[^|]*`--autonomy A3 --until pr`/, `${harness}: spec + hasta el PR`);
+		assert.match(spec, /`Confirmar → hasta la spec`[^|]*`--autonomy A2`/, `${harness}: spec + hasta la spec`);
+		for (const row of [grill, spec]) {
+			assert.match(row, /`supervisado`[^|]*`--autonomy <level>` si vino/, `${harness}: supervisado → los argumentos de hoy`);
+			assert.match(row, /`--autonomy <level>` recibido gana sobre el nivel del veredicto/, `${harness}: el flag recibido gana`);
+		}
+		assert.equal(args.get("join-grill"), grill, `${harness}: join-grill usa el issue canónico con los mismos args`);
+		assert.equal(args.get("join-spec"), spec, `${harness}: join-spec usa el issue canónico con los mismos args`);
+	}
+	for (const harness of ALL_HARNESSES) {
+		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
+		const contract = harness === "antigravity" ? markdown : artifactAwareBlock(markdown);
+		assert.match(contract, /verdict: WorkflowVerdict \| null;/, `${harness}: el tipo declara verdict`);
+		assert.match(contract, /type VerdictItem = \{ text: string; confidence: number \}/, `${harness}: VerdictItem`);
+		assert.match(contract, /until: "pr" \| "spec"; accepted: boolean; thresholds: \{ grill: number; spec: number \}; questions: VerdictItem\[\]; assumed: VerdictItem\[\]; forSpec: VerdictItem\[\]; warnings: string\[\]/, `${harness}: WorkflowVerdict`);
+	}
+	const pi = await readRepoFile("pi/issue-triage/SKILL.md");
+	assert.match(pi, /`\/issues --autonomy <level>`[^\n]*gana sobre el nivel del veredicto/, "pi: /issues --autonomy gana");
+});
+
+test("#119 CA-19: las filas issue-triage de los dos README nombran el veredicto y las dos confirmaciones", async () => {
+	for (const [path, patterns] of [
+		["README.md", [/`Veredicto:`/, /`Confirmar → hasta <el PR \| la spec>`/, /`Confirmar supervisado`/, /`--until pr`/]],
+		["README.en.md", [/`Veredicto:`/, /`Confirmar → hasta <el PR \| la spec>`/, /`Confirmar supervisado`/, /`--until pr`/]],
+	] as const) {
+		const row = (await readRepoFile(path)).split("\n").find((line) => line.startsWith("| **`issue-triage`**")) ?? "";
+		for (const pattern of patterns) assert.match(row, pattern, `${path}: ${pattern}`);
 	}
 });

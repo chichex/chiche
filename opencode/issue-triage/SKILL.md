@@ -112,7 +112,7 @@ El comando termina con exit 2 ante un nivel no soportado o inválido, antes de t
 
 ### Interacción en OpenCode
 
-Usá `question` para los gates de las Fases 4 y 5, después de imprimir el diagnóstico y los efectos de confirmar. Mandá una pregunta en `questions`, con `header` breve, `question` autocontenida y `options`. En la Fase 4, usá labels cortos (`Confirmar (Recommended)`, `Usar fallback`, `Cancelar`) y poné la ruta completa y su efecto en `description`; la recomendada va primera y la respuesta libre la agrega la tool. La Fase 5 ofrece sólo confirmar o cancelar la creación del issue combinado y el cierre de los originales, sin autorizar todavía un stage.
+Usá `question` para los gates de las Fases 4 y 5, después de imprimir el diagnóstico y los efectos de confirmar. Mandá una pregunta en `questions`, con `header` breve, `question` autocontenida y `options`. En la Fase 4, usá labels cortos (`Confirmar → hasta <el PR | la spec> (Recommended)` y `Confirmar supervisado` con veredicto; `Confirmar (Recommended)` sin veredicto; `Usar fallback`, `Cancelar`) y poné la ruta completa y su efecto en `description`; la recomendada va primera y la respuesta libre la agrega la tool. La Fase 5 ofrece sólo confirmar o cancelar la creación del issue combinado y el cierre de los originales, sin autorizar todavía un stage.
 
 Si `question` no está disponible, formulá el mismo gate en texto plano con opciones numeradas y la recomendada primera marcada `(Recomendado)`, terminá el turno y esperá la respuesta. Mostrar la preview no equivale a confirmar.
 
@@ -218,10 +218,14 @@ type WorkflowResolutionV1 = {
   evidence: EvidenceRef[];
   risks: string[];
   artifacts: ArtifactRef[];
+  verdict: WorkflowVerdict | null;
 };
+
+type VerdictItem = { text: string; confidence: number };
+type WorkflowVerdict = { until: "pr" | "spec"; accepted: boolean; thresholds: { grill: number; spec: number }; questions: VerdictItem[]; assumed: VerdictItem[]; forSpec: VerdictItem[]; warnings: string[] };
 ```
 
-`NewWorkRoute` conserva rutas single/join y rechazos; `WorkflowRoute` agrega las ocho rutas artifact-aware de la matriz. Cada `ArtifactRef` expone ubicación, identidad, tipo, estado, format/provenance, vigencia y diagnósticos. Los campos de dispatch son enums/códigos; prose y evidencia son payload. `JSON.parse(JSON.stringify(result))` preserva el valor completo.
+`NewWorkRoute` conserva rutas single/join y rechazos; `WorkflowRoute` agrega las ocho rutas artifact-aware de la matriz. Cada `ArtifactRef` expone ubicación, identidad, tipo, estado, format/provenance, vigencia y diagnósticos. Los campos de dispatch son enums/códigos; prose y evidencia son payload. `JSON.parse(JSON.stringify(result))` preserva el valor completo. `verdict` es el veredicto de «Veredicto» para `grill`, `spec`, `join-grill` y `join-spec` (`confidence` y umbrales enteros de 0 a 100; `until` según `k`; `accepted` solo con `Confirmar <ruta> → hasta`) y `null` en `stop`, `error` y toda ruta artifact-aware; un `confidence` fuera de rango o un `until` desconocido es `invalid-value`, y el campo ausente es `missing-field`, como los demás.
 
 El análisis termina después de confirmar, serializar y emitir el resultado. Esta unidad no ejecuta pasos de ningún stage (grill, spec ni run), no cambia sesiones y no crea branches/worktrees de implementación. Tras una confirmación, el resultado se entrega al skill dueño del stage: en Claude, Codex y OpenCode lo encadena la Fase 7 de este skill; en Pi lo abre el orquestador de `/issues`, y una invocación manual termina con el resultado emitido.
 <!-- artifact-aware:end -->
@@ -317,6 +321,22 @@ Mostrá exactamente esta estructura antes de cualquier mutación:
 
 La ruta primaria debe ser única. El fallback no es otra recomendación equivalente: es la degradación segura si el usuario no acepta la primaria o si aparece una precondición faltante.
 
+### Veredicto
+
+<!-- triage-verdict:start -->
+Para toda ruta nueva —`grill`, `spec`, `join-grill` o `join-spec`— el triage hace un reconocimiento liviano con el mismo relevamiento de código de la Fase 2: lista cada decisión candidata con su tipo (`producto` define el qué, `técnica` define el cómo) y una confianza entera `NN %` (la probabilidad de que la opción recomendada sea la correcta, calibrada con las anclas de «Tipo y confianza» de `grill` y `chiche-spec`), lee los umbrales de las líneas `umbral grill:` y `umbral spec:` que imprime el resolver de «Nivel efectivo» y cuenta `n` (decisiones de producto con confianza `≤ umbral grill`) y `k` (decisiones técnicas con confianza `≤ umbral spec`). Imprime, como texto visible antes del gate, este bloque literal:
+
+```text
+Veredicto: <n> pregunta(s) de producto y después sigo solo hasta <el PR | la spec>.
+- Te pregunto: <decisión> (<NN> %)        ← una línea por decisión de producto ≤ umbral grill
+- Asumo: <decisión> (<NN> %)              ← una línea por decisión de producto > umbral grill
+- Para la spec: <decisión> (<NN> %)       ← una línea por decisión técnica
+- Aviso: <riesgo de ejecución>            ← archivos tocados, tests del área; no suma preguntas
+```
+
+`hasta el PR` cuando `k = 0`; `hasta la spec` cuando `k > 0`. La ruta recomendada sigue la regla de hoy: `grill` cuando `n > 0`, `spec` cuando `n = 0`. Las rutas de rechazo y las artifact-aware no llevan veredicto. El veredicto es una promesa de esfuerzo, no un contrato: mandan el grill y la spec reales. En el resultado viaja como `verdict` (`until` según `k`, `thresholds` leídos del resolver, `questions`, `assumed` y `forSpec` con su `confidence`, y `warnings` con los avisos), con `accepted` en `true` solo si el humano eligió `Confirmar <ruta> → hasta <el PR | la spec>`; en toda otra ruta, `verdict` es `null`.
+<!-- triage-verdict:end -->
+
 ### Rechazos
 
 Para `blocked-dependency`, `split-too-large`, `combined-too-large`, `incoherent-selection`, `already-implemented`, `superseded-artifact` o `artifact-conflict`, no abras gate de ejecución: construí el resultado `stop`, pasá a la Fase 6 para emitirlo y agregá una instrucción concreta sólo cuando haya un bloqueo reparable.
@@ -325,9 +345,16 @@ Para `blocked-dependency`, `split-too-large`, `combined-too-large`, `incoherent-
 
 Para todo resultado `outcome=start` —ruta nueva o artifact-aware— usá `question` (o el fallback de «Interacción en OpenCode»). La pregunta debe repetir en una oración el outcome de `En pocas palabras`, para que la decisión sea autocontenida. Con `question`, usá las labels cortas de «Interacción en OpenCode» y la ruta completa en `description`. En el fallback en texto plano, ofrecé estas opciones numeradas:
 
-- `Confirmar <ruta recomendada> (Recomendado)`
+Con veredicto (rutas nuevas), en este orden:
+
+- `Confirmar <ruta> → hasta <el PR | la spec> (Recomendado)`
+- `Confirmar <ruta> supervisado`
 - `Usar fallback: <ruta>`
 - `Cancelar`
+
+Las rutas artifact-aware, sin veredicto, conservan las opciones de hoy: `Confirmar <ruta recomendada> (Recomendado)` / `Usar fallback: <ruta>` / `Cancelar`.
+
+`→ hasta <el PR | la spec>` repite el destino del veredicto y encadena con los argumentos de la tabla `stage-chain` (`--autonomy A2 --until pr` o `--autonomy A2` para `grill`, `--autonomy A3 --until pr` o `--autonomy A2` para `spec`, según el destino); `supervisado` encadena con los argumentos de hoy. Un `--autonomy` recibido por este skill gana sobre el nivel del veredicto, y el veredicto se muestra igual. En el resultado, `accepted` es `true` solo con `Confirmar <ruta> → hasta <el PR | la spec>`; `supervisado`, fallback y cancelar lo dejan en `false`.
 
 Antes de elegir, declará qué abre confirmar: el skill del stage según la tabla de la Fase 7. Si la ruta confirmable es `run-existing-spec`, aclará que abre un run aislado capaz de crear branch, commits y PR (nunca merge), sujeto a su preflight y verificaciones. Si es `spec|join-spec`, o `update-existing-spec|audit-existing-spec` sobre una spec que vive en el issue, aclará que `chiche-spec` reescribe el body del issue `#<N>` con la spec en `draft` (archivando el body original). Una confirmación registra `selectedRoute` y autoriza a encadenar ese skill en la Fase 7; no autoriza ampliar alcance ni saltear los gates del skill encadenado. Antes del gate vale `selectedRoute=null`; primaria y fallback preservan la recomendación, y cancelar emite `code=cancelled` sin crear issues, archivos, branches ni comentarios.
 
@@ -393,7 +420,7 @@ Desde este punto, la única fuente downstream es `#NEW`.
 
 ## Fase 6 — Emitir el resultado
 
-1. Construí el `WorkflowResolutionV1` completo con la recomendación original, fallback, ruta artifact-aware, elección efectiva y toda la evidencia normalizada.
+1. Construí el `WorkflowResolutionV1` completo con la recomendación original, fallback, ruta artifact-aware, elección efectiva y toda la evidencia normalizada. Para una ruta nueva incluí `verdict` con el veredicto impreso y `accepted` según la opción elegida; en las demás, `verdict: null`.
 2. Conservá `En pocas palabras` y `Ejemplo de impacto` en `summary`/`impactExample`; la fuente sigue siendo autoritativa.
 3. Mostrá el resultado serializado y una síntesis humana breve. Verificá el round-trip `JSON.parse(JSON.stringify(result))`.
 4. Cerrá el análisis. Este skill no ejecuta pasos de grill/chiche-spec/chiche-run ni crea branch/worktree/PR por su cuenta; si hubo un inicio confirmado, seguí a la Fase 7; si no, el workflow termina acá.
@@ -409,9 +436,9 @@ Si el skill no está instalado o su carga queda denegada por `permission.skill`,
 <!-- stage-chain:start -->
 | `selectedRoute` | Skill | Argumentos |
 |---|---|---|
-| `grill`, `join-grill` | `/grill` | `#<N>` del issue efectivo, más `--autonomy <level>` si vino |
+| `grill`, `join-grill` | `/grill` | `#<N>` del issue efectivo; con `Confirmar → hasta el PR`, `--autonomy A2 --until pr`; con `Confirmar → hasta la spec`, `--autonomy A2`; con `supervisado` o fallback, más `--autonomy <level>` si vino; un `--autonomy <level>` recibido gana sobre el nivel del veredicto |
 | `resume-grill` | `/grill` | ruta del handoff del grill primario para retomar, más `--autonomy <level>` si vino |
-| `spec`, `join-spec` | `/chiche-spec` | `#<N>` del issue efectivo, más `--autonomy <level>` si vino |
+| `spec`, `join-spec` | `/chiche-spec` | `#<N>` del issue efectivo; con `Confirmar → hasta el PR`, `--autonomy A3 --until pr`; con `Confirmar → hasta la spec`, `--autonomy A2`; con `supervisado` o fallback, más `--autonomy <level>` si vino; un `--autonomy <level>` recibido gana sobre el nivel del veredicto |
 | `spec-from-grill` | `/chiche-spec` | `--from-grill <ruta del handoff finalized primario>`, más `--autonomy <level>` si vino |
 | `update-existing-spec`, `audit-existing-spec` | `/chiche-spec` | ruta de la spec primaria local, o `#<N>` si vive en el issue, más `--triage-route <ruta>`, y `--autonomy <level>` si vino |
 | `run-existing-spec` | `/chiche-run` | ruta de la spec primaria local, o `#<N>` si vive en el issue, más `--autonomy <level>` si vino |
