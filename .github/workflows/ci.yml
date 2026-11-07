@@ -83,6 +83,9 @@ jobs:
         run: command -v zsh >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq zsh; }
       - name: node --test
         run: node --test pi-extensions/*/*.test.ts
+        env:
+          # Con la variable, autonomy-gate falla si zsh falta en vez de saltear la iteración.
+          AUTONOMY_GATE_REQUIRE_ZSH: "1"
 
   harness-gate:
     name: Gate anti-drift de productores SDD
