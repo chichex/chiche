@@ -686,11 +686,12 @@ test("CA-17: el contrato fecha los conteos nuevos y cita la corrida con Pi 0.85.
 	const contract = await readRepoFile(".chiche/project.md");
 	const commands = section(contract, /^## Comandos$/);
 	// Pi Package se re-verificó el 2026-11-02 con la capa 3 del renombre a chiche
-	// (migración a .chiche/); la suite, el lint de frontmatter y el drift, el
-	// 2026-11-05 con el dial de autonomía (issue #102).
+	// (migración a .chiche/); el lint de frontmatter y el drift, el 2026-11-05
+	// con el dial de autonomía (issue #102); la suite, el 2026-11-07 con el fix
+	// zsh del resolver (issue #120).
 	const verifiedOn: Record<string, string> = {
 		"gate focalizado de Pi Package": "2026-11-02",
-		"tests de extensiones": "2026-11-05",
+		"tests de extensiones": "2026-11-07",
 		"lint de frontmatter": "2026-11-05",
 		"reporte de drift": "2026-11-05",
 	};
