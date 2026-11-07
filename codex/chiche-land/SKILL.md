@@ -77,7 +77,7 @@ Los gates usan la tool de preguntas del harness (`request_user_input`). Donde la
     if [ -z "$stop" ]; then legible=0; aviso="$aviso aviso: ## Autonomy sin stop list legible (sin el header | Action | Pattern | Reason | o sin filas);"; fi
     if [ -z "$pick" ] && [ "$stage" = none ]; then pick=a1
     elif [ -z "$pick" ]; then
-      row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*$stage[[:space:]]*\|" | head -n 1)
+      row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${stage}[[:space:]]*\|" | head -n 1)
       if [ -z "$row" ]; then pick=a1; aviso="$aviso aviso: ## Autonomy sin fila $stage: rige supervised (A1);"
       else
         pick=$(printf '%s\n' "$row" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]].*$//' | tr A-Z a-z)
