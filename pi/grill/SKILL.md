@@ -15,13 +15,14 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 ## Argumentos Pi
 
 ```text
-/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--autonomy <level>]
+/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--autonomy <level>] [--until pr]
 ```
 
 - `#NN` inicia el reconocimiento desde ese issue del repositorio actual.
 - `owner/repo#NN` o una URL canónica `https://github.com/owner/repo/issues/NN` pueden apuntar a otro proyecto. Si NO recibiste un envelope `workflow-launch`, invocá inmediatamente `launch_grill` usando sólo esa referencia calificada como target exacto y terminá el turno: la tool localiza un único checkout entre los proyectos conocidos por Pi, pide autorización y abre allí una sesión hija. No explores, no crees una sesión de grill y no interpretes la URL como path. Si la tool no está disponible, frená con el comando manual `/grill <target>`; no continúes en el cwd equivocado.
 - `--resume <sessionId>` viene de un selector o del orquestador: cargá directamente el snapshot autoritativo con `grill_session` (`action: "get"`), sin volver a abrir `select_grill_session`, y continuá en esta misma conversación.
 - `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta las decisiones de producto que quedan debajo del umbral y además la configuración, la frontera de bloque y el cierre; `plan-approved` (A2) pregunta solo lo que queda debajo del umbral; `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Tipo y confianza».
+- `--until pr` — hasta dónde llega la cadena: al cerrar con `Confirmar y crear spec SDD`, `/skill:chiche-spec --from-grill <ruta>` recibe `--autonomy A3 --until pr`, sea cual sea el nivel con que corrió el grill, y la spec aprueba y lanza el run sin menú. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag existe solo en `grill` y `chiche-spec`: nunca llega a `chiche-run`.
 
 <!-- autonomy-levels:start -->
 **Niveles de autonomía.** La escala es `manual (A0)`, `supervised (A1)`, `plan-approved (A2)`, `unattended (A3)`, `auto-land (A4)` y `auto-deploy (A5)`. `--autonomy <level>` acepta el código o la palabra, sin distinguir mayúsculas (`A2`, `a2` y `plan-approved` son el mismo nivel). Esta versión honra A1 a A3: con A0, A4 o A5 el skill aborta antes de cualquier mutación con el diagnóstico literal `--autonomy <nivel>: no soportado todavía (v1 honra A1–A3)`, y cualquier otro token aborta listando los valores válidos. `--autonomy` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. Sin flag rige lo que resuelve «Nivel efectivo»; el default es `supervised (A1)`.
@@ -467,7 +468,7 @@ Si pide ajustar, retomá una sola rama. Una corrección inequívoca de un supues
 Después de finalizar:
 
 - si eligió **Confirmar entendimiento**, terminá e informá el handoff;
-- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>` (más `--autonomy <código>` si esta corrida recibió `--autonomy`: pasalo en el parámetro `autonomy` del finalize);
+- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>` (más `--autonomy <código>` si esta corrida recibió `--autonomy`: pasalo en el parámetro `autonomy` del finalize; con `--until pr`, pasá `until: "pr"` en el finalize y la tool le agrega `--autonomy A3 --until pr` a `--from-grill <sessionId>`, sea cual sea el nivel con que corrió el grill);
 - no leas un `SKILL.md` por un path inferido ni envíes slash commands;
 - el handoff confirmado es fuente autoritativa: no vuelvas a preguntar decisiones ya resueltas;
 - la spec sigue exigiendo `.chiche/project.md`.

@@ -1192,6 +1192,47 @@ test("issue #102 CA-9: grill_session finalize con continueWithSpec y autonomy pr
 	assertQueuedChicheSpec(sentMessages[0]!.content);
 });
 
+test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"pr\" propaga --autonomy A3 --until pr a chiche-spec sea cual sea el nivel del grill, y rechaza otro valor o un finalize sin continueWithSpec", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const tool = tools.get("grill_session");
+	assert.ok(tool);
+	const { base, main } = repoWithLinkedWorktree("continue-spec-until");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	const created = await tool.execute(
+		"create-continue-until",
+		{ action: "create", topic: "Continuar hasta el PR", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const id = created.details.snapshot.id;
+	t.after(() => removeStoredSnapshot(id));
+	await tool.execute("configure-continue-until", { action: "configure", sessionId: id, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
+	await assert.rejects(
+		tool.execute("configure-until-invalid", { action: "configure", sessionId: id, until: "pr" }, undefined, undefined, { cwd: main }),
+		/until is valid only for finalize/,
+	);
+	await assert.rejects(
+		tool.execute("finalize-until-sin-continue", { action: "finalize", sessionId: id, until: "pr", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
+		/until requires continueWithSpec/,
+	);
+	await assert.rejects(
+		tool.execute("finalize-until-spec", { action: "finalize", sessionId: id, continueWithSpec: true, until: "spec", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
+		/--until spec: valor inválido; válido: pr/,
+	);
+	sentMessages = [];
+	await tool.execute(
+		"finalize-continue-until",
+		{ action: "finalize", sessionId: id, continueWithSpec: true, until: "pr", autonomy: "plan-approved", handoffMarkdown: "# Grill — Continuar hasta el PR\n\n## Handoff\nListo.\n" },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	assert.equal(sentMessages.length, 1);
+	// El grill corrió en A2 y aun así la spec recibe A3: --until pr manda sobre el nivel del grill (#119 CA-12).
+	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(id)} --autonomy A3 --until pr`), sentMessages[0]!.content.slice(-120));
+	assertQueuedChicheSpec(sentMessages[0]!.content);
+});
+
 test("issue #103 S11: grill_session finalize con continueWithSpec encola chiche-spec --from-grill en la misma sesión", { skip: !PI_PACKAGE_ROOT }, async (t) => {
 	const tool = tools.get("grill_session");
 	assert.ok(tool);

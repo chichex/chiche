@@ -170,6 +170,7 @@ const GrillSessionParams = Type.Object({
 	handoffMarkdown: Type.Optional(Type.String({ description: "Required for finalize" })),
 	continueWithSpec: Type.Optional(Type.Boolean({ description: "After finalize, materialize chiche-spec --from-grill in this session" })),
 	autonomy: Type.Optional(Type.String({ description: "Autonomy level received by this grill (A1-A3 or its name); with continueWithSpec it is propagated as --autonomy <code>" })),
+	until: Type.Optional(Type.String({ description: "With continueWithSpec, \"pr\" chains chiche-spec with --autonomy A3 --until pr whatever the grill level was (issue #119, CA-12)" })),
 });
 
 const SpecPublicationDestinationParams = Type.Object({
@@ -1487,6 +1488,15 @@ export default function grillTools(pi: ExtensionAPI) {
 				if (!parsedAutonomy.ok) throw new Error(parsedAutonomy.message);
 				continuationAutonomy = parsedAutonomy.code;
 			}
+			// Issue #119, CA-12: `--until pr` encadena la spec en A3 sea cual sea el nivel del grill; la spec aprueba y lanza el run.
+			let continuationUntil: "pr" | undefined;
+			if (params.until !== undefined) {
+				if (params.action !== "finalize") throw new Error("until is valid only for finalize");
+				if (!params.continueWithSpec) throw new Error("until requires continueWithSpec");
+				if (params.until !== "pr") throw new Error(`--until ${params.until}: valor inválido; válido: pr`);
+				continuationUntil = "pr";
+				continuationAutonomy = "A3";
+			}
 			if (params.action === "create") {
 				if (!params.topic?.trim()) throw new Error("topic is required for create");
 				if (!params.estimate) throw new Error("estimate is required for create");
@@ -1619,7 +1629,7 @@ export default function grillTools(pi: ExtensionAPI) {
 					? await continueWithMaterializedSkill(
 						pi,
 						"chiche-spec",
-						withAutonomy(`--from-grill ${JSON.stringify(snapshot.id)}`, continuationAutonomy),
+						`${withAutonomy(`--from-grill ${JSON.stringify(snapshot.id)}`, continuationAutonomy)}${continuationUntil ? ` --until ${continuationUntil}` : ""}`,
 						{ deliverAs: "followUp" },
 					)
 					: undefined;
