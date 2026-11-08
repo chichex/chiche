@@ -15,26 +15,27 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 ## Argumentos Pi
 
 ```text
-/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--autonomy <level>]
+/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--autonomy <level>] [--until pr]
 ```
 
 - `#NN` inicia el reconocimiento desde ese issue del repositorio actual.
 - `owner/repo#NN` o una URL canónica `https://github.com/owner/repo/issues/NN` pueden apuntar a otro proyecto. Si NO recibiste un envelope `workflow-launch`, invocá inmediatamente `launch_grill` usando sólo esa referencia calificada como target exacto y terminá el turno: la tool localiza un único checkout entre los proyectos conocidos por Pi, pide autorización y abre allí una sesión hija. No explores, no crees una sesión de grill y no interpretes la URL como path. Si la tool no está disponible, frená con el comando manual `/grill <target>`; no continúes en el cwd equivocado.
 - `--resume <sessionId>` viene de un selector o del orquestador: cargá directamente el snapshot autoritativo con `grill_session` (`action: "get"`), sin volver a abrir `select_grill_session`, y continuá en esta misma conversación.
-- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta todo, `plan-approved` (A2) solo lo de impacto alto y `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Autonomía por nivel».
+- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta las decisiones de producto que quedan debajo del umbral y además la configuración, la frontera de bloque y el cierre; `plan-approved` (A2) pregunta solo lo que queda debajo del umbral; `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Tipo y confianza».
+- `--until pr` — hasta dónde llega la cadena: el cierre encadena la spec sin esperar la elección `Confirmar y crear spec SDD`: con A2 o A3 congela el handoff y encadena sin preguntar; con A1 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar (más ajustar y pausar), sin `Confirmar` a secas, para que el flag no se pierda en silencio. `/skill:chiche-spec --from-grill <sessionId>` recibe `--autonomy A3 --until pr`, sea cual sea el nivel con que corrió el grill, y la spec aprueba y lanza el run sin menú. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag existe solo en `grill` y `chiche-spec`: nunca llega a `chiche-run`.
 
 <!-- autonomy-levels:start -->
 **Niveles de autonomía.** La escala es `manual (A0)`, `supervised (A1)`, `plan-approved (A2)`, `unattended (A3)`, `auto-land (A4)` y `auto-deploy (A5)`. `--autonomy <level>` acepta el código o la palabra, sin distinguir mayúsculas (`A2`, `a2` y `plan-approved` son el mismo nivel). Esta versión honra A1 a A3: con A0, A4 o A5 el skill aborta antes de cualquier mutación con el diagnóstico literal `--autonomy <nivel>: no soportado todavía (v1 honra A1–A3)`, y cualquier otro token aborta listando los valores válidos. `--autonomy` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. Sin flag rige lo que resuelve «Nivel efectivo»; el default es `supervised (A1)`.
 <!-- autonomy-levels:end -->
 
 <!-- autonomy-resolve:start -->
-**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, o la fila está `unrehearsed` o `FAILED`, rige `supervised (A1)` con aviso. Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>`. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
+**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, o la fila está `unrehearsed` o `FAILED`, rige `supervised (A1)` con aviso. Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>` y, después de `nivel efectivo:`, dos líneas con los umbrales de confianza: `umbral grill: <n>` y `umbral spec: <n>`, la columna `Umbral` de las filas `grill` y `spec` de la tabla de niveles, leída de la misma fuente que el nivel (también con `--autonomy`), un entero de 0 a 100; sin la columna, con `—`, sin la fila, sin `## Autonomy` o sin contrato imprime `80 (default)`; un valor que no es un entero de 0 a 100 imprime `80 (default)` y avisa por stderr `umbral <stage> inválido (<valor>): rige 80`, con `<stage>` la fila (`grill` o `spec`). `grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos; los demás skills las imprimen y no las usan. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
 
 ```bash
 (
   stage='<stage>' flag='<flag>'
   export LC_ALL=C
-  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1
+  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1; ug='80 (default)'; us='80 (default)'
   case $pick in
     ''|a1|supervised|a2|plan-approved|a3|unattended) ;;
     a0|manual|a4|auto-land|a5|auto-deploy) echo "--autonomy $flag: no soportado todavía (v1 honra A1–A3)" >&2; exit 2 ;;
@@ -70,6 +71,14 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
   else
     stop=$(printf '%s\n' "$section" | sed -n '/^| *Action *| *Pattern *| *Reason *|/,$p' | sed -n '3,$p' | sed -n '/^|/!q;p')
     if [ -z "$stop" ]; then legible=0; aviso="$aviso aviso: ## Autonomy sin stop list legible (sin el header | Action | Pattern | Reason | o sin filas);"; fi
+    for th in grill spec; do
+      tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f6 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      case $tval in
+        ''|—) tval='80 (default)' ;;
+        *) if ! printf '%s\n' "$tval" | grep -Eq '^(0|[1-9][0-9]?|100)$'; then aviso="$aviso aviso: umbral ${th} inválido (${tval}): rige 80;"; tval='80 (default)'; fi ;;
+      esac
+      if [ "$th" = grill ]; then ug=$tval; else us=$tval; fi
+    done
     if [ -z "$pick" ] && [ "$stage" = none ]; then pick=a1
     elif [ -z "$pick" ]; then
       row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${stage}[[:space:]]*\|" | head -n 1)
@@ -91,6 +100,8 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
   esac
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
   echo "nivel efectivo: $nivel, leído de $src"
+  printf 'umbral grill: %s\n' "$ug"
+  printf 'umbral spec: %s\n' "$us"
   [ -z "$stop" ] || printf '%s\n' "$stop" | while IFS= read -r fila; do
     pat=$(printf '%s\n' "$fila" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     if [ -z "$pat" ]; then printf 'aviso: fila de la stop list sin Pattern, ignorada: %s\n' "$fila" >&2; else printf 'parada: %s\n' "$fila"; fi
@@ -98,12 +109,12 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 )
 ```
 
-El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
+El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza, las dos líneas de umbral y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
 <!-- autonomy-resolve:end -->
 
-<!-- autonomy-a2:start -->
-**Autonomía por nivel.** Con `plan-approved` (A2) se preguntan solo las decisiones de impacto alto: una decisión es de impacto alto si define el alcance entero, o roza la stop list, datos o migraciones, o un contrato externo (API, formato, evento); el resto queda `[ASSUMED]` en el handoff o en la tabla de inferencias. Con `unattended` (A3), `grill` corre el reconocimiento siempre y cuenta las decisiones de alcance abiertas: con 0 sigue sin preguntar; con 1 a 3 las deja `[ASSUMED]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`. En A2 y A3 no hay preguntas de configuración, de frontera de bloque ni de confirmación de cierre: el handoff se congela con lo decidido y lo asumido. En `chiche-spec`, con `supervised` (A1) no se pregunta antes de publicar y la corrida termina en el menú final, donde se revisa la spec entera; con A2 se preguntan las de impacto alto y no hay menú: responderlas es la aprobación; con A3 no se pregunta nada ni hay menú.
-<!-- autonomy-a2:end -->
+<!-- autonomy-confidence:start -->
+**Tipo y confianza.** (1) Toda decisión lleva un tipo: `producto` (define el qué: alcance, comportamiento visible, prioridades) o `técnica` (define el cómo: implementación, estructura, herramientas). `grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata solo las técnicas. (2) Toda decisión tratada lleva una opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta. (3) El umbral es el que imprime el resolver de «Nivel efectivo»: `umbral grill` en `grill` y `umbral spec` en `chiche-spec`. Con confianza `> umbral` la decisión se asume y se muestra como `[ASSUMED NN %]` con su recomendada; con confianza `≤ umbral` se pregunta. (4) En `grill`, `supervised` (A1) y `plan-approved` (A2) preguntan las mismas decisiones, las de producto con confianza `≤ umbral`; A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite: el handoff se congela con lo decidido y lo asumido. Con `unattended` (A3), `grill` corre el reconocimiento siempre y cuenta las decisiones de producto con confianza `≤ umbral`: con 0 sigue sin preguntar; con 1 a 3 las deja `[ASSUMED NN %]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`. (5) En `chiche-spec`, con A1 no se pregunta antes de publicar y la corrida termina en el menú final, donde se revisa la spec entera; con A2 se preguntan las técnicas con confianza `≤ umbral` y no hay menú: responderlas es la aprobación; con A3 no se pregunta nada ni hay menú: las técnicas con confianza `≤ umbral` quedan `[ASSUMED NN %]` y se listan en `## Riesgos y gaps`. (6) Una decisión de producto que aparece en la spec es una fuga: A1 la marca `[NEEDS-INPUT]` en la tabla de inferencias y en `## Riesgos y gaps` y publica igual, para revisarla desde el menú; A2 la pregunta; A3 aborta antes de publicar con el diagnóstico `decisión de producto sin cerrar en la spec: <decisión>; volvé al grill`. (7) La stop list frena en todo nivel, sin excepción nueva. (8) Anclas de calibración, para no inflar la confianza: `¿aplica a juegos 2D, 3D o todos?` es de producto y central, se pregunta (≈35 %); `¿se puede ordenar?` es un nice-to-have de producto (≈60 %); `¿parametrizable: tecla con que se abre, tamaño?` es obvio, se asume (≈95 %); `¿usa el store existente o uno propio?` es técnica, va a la spec (≈90 %).
+<!-- autonomy-confidence:end -->
 
 
 ### Lanzamiento orquestado de Pi
@@ -122,8 +133,8 @@ Validá que sea versión 1, exacto y serializable; que `kind=grill`; que `repo`,
 
 - Optimizá por **mínima interrupción**, no por máxima cantidad de preguntas. Un hueco en el pedido no es automáticamente una decisión para el usuario.
 - Clasificá cada punto abierto como hecho comprobable, supuesto de bajo riesgo o decisión material.
-- Marcá como `[ASSUMED]` una opción respaldada por el pedido, el código, convenciones del repo o un default seguro cuando sea de bajo riesgo, barata y reversible. No la preguntes.
-- Preguntá solo decisiones que cambien materialmente alcance o comportamiento observable, UX/API pública, datos/seguridad/privacidad, costo o efectos externos, compatibilidad o una migración irreversible; también cuando haya una contradicción real o alternativas igual de plausibles con consecuencias relevantes.
+- Marcá como `[ASSUMED NN %]` una decisión de producto cuya opción recomendada supere el umbral (confianza `> umbral grill`, ver «Tipo y confianza»): respaldada por el pedido, el código, convenciones del repo o un default seguro, barata y reversible. No la preguntes. Una decisión técnica no se asume ni se pregunta: va a `**Para la spec.**`.
+- Preguntá las decisiones de producto con confianza `≤ umbral grill`: típicamente las que cambian materialmente alcance o comportamiento observable, UX/API pública, datos/seguridad/privacidad, costo o efectos externos, compatibilidad o una migración irreversible, y las contradicciones reales o alternativas igual de plausibles con consecuencias relevantes; el umbral manda, no la lista.
 - No preguntes por detalles de implementación que el agente puede resolver responsablemente — nombres internos, ubicación de archivos, estructura menor de tests, copy no contractual o defaults convencionales — salvo que el usuario haya expresado una preferencia o tengan consecuencias materiales.
 - Nunca asumas en silencio: cada `[ASSUMED]` debe quedar visible con su evidencia en el mapa, persistido en el resumen y enumerado en el contrato final. El usuario puede corregirlo en cualquier momento.
 - Elegí el `interviewMode` a partir del diagnóstico y configuralo sin abrir una pregunta de preferencias. Respetá un modo pedido explícitamente; preguntá por el modo solo ante instrucciones contradictorias o si el usuario pidió elegirlo.
@@ -137,7 +148,7 @@ Validá que sea versión 1, exacto y serializable; que `kind=grill`; que `repo`,
 - Para cada pregunta ofrecé una respuesta recomendada y una justificación breve.
 - Habilitá siempre respuesta libre con `allowOther: true`.
 - Si un hecho se puede averiguar explorando el codebase, buscándolo en documentación local o ejecutando una comprobación segura, hacelo en vez de preguntarlo.
-- Las decisiones materiales pertenecen al usuario; las elecciones operativas de bajo impacto son responsabilidad del agente. Si el usuario pide un grill exhaustivo o sin supuestos, activá la política `explicit-only`, registrala en el `summary` y no apliques ninguna poda `[ASSUMED]`: todo punto abierto sigue como decisión explícita. Esta regla prevalece sobre cualquier instrucción posterior de asumir o podar.
+- Las decisiones materiales pertenecen al usuario; las elecciones operativas de bajo impacto son responsabilidad del agente. Si el usuario pide un grill exhaustivo o sin supuestos, activá la política `explicit-only` (equivale a umbral 100: se pregunta toda decisión de producto), registrala en el `summary` y no apliques ninguna poda `[ASSUMED NN %]`: todo punto abierto sigue como decisión explícita. Esta regla prevalece sobre cualquier instrucción posterior de asumir o podar.
 
 ## Retomar una entrevista
 
@@ -164,7 +175,7 @@ Antes de entrevistar:
 1. Explorá el codebase y resolvé todos los hechos comprobables relevantes. Los hechos los averigua el agente, nunca el usuario: si más adelante una pregunta de la frontera necesita un hecho del entorno todavía sin comprobar, se averigua sin frenar la ronda (ver **Modalidad B: Por rondas**).
 2. Buscá `CONTEXT-MAP.md`, los `CONTEXT.md` y `docs/adr/`; informá su existencia en el mapa. Leé los que sean relevantes para entender el vocabulario; nunca los modifiques.
 3. Separá explícitamente: hechos comprobados, instrucciones ya dadas por el usuario y elecciones todavía abiertas.
-4. Resolvé la política de supuestos antes de podar. Si el usuario pidió un grill exhaustivo o sin supuestos, usá `explicit-only`: no conviertas ningún punto en `[ASSUMED]` y tratá todas las elecciones abiertas como decisiones explícitas, también para la estimación. En otro caso usá `risk-pruned`: convertí cada elección respaldada, de bajo riesgo y reversible en `[ASSUMED]`; si corregirla durante la spec o implementación sería local y barato, no merece un gate.
+4. Resolvé la política de supuestos antes de podar. Si el usuario pidió un grill exhaustivo o sin supuestos, usá `explicit-only`: no conviertas ningún punto en `[ASSUMED]` y tratá todas las elecciones abiertas como decisiones explícitas, también para la estimación. En otro caso usá `risk-pruned`, atada al umbral: convertí en `[ASSUMED NN %]` cada decisión de producto cuya recomendada supere `umbral grill` (respaldada, de bajo riesgo y reversible); una con confianza `≤ umbral grill` sigue explícita aunque sea barata de corregir.
 5. Construí el árbol con las decisiones que sigan explícitas después de aplicar la política y sus dependencias. En `risk-pruned`, no lo infles con detalles de implementación ni preferencias hipotéticas.
 6. Estimá preguntas mínimas, probables y máximas después de aplicar la política. La cifra operativa es la estimación probable y puede ser cero.
 7. Agrupá las preguntas explícitas por secciones coherentes —los bloques— y asigná una estimación a cada una.
@@ -374,7 +385,8 @@ El handoff es el artefacto interoperable del grill: los cuatro harnesses lo escr
 ...
 
 ## Decisiones resueltas
-1. ...
+1. <decisión y lo acordado> — preguntada
+2. <decisión y su recomendada> — asumida NN %
 
 ## Ramas pendientes
 ...
@@ -383,10 +395,12 @@ El handoff es el artefacto interoperable del grill: los cuatro harnesses lo escr
 <solo si la rama de diseño se activó; ausente mientras esté paused, cuando las decisiones de diseño van a Decisiones resueltas con prefijo "Diseño:": superficies y su estado; pantallas, flujos y estados; componentes a reusar o crear por nombre del inventario; dirección visual si la superficie está sin sistema; requisitos de webview, plataforma y accesibilidad; capturas de referencia por ruta relativa>
 
 ## Handoff
-<vacío mientras esté paused; contrato completo cuando esté finalized>
+<vacío mientras esté paused; contrato completo cuando esté finalized, con el párrafo **Para la spec.** y las decisiones técnicas anotadas, o `ninguna`>
 ```
 
 Si tu marker difiere del estado real de la sesión, la tool lo corrige: siempre queda exactamente un marker con la identidad autoritativa.
+
+`— preguntada` o `— asumida NN %` van al final del texto de cada decisión del `handoffMarkdown` y, en una sesión pausada, viajan al final del texto de `agreement` de cada decisión (`grill_session` no cambia de esquema).
 
 `## Diseño` no cambia el esquema de `grill_session`: `pause` arma el Markdown desde el snapshot con sus cuatro secciones fijas, así que en una sesión pausada las decisiones de diseño viajan en `## Decisiones resueltas` con prefijo `Diseño:`; `finalize` escribe el `handoffMarkdown` verbatim, con `## Diseño` cuando la rama se activó. Las capturas se copian a la carpeta derivada de la ruta del handoff que devuelve la tool, nunca del slug calculado. Si hay capturas, hacé `pause` antes de `finalize`: `pause` escribe el handoff y devuelve su ruta real, la misma que después usa `finalize`, y de ahí salen el nombre de la carpeta y las rutas relativas del `handoffMarkdown`. En una sesión importada, la tool no escribe el `handoffMarkdown` verbatim: lo anida bajo `### Handoff de la revisión`, después del handoff fuente, así que el `## Diseño` vigente es el último del archivo.
 
@@ -415,12 +429,13 @@ Primero escribí en el chat el entendimiento compartido completo. Debe incluir:
 
 1. tema y alcance;
 2. hechos comprobados;
-3. decisiones resueltas, agrupadas por bloque y enumeradas una por una;
+3. decisiones resueltas, agrupadas por bloque y enumeradas una por una, cada una cerrada con `— preguntada` o `— asumida NN %`;
 4. restricciones y no-objetivos;
 5. dependencias y consecuencias importantes;
 6. supuestos `[ASSUMED]`, cada uno con su evidencia y el impacto si fuera incorrecto;
 7. riesgos o preguntas deliberadamente diferidas;
-8. contexto recomendado para la sesión que escribirá el spec.
+8. contexto recomendado para la sesión que escribirá el spec;
+9. el párrafo `**Para la spec.**` con las decisiones técnicas anotadas para la spec, o `ninguna`.
 
 Este texto es el contrato de handoff. Tiene que estar renderizado en el chat; no puede vivir solamente en una tool o archivo. La confirmación final aprueba tanto las decisiones como los `[ASSUMED]` enumerados, sin un gate separado por cada supuesto.
 
@@ -434,7 +449,7 @@ Recién después del contrato visible, invocá `ask_user_question` con `grill: {
 - **Pausar**: conserva el progreso sin finalizar.
 - **Exportar cuestionario**: escribe las decisiones pendientes o diferidas como cuestionario para un stakeholder sin agente y pausa la sesión hasta que vuelvan las respuestas (ver **Exportar cuestionario**).
 
-No incluyas acciones para implementar o construir.
+No incluyas acciones para implementar o construir. Con `--until pr`, **Confirmar entendimiento** no se ofrece: la única confirmación es **Confirmar y crear spec SDD**; con A2 o A3 no hay pregunta de cierre y el finalize lleva `continueWithSpec: true` y `until: "pr"` directo.
 
 ### Paso 3: persistencia final
 
@@ -453,7 +468,7 @@ Si pide ajustar, retomá una sola rama. Una corrección inequívoca de un supues
 Después de finalizar:
 
 - si eligió **Confirmar entendimiento**, terminá e informá el handoff;
-- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>` (más `--autonomy <código>` si esta corrida recibió `--autonomy`: pasalo en el parámetro `autonomy` del finalize);
+- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>` (más `--autonomy <código>` si esta corrida recibió `--autonomy`: pasalo en el parámetro `autonomy` del finalize; con `--until pr`, pasá `until: "pr"` en el finalize sin esperar la elección **Confirmar y crear spec SDD** (en A1 es la única confirmación; en A2 y A3 no se pregunta) y la tool le agrega `--autonomy A3 --until pr` a `--from-grill <sessionId>`, sea cual sea el nivel con que corrió el grill);
 - no leas un `SKILL.md` por un path inferido ni envíes slash commands;
 - el handoff confirmado es fuente autoritativa: no vuelvas a preguntar decisiones ya resueltas;
 - la spec sigue exigiendo `.chiche/project.md`.

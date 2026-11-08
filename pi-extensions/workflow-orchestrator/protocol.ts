@@ -1,12 +1,15 @@
-import type {
-	ArtifactRef,
-	EvidenceRef,
-	IssueRef,
-	NewWorkRoute,
-	WorkflowMode,
-	WorkflowResolutionV1,
-	WorkflowRoute,
-	WorkflowStage,
+import {
+	type ArtifactRef,
+	type EvidenceRef,
+	type IssueRef,
+	type NewWorkRoute,
+	type VerdictItem,
+	type WorkflowMode,
+	type WorkflowResolutionV1,
+	type WorkflowRoute,
+	type WorkflowStage,
+	type WorkflowVerdict,
+	routeCarriesVerdict,
 } from "../workflow-resolution/index.ts";
 import { exactObject, type RecordValue } from "./validation.ts";
 
@@ -75,7 +78,14 @@ const RESOLUTION_FIELDS = [
 	"evidence",
 	"risks",
 	"artifacts",
+	"verdict",
 ] as const;
+
+// Issue #119, CA-17.
+const VERDICT_FIELDS = ["until", "accepted", "thresholds", "questions", "assumed", "forSpec", "warnings"] as const;
+const VERDICT_THRESHOLD_FIELDS = ["grill", "spec"] as const;
+const VERDICT_ITEM_FIELDS = ["text", "confidence"] as const;
+const VERDICT_UNTIL = ["pr", "spec"] as const;
 
 const ISSUE_FIELDS = ["repository", "number"] as const;
 const EVIDENCE_FIELDS = ["kind", "reference", "detail"] as const;
@@ -282,6 +292,92 @@ function artifactArray(value: unknown, path: string, diagnostics: WorkflowResolu
 	});
 }
 
+function percentValue(value: unknown, path: string, diagnostics: WorkflowResolutionDiagnostic[]): value is number {
+	if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100) return true;
+	diagnostics.push({ path, code: "invalid-value", message: "Expected an integer from 0 to 100" });
+	return false;
+}
+
+function verdictItems(value: unknown, path: string, diagnostics: WorkflowResolutionDiagnostic[]): VerdictItem[] {
+	if (!Array.isArray(value)) {
+		diagnostics.push({ path, code: "invalid-type", message: "Expected an array" });
+		return [];
+	}
+	return value.flatMap((item, index) => {
+		const itemPath = `${path}[${index}]`;
+		const object = exactWorkflowObject(item, itemPath, VERDICT_ITEM_FIELDS, diagnostics);
+		if (!object) return [];
+		const textOk = stringValue(object.text, `${itemPath}.text`, diagnostics);
+		const confidenceOk = percentValue(object.confidence, `${itemPath}.confidence`, diagnostics);
+		return textOk && confidenceOk ? [{ text: object.text as string, confidence: object.confidence as number }] : [];
+	});
+}
+
+// Issue #119, CA-17: `verdict` es null en stop, error y toda ruta artifact-aware; en una ruta nueva
+// (grill, spec, join-grill, join-spec) con outcome start es el veredicto del triage. Un `confidence`
+// o un umbral fuera de 0–100 y un `until` desconocido son `invalid-value`; el campo ausente es
+// `missing-field` como los demás (lo exige `exactWorkflowObject`).
+function verdictValue(
+	value: unknown,
+	allowed: boolean,
+	path: string,
+	diagnostics: WorkflowResolutionDiagnostic[],
+): WorkflowVerdict | null | undefined {
+	// Review #125-9: el campo ausente ya es `missing-field` en la raíz; no sumar un `invalid-value` engañoso.
+	if (value === undefined) return undefined;
+	if (value === null) return null;
+	if (!allowed) {
+		diagnostics.push({ path, code: "invalid-value", message: "Verdict applies only to start resolutions with a new-work route (grill, spec, join-grill, join-spec)" });
+		return undefined;
+	}
+	const object = exactWorkflowObject(value, path, VERDICT_FIELDS, diagnostics);
+	if (!object) return undefined;
+	const untilOk = typeof object.until === "string" && (VERDICT_UNTIL as readonly string[]).includes(object.until);
+	if (!untilOk) diagnostics.push({ path: `${path}.until`, code: "invalid-value", message: `Expected until to be one of: ${VERDICT_UNTIL.join(", ")}` });
+	const acceptedOk = booleanValue(object.accepted, `${path}.accepted`, diagnostics);
+	const thresholds = exactWorkflowObject(object.thresholds, `${path}.thresholds`, VERDICT_THRESHOLD_FIELDS, diagnostics);
+	const grillOk = thresholds !== null && percentValue(thresholds.grill, `${path}.thresholds.grill`, diagnostics);
+	const specOk = thresholds !== null && percentValue(thresholds.spec, `${path}.thresholds.spec`, diagnostics);
+	const questions = verdictItems(object.questions, `${path}.questions`, diagnostics);
+	const assumed = verdictItems(object.assumed, `${path}.assumed`, diagnostics);
+	const forSpec = verdictItems(object.forSpec, `${path}.forSpec`, diagnostics);
+	const warningsOk = stringArray(object.warnings, `${path}.warnings`, diagnostics);
+	// Review #125-4: `until` sale de `forSpec` contra `thresholds.spec` (k = 0 → pr; k > 0 → spec), `questions` lleva solo
+	// confianzas ≤ thresholds.grill y `assumed` solo > thresholds.grill: un veredicto incoherente no despacha nada.
+	let coherent = true;
+	if (grillOk && specOk) {
+		const grillThreshold = thresholds!.grill as number;
+		const specThreshold = thresholds!.spec as number;
+		const expectedUntil = forSpec.some((item) => item.confidence <= specThreshold) ? "spec" : "pr";
+		if (untilOk && object.until !== expectedUntil) {
+			diagnostics.push({ path: `${path}.until`, code: "invalid-value", message: `Expected until to be ${expectedUntil}: it follows forSpec against thresholds.spec` });
+			coherent = false;
+		}
+		questions.forEach((item, index) => {
+			if (item.confidence > grillThreshold) {
+				diagnostics.push({ path: `${path}.questions[${index}].confidence`, code: "invalid-value", message: "Expected a confidence at or below thresholds.grill" });
+				coherent = false;
+			}
+		});
+		assumed.forEach((item, index) => {
+			if (item.confidence <= grillThreshold) {
+				diagnostics.push({ path: `${path}.assumed[${index}].confidence`, code: "invalid-value", message: "Expected a confidence above thresholds.grill" });
+				coherent = false;
+			}
+		});
+	}
+	if (!untilOk || !acceptedOk || !grillOk || !specOk || !warningsOk || !coherent) return undefined;
+	return {
+		until: object.until as WorkflowVerdict["until"],
+		accepted: object.accepted as boolean,
+		thresholds: { grill: thresholds!.grill as number, spec: thresholds!.spec as number },
+		questions,
+		assumed,
+		forSpec,
+		warnings: [...(object.warnings as string[])],
+	};
+}
+
 function validateDiscriminant(object: RecordValue, diagnostics: WorkflowResolutionDiagnostic[]): void {
 	if (!enumValue(object.outcome, ["start", "stop", "error"] as const, "$.outcome", diagnostics)) return;
 	if (object.outcome === "start") {
@@ -335,8 +431,10 @@ export function validateWorkflowResolution(value: unknown): WorkflowResolutionVa
 	const evidence = evidenceArray(object.evidence, "$.evidence", diagnostics);
 	stringArray(object.risks, "$.risks", diagnostics);
 	const artifacts = artifactArray(object.artifacts, "$.artifacts", diagnostics);
+	const verdictAllowed = object.outcome === "start" && typeof object.code === "string" && routeCarriesVerdict(object.code as WorkflowRoute);
+	const verdict = verdictValue(object.verdict, verdictAllowed, "$.verdict", diagnostics);
 
-	if (diagnostics.length > 0 || canonicalIssue === undefined) return { ok: false, diagnostics };
+	if (diagnostics.length > 0 || canonicalIssue === undefined || verdict === undefined) return { ok: false, diagnostics };
 	const normalized = {
 		version: 1,
 		outcome: object.outcome,
@@ -358,6 +456,7 @@ export function validateWorkflowResolution(value: unknown): WorkflowResolutionVa
 		evidence,
 		risks: [...(object.risks as string[])],
 		artifacts,
+		verdict,
 	} as WorkflowResolutionV1;
 	return { ok: true, value: normalized };
 }
@@ -408,6 +507,17 @@ const evidenceSchema = strictObjectSchema({
 	reference: { type: "string" },
 	detail: { type: "string" },
 });
+const percentSchema = { type: "integer", minimum: 0, maximum: 100 };
+const verdictItemSchema = strictObjectSchema({ text: { type: "string" }, confidence: percentSchema });
+const verdictSchema = strictObjectSchema({
+	until: enumSchema(VERDICT_UNTIL),
+	accepted: { type: "boolean" },
+	thresholds: strictObjectSchema({ grill: percentSchema, spec: percentSchema }),
+	questions: { type: "array", items: verdictItemSchema },
+	assumed: { type: "array", items: verdictItemSchema },
+	forSpec: { type: "array", items: verdictItemSchema },
+	warnings: { type: "array", items: { type: "string" } },
+});
 
 export const WORKFLOW_RESOLUTION_SCHEMA = strictObjectSchema({
 	version: { type: "integer", enum: [1] },
@@ -430,6 +540,7 @@ export const WORKFLOW_RESOLUTION_SCHEMA = strictObjectSchema({
 	evidence: { type: "array", items: evidenceSchema },
 	risks: { type: "array", items: { type: "string" } },
 	artifacts: { type: "array", items: artifactSchema },
+	verdict: nullableSchema(verdictSchema),
 });
 
 export class WorkflowResolutionValidationError extends Error {

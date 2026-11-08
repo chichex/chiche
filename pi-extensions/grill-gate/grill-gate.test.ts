@@ -425,3 +425,45 @@ test("autotest: section() recorta hasta el siguiente encabezado del mismo nivel"
 	assert.equal(section(markdown, /^### A\.1$/), "### A.1\nsub");
 	assert.equal(section(markdown, /^## Z$/), "");
 });
+
+// ---------------------------------------------------------------------------
+// I. Issue #119, CA-7: el handoff muestra cómo se cerró cada decisión y anota las técnicas para la spec
+// ---------------------------------------------------------------------------
+
+test("#119 CA-7: el template del handoff y el contrato visible del cierre terminan cada decisión en «— preguntada» o «— asumida NN %» y el handoff lleva el párrafo **Para la spec.**, en los cinco harnesses; en Pi el % viaja en agreement", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const skill = await grillSkill(harness);
+		const template = fencedBlocks(skill).find((fence) => fence.content.includes("type=grill"))?.content ?? "";
+		for (const problem of missing(template, [
+			/^## Decisiones resueltas\n1\. <decisión y lo acordado> — preguntada\n2\. <decisión y su recomendada> — asumida NN %$/m,
+			/^## Handoff\n<vacío mientras esté paused; contrato completo cuando esté finalized, con el párrafo \*\*Para la spec\.\*\* y las decisiones técnicas anotadas, o `ninguna`>$/m,
+		])) problems.push(`${harness}/grill: template del handoff ${problem}`);
+		// El template no gana secciones nuevas (CA-7): siguen las cinco de siempre.
+		const headings = template.split("\n").filter((line) => line.startsWith("## "));
+		if (headings.join("|") !== "## Hechos comprobados|## Decisiones resueltas|## Ramas pendientes|## Diseño|## Handoff") problems.push(`${harness}/grill: el template cambió de secciones: ${headings.join(", ")}`);
+		const closing = section(skill, /^(## Cierre|## Fase 3: cierre)$/);
+		if (closing === "") problems.push(`${harness}/grill: sin sección de cierre`);
+		for (const problem of missing(closing, [
+			/`— preguntada` o `— asumida NN %`/,
+			/\*\*Para la spec\.\*\*[^\n]*decisiones técnicas[^\n]*`ninguna`/,
+		])) problems.push(`${harness}/grill: cierre ${problem}`);
+	}
+	const pi = await grillSkill("pi");
+	// Review #123-6: en una sesión pausada también viaja `— preguntada`, al final del texto de agreement.
+	for (const problem of missing(pi, [/`— preguntada` o `— asumida NN %` van al final del texto de cada decisión del `handoffMarkdown` y, en una sesión pausada, viajan al final del texto de `agreement`[^\n]*`grill_session` no cambia/])) problems.push(`pi/grill: ${problem}`);
+	assert.deepEqual(problems, []);
+});
+
+// Review #123-4: en Pi la poda `risk-pruned` y la política `explicit-only` quedan atadas al umbral, como en los otros cuatro.
+test("review #123: en pi/grill risk-pruned asume solo decisiones de producto con confianza > umbral grill, explicit-only equivale a umbral 100 y ningún [ASSUMED] queda sin porcentaje en las reglas de poda", async () => {
+	const pi = await grillSkill("pi");
+	assert.deepEqual(missing(pi, [
+		/Marcá como `\[ASSUMED NN %\]` una decisión de producto cuya opción recomendada supere el umbral \(confianza `> umbral grill`, ver «Tipo y confianza»\)/,
+		/Una decisión técnica no se asume ni se pregunta: va a `\*\*Para la spec\.\*\*`/,
+		/Preguntá las decisiones de producto con confianza `≤ umbral grill`[^\n]*el umbral manda, no la lista/,
+		/`explicit-only` \(equivale a umbral 100: se pregunta toda decisión de producto\)/,
+		/usá `risk-pruned`, atada al umbral: convertí en `\[ASSUMED NN %\]` cada decisión de producto cuya recomendada supere `umbral grill`[^\n]*una con confianza `≤ umbral grill` sigue explícita aunque sea barata de corregir/,
+	]).map((problem) => `pi/grill: ${problem}`), []);
+	assert.deepEqual(present(pi, [/Marcá como `\[ASSUMED\]` una opción respaldada/, /Preguntá solo decisiones que cambien materialmente/, /convertí cada elección respaldada, de bajo riesgo y reversible en `\[ASSUMED\]`/]).map((problem) => `pi/grill: ${problem}`), []);
+});

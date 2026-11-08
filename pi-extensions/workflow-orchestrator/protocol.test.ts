@@ -51,6 +51,7 @@ function startResolution() {
 			primary: true,
 			diagnostics: [{ code: "fresh", message: "issue body is current" }],
 		}],
+		verdict: null,
 	};
 }
 
@@ -165,7 +166,7 @@ test("registerable terminal tool exposes a strict complete schema and returns th
 	const expectedFields = [
 		"version", "outcome", "code", "recommendedClassification", "fallbackClassification",
 		"recommendedRoute", "selectedRoute", "stage", "mode", "repo", "cwd", "sources",
-		"canonicalIssue", "summary", "impactExample", "scope", "checklist", "evidence", "risks", "artifacts",
+		"canonicalIssue", "summary", "impactExample", "scope", "checklist", "evidence", "risks", "artifacts", "verdict",
 	];
 
 	assert.equal(tool.name, "submit_workflow_resolution");
@@ -195,4 +196,77 @@ test("terminal tool throws a typed error for invalid input and performs no callb
 			return true;
 		},
 	);
+});
+
+// Issue #119, CA-17: el veredicto del triage viaja en `verdict` (null en stop/error y en toda ruta
+// artifact-aware; objeto en grill/spec/join-*), con `version: 1` intacto y el campo obligatorio.
+function verdict(overrides: Record<string, unknown> = {}) {
+	return {
+		until: "pr",
+		accepted: true,
+		thresholds: { grill: 80, spec: 80 },
+		questions: [{ text: "¿aplica a juegos 2D, 3D o todos?", confidence: 35 }],
+		assumed: [{ text: "parametrizable, con tecla y tamaño", confidence: 95 }],
+		forSpec: [{ text: "usa el store existente", confidence: 90 }],
+		warnings: ["sin tests en el área"],
+		...overrides,
+	};
+}
+
+test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, se clona en el round-trip, y se rechaza fuera de rango, con until desconocido, ausente, con campos extra o fuera de una ruta nueva", () => {
+	const withVerdict = { ...startResolution(), code: "grill", recommendedClassification: "grill", fallbackClassification: "spec", recommendedRoute: "grill", selectedRoute: "grill", stage: "grill", verdict: verdict() };
+	const ok = validateWorkflowResolution(withVerdict);
+	assert.equal(ok.ok, true, JSON.stringify(ok));
+	if (ok.ok) {
+		assert.deepEqual(ok.value, withVerdict);
+		assert.notEqual(ok.value.verdict, withVerdict.verdict, "el veredicto se clona");
+		assert.deepEqual(JSON.parse(JSON.stringify(ok.value)), ok.value);
+	}
+	for (const route of ["spec", "join-grill", "join-spec"]) {
+		const stage = route.endsWith("grill") ? "grill" : "spec";
+		// Review #125-4: `until: "spec"` exige alguna técnica ≤ thresholds.spec.
+		const result = validateWorkflowResolution({ ...withVerdict, code: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict({ until: "spec", accepted: false, forSpec: [{ text: "usa el store existente", confidence: 40 }] }) });
+		assert.equal(result.ok, true, `${route}: ${JSON.stringify(result)}`);
+	}
+	const nullable = validateWorkflowResolution(startResolution());
+	assert.equal(nullable.ok, true);
+	if (nullable.ok) assert.equal(nullable.value.verdict, null);
+	const cases: Array<{ name: string; value: unknown; path: string; code: string }> = [
+		{ name: "confidence 120", value: { ...withVerdict, verdict: verdict({ questions: [{ text: "x", confidence: 120 }] }) }, path: "$.verdict.questions[0].confidence", code: "invalid-value" },
+		{ name: "confidence -1", value: { ...withVerdict, verdict: verdict({ assumed: [{ text: "x", confidence: -1 }] }) }, path: "$.verdict.assumed[0].confidence", code: "invalid-value" },
+		{ name: "confidence 7.5", value: { ...withVerdict, verdict: verdict({ forSpec: [{ text: "x", confidence: 7.5 }] }) }, path: "$.verdict.forSpec[0].confidence", code: "invalid-value" },
+		{ name: "threshold 101", value: { ...withVerdict, verdict: verdict({ thresholds: { grill: 101, spec: 80 } }) }, path: "$.verdict.thresholds.grill", code: "invalid-value" },
+		{ name: "until x", value: { ...withVerdict, verdict: verdict({ until: "x" }) }, path: "$.verdict.until", code: "invalid-value" },
+		// Review #125-4: coherencia entre until, forSpec, questions, assumed y los umbrales.
+		{ name: "until spec sin técnicas debajo", value: { ...withVerdict, verdict: verdict({ until: "spec" }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "until pr con técnica debajo", value: { ...withVerdict, verdict: verdict({ until: "pr", forSpec: [{ text: "store", confidence: 40 }] }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "pregunta por encima del umbral grill", value: { ...withVerdict, verdict: verdict({ questions: [{ text: "x", confidence: 90 }] }) }, path: "$.verdict.questions[0].confidence", code: "invalid-value" },
+		{ name: "asumida debajo del umbral grill", value: { ...withVerdict, verdict: verdict({ assumed: [{ text: "x", confidence: 50 }] }) }, path: "$.verdict.assumed[0].confidence", code: "invalid-value" },
+		{ name: "accepted string", value: { ...withVerdict, verdict: verdict({ accepted: "yes" }) }, path: "$.verdict.accepted", code: "invalid-type" },
+		{ name: "extra field", value: { ...withVerdict, verdict: verdict({ level: "A3" }) }, path: "$.verdict.level", code: "extra-field" },
+		{ name: "missing warnings", value: { ...withVerdict, verdict: (({ warnings: _w, ...rest }) => rest)(verdict()) }, path: "$.verdict.warnings", code: "missing-field" },
+		{ name: "missing verdict", value: (({ verdict: _v, ...rest }) => rest)(startResolution()), path: "$.verdict", code: "missing-field" },
+		{ name: "verdict on stop", value: { ...startResolution(), outcome: "stop", code: "cancelled", selectedRoute: null, stage: null, mode: null, verdict: verdict() }, path: "$.verdict", code: "invalid-value" },
+		{ name: "verdict on artifact-aware", value: { ...startResolution(), code: "run-existing-spec", recommendedRoute: "run-existing-spec", selectedRoute: "run-existing-spec", stage: "run-existing-spec", mode: null, verdict: verdict() }, path: "$.verdict", code: "invalid-value" },
+	];
+	for (const fixture of cases) {
+		const result = validateWorkflowResolution(fixture.value);
+		assert.equal(result.ok, false, fixture.name);
+		if (result.ok) continue;
+		assert.ok(result.diagnostics.some((diagnostic) => diagnostic.path === fixture.path && diagnostic.code === fixture.code), `${fixture.name}: ${JSON.stringify(result.diagnostics)}`);
+	}
+	// Review #125-9: sin el campo, en un stop o en un start, solo sale missing-field en $.verdict (ningún invalid-value engañoso).
+	for (const base of [startResolution(), { ...startResolution(), outcome: "stop", code: "cancelled", selectedRoute: null, stage: null, mode: null }]) {
+		const { verdict: _v, ...absent } = base;
+		const result = validateWorkflowResolution(absent);
+		assert.equal(result.ok, false);
+		if (!result.ok) assert.deepEqual(result.diagnostics.filter((diagnostic) => diagnostic.path === "$.verdict").map((diagnostic) => diagnostic.code), ["missing-field"], JSON.stringify(result.diagnostics));
+	}
+	const schema = createSubmitWorkflowResolutionTool().parameters as { properties: Record<string, { anyOf?: Array<Record<string, unknown>> }> };
+	const verdictSchema = schema.properties.verdict?.anyOf?.[0] as { required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> } | undefined;
+	assert.ok(verdictSchema, "el schema de la tool declara verdict");
+	assert.deepEqual(verdictSchema.required, ["until", "accepted", "thresholds", "questions", "assumed", "forSpec", "warnings"]);
+	assert.equal(verdictSchema.additionalProperties, false);
+	assert.deepEqual(verdictSchema.properties?.until?.enum, ["pr", "spec"]);
+	assert.deepEqual(schema.properties.verdict?.anyOf?.[1], { type: "null" });
 });

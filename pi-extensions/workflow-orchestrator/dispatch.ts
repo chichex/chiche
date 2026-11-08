@@ -157,6 +157,29 @@ function request(
 	return { ok: true, request: { resolution, skill: { name, args: withAutonomy(args, autonomy) } } };
 }
 
+// Issue #119, CA-16 y CA-18: con el veredicto aceptado (`Confirmar <ruta> → hasta <el PR | la spec>`) y la
+// ruta recomendada confirmada, los argumentos salen de la tabla stage-chain: grill → `--autonomy A2`
+// (+ `--until pr` con `hasta el PR`); spec → `--autonomy A3 --until pr` con `hasta el PR`, `--autonomy A2`
+// con `hasta la spec`. Un `--autonomy` recibido por `/issues` gana sobre el nivel del veredicto, y
+// `--until pr` sigue al veredicto. `supervisado` (accepted: false) y el fallback usan los args de hoy. Review #125-1: con un
+// `--autonomy` recibido el gate no ofrece `→ hasta` (el flag gana y el veredicto solo se muestra), así que el despacho
+// tampoco aplica el veredicto: evita `grill --autonomy A1 --until pr` (la spec subiría a A3) y `chiche-spec --autonomy A1
+// --until pr` (abortaría). Un `accepted: true` que llegue igual con el flag se trata como supervisado.
+function verdictRequest(
+	resolution: WorkflowResolutionV1,
+	name: "grill" | "chiche-spec",
+	args: string,
+	autonomy?: AutonomyCode,
+): WorkflowDispatchResult {
+	const verdict = resolution.verdict;
+	if (!verdict || !verdict.accepted || autonomy !== undefined || resolution.selectedRoute !== resolution.recommendedRoute) {
+		return request(resolution, name, args, autonomy);
+	}
+	const level: AutonomyCode = name === "chiche-spec" && verdict.until === "pr" ? "A3" : "A2";
+	const until = verdict.until === "pr" ? " --until pr" : "";
+	return { ok: true, request: { resolution, skill: { name, args: `${withAutonomy(args, level)}${until}` } } };
+}
+
 export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispatchDirs, options: WorkflowDispatchOptions = {}): WorkflowDispatchResult {
 	let autonomy: AutonomyCode | undefined;
 	if (options.autonomy !== undefined) {
@@ -192,10 +215,10 @@ export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispat
 	switch (route) {
 		case "grill":
 		case "join-grill":
-			return request(resolution, "grill", `#${issue.number}`, autonomy);
+			return verdictRequest(resolution, "grill", `#${issue.number}`, autonomy);
 		case "spec":
 		case "join-spec":
-			return request(resolution, "chiche-spec", `#${issue.number}`, autonomy);
+			return verdictRequest(resolution, "chiche-spec", `#${issue.number}`, autonomy);
 		case "resume-grill": {
 			const grill = validatedGrill(resolution, issue, true);
 			return grill

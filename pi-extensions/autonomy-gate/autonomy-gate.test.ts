@@ -35,6 +35,12 @@ const LIMITES_FALLBACK = "contrato sin ## Autonomy: rigen sus ## Limites; corré
 const WORKING_TREE_NOTICE = "nivel leído del working tree: sin remote";
 const APTITUDE = "ninguna fila de la stop list matchea `git push -u origin <branch>`";
 const GREP_DIRS = ["claude", "codex", "opencode", "pi", "antigravity", "agents", "pi-extensions/subagent/agents"] as const;
+// Issue #119, CA-6: `autonomy-confidence` reemplaza a `autonomy-a2` en grill y chiche-spec.
+const AUTONOMY_BLOCKS = ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-confidence"] as const;
+const CONFIDENCE_SKILLS = ["grill", "chiche-spec"] as const;
+const A3_UNAUTONOMIZABLE = "pedido no autonomizable en A3: bajá a A2 o partilo";
+const PRODUCT_LEAK = "decisión de producto sin cerrar en la spec: <decisión>; volvé al grill";
+const BELOW_THRESHOLD_A2 = "pregunta solo lo que queda debajo del umbral";
 
 function repoPath(path: string): string {
 	return new URL(`../../${path}`, import.meta.url).pathname;
@@ -148,7 +154,7 @@ test("CA-1: el template de la Fase 4 de chiche-init lleva ## Autonomy con sus do
 		const template = fence.content;
 		if (!/^## Autonomy$/m.test(template)) problems.push(`${harness}/chiche-init: el template no tiene ## Autonomy`);
 		if (/^## Limites$/m.test(template)) problems.push(`${harness}/chiche-init: el template todavía tiene ## Limites`);
-		if (!/^\| Stage \| Level \| Since \| Rehearsed \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de niveles`);
+		if (!/^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de niveles con la columna Umbral (#119 CA-1)`);
 		if (!/^\| Action \| Pattern \| Reason \|$/m.test(template)) problems.push(`${harness}/chiche-init: falta la tabla de paradas`);
 		const autonomyIndex = template.indexOf("## Autonomy");
 		const policiesIndex = template.indexOf("## Politicas de generacion");
@@ -164,7 +170,7 @@ test("CA-1: el bloque autonomy-contract es idéntico en los cinco chiche-init tr
 	assert.equal(blocks.size, 5);
 	const block = await referenceBlock("autonomy-contract", "chiche-init");
 	assert.deepEqual(missing(block, [
-		/`\| Stage \| Level \| Since \| Rehearsed \|`/,
+		/`\| Stage \| Level \| Since \| Rehearsed \| Umbral \|`/,
 		/`\| Action \| Pattern \| Reason \|`/,
 		/filas fijas `grill`, `spec`, `run`, `review` y `land`, más una por ambiente de `## Ambientes`/,
 		/`land`, `review` y los ambientes solo aceptan `supervised`/,
@@ -273,7 +279,7 @@ test("CA-4: ningún bloque autonomy-* contiene parámetros posicionales ni $ARGU
 	for (const skill of SKILLS) {
 		for (const harness of HARNESSES) {
 			const markdown = await skillFile(harness, skill);
-			for (const name of ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-a2"]) {
+			for (const name of AUTONOMY_BLOCKS) {
 				const block = delimitedBlock(markdown, name);
 				if (block === null) continue;
 				const hit = block.match(/\$(?:[0-9]|ARGUMENTS|@|\*)/);
@@ -292,7 +298,9 @@ function git(cwd: string, ...args: string[]): string {
 
 // Review #115-6: desde la capa 3, `Action` es el comando de prueba del patrón, no un rótulo.
 const DEFAULT_STOP = "| git push origin main | git push .* main | solo via PR |\n| npm run deploy | npm run deploy | sin confirmacion humana |\n| ./deploy.sh staging | \\bdeploy\\.sh\\b | receta con barras invertidas |\n| sin patron |  | fila invalida |";
-const LEVELS_TABLE = (rows: string, stopRows = DEFAULT_STOP) => `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${rows}\n\n| Action | Pattern | Reason |\n|---|---|---|\n${stopRows}\n`;
+// Issue #119, CA-1: la tabla de niveles gana la columna `Umbral`; las filas sin esa celda valen 80 (CA-2).
+const LEVELS_HEADER = "| Stage | Level | Since | Rehearsed | Umbral |\n|---|---|---|---|---|";
+const LEVELS_TABLE = (rows: string, stopRows = DEFAULT_STOP) => `## Autonomy\n${LEVELS_HEADER}\n${rows}\n\n| Action | Pattern | Reason |\n|---|---|---|\n${stopRows}\n`;
 
 function contract(autonomy: string | null, limites = false): string {
 	return [
@@ -641,7 +649,8 @@ test("CA-9: issue-triage agrega --autonomy a toda ruta encadenada, chiche-spec/c
 		const block = delimitedBlock(await skillFile(harness, "issue-triage"), "stage-chain") ?? "";
 		const rows = block.split("\n").filter((line) => line.startsWith("|")).slice(2);
 		if (rows.length < 6) problems.push(`${harness}/issue-triage: tabla stage-chain con ${rows.length} rutas`);
-		for (const row of rows) if (!/`--autonomy <level>` si vino \|$/.test(row)) problems.push(`${harness}/issue-triage: la ruta ${row.slice(0, 40)}… no propaga --autonomy`);
+		// Issue #119, CA-16: las filas grill y spec suman los argumentos del veredicto y terminan con la regla del flag recibido.
+		for (const row of rows) if (!/`--autonomy <level>` si vino \|$/.test(row) && !/`--autonomy <level>` si vino; un `--autonomy <level>` recibido gana sobre el nivel del veredicto \|$/.test(row)) problems.push(`${harness}/issue-triage: la ruta ${row.slice(0, 40)}… no propaga --autonomy`);
 	}
 	for (const harness of HARNESSES) {
 		const spec = section(await skillFile(harness, "chiche-spec"), /^Argumentos$/);
@@ -661,24 +670,78 @@ test("CA-9: issue-triage agrega --autonomy a toda ruta encadenada, chiche-spec/c
 	assert.deepEqual(problems, []);
 });
 
-test("CA-10: el bloque autonomy-a2 está en grill y chiche-spec de los cinco harnesses, byte a byte, con la definición de impacto alto, la regla 0 / 1–3 / >3 de A3 y la conducta de chiche-spec por nivel", async () => {
-	const { problems, blocks } = await sharedBlocks("autonomy-a2", ["grill", "chiche-spec"], { normalized: false });
+test("#102 CA-10 → #119 CA-6: el bloque autonomy-confidence reemplaza a autonomy-a2 en grill y chiche-spec de los cinco harnesses, byte a byte, con los ocho puntos (tipo, confianza, umbral, grill por nivel, spec por nivel, fuga, stop list, anclas) y en ningún otro skill", async () => {
+	const { problems, blocks } = await sharedBlocks("autonomy-confidence", CONFIDENCE_SKILLS, { normalized: false });
 	assert.deepEqual(problems, []);
 	assert.equal(blocks.size, 10);
-	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-a2") ?? "";
+	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-confidence") ?? "";
 	assert.deepEqual(missing(block, [
-		/define el alcance entero, o roza la stop list, datos o migraciones, o un contrato externo \(API, formato, evento\)/,
-		/el resto queda `\[ASSUMED\]` en el handoff o en la tabla de inferencias/,
-		/`grill` corre el reconocimiento siempre/,
-		/con 0 sigue sin preguntar; con 1 a 3 las deja `\[ASSUMED\]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
-		/con `supervised` \(A1\) no se pregunta antes de publicar y la corrida termina en el menú final/,
-		/con A2 se preguntan las de impacto alto y no hay menú: responderlas es la aprobación/,
-		/con A3 no se pregunta nada ni hay menú/,
+		// (1) tipo
+		/\(1\)[^\n]*?tipo[^\n]*?`producto` \(define el qué[^\n]*?`técnica` \(define el cómo/,
+		/`grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata solo las técnicas/,
+		// (2) confianza
+		/\(2\)[^\n]*?opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta/,
+		// (3) umbral
+		/\(3\)[^\n]*?`umbral grill` en `grill` y `umbral spec` en `chiche-spec`/,
+		/confianza `> umbral` la decisión se asume y se muestra como `\[ASSUMED NN %\]` con su recomendada; con confianza `≤ umbral` se pregunta/,
+		// (4) grill por nivel
+		/\(4\)[^\n]*?`supervised` \(A1\) y `plan-approved` \(A2\) preguntan las mismas decisiones, las de producto con confianza `≤ umbral`; A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite/,
+		/`grill` corre el reconocimiento siempre y cuenta las decisiones de producto con confianza `≤ umbral`: con 0 sigue sin preguntar; con 1 a 3 las deja `\[ASSUMED NN %\]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
+		// (5) spec por nivel
+		/\(5\)[^\n]*?con A1 no se pregunta antes de publicar y la corrida termina en el menú final/,
+		/con A2 se preguntan las técnicas con confianza `≤ umbral` y no hay menú: responderlas es la aprobación/,
+		/con A3 no se pregunta nada ni hay menú: las técnicas con confianza `≤ umbral` quedan `\[ASSUMED NN %\]` y se listan en `## Riesgos y gaps`/,
+		// (6) fuga
+		/\(6\)[^\n]*?decisión de producto que aparece en la spec es una fuga: A1 la marca `\[NEEDS-INPUT\]` en la tabla de inferencias y en `## Riesgos y gaps`[^\n]*?A2 la pregunta; A3 aborta antes de publicar con el diagnóstico `decisión de producto sin cerrar en la spec: <decisión>; volvé al grill`/,
+		// (7) stop list
+		/\(7\) La stop list frena en todo nivel, sin excepción nueva/,
+		// (8) anclas
+		/\(8\)[^\n]*?`¿aplica a juegos 2D, 3D o todos\?`[^\n]*?producto[^\n]*?se pregunta \(≈35 %\)/,
+		/`¿se puede ordenar\?`[^\n]*?nice-to-have de producto \(≈60 %\)/,
+		/`¿parametrizable: tecla con que se abre, tamaño\?`[^\n]*?obvio, se asume \(≈95 %\)/,
+		/`¿usa el store existente o uno propio\?`[^\n]*?técnica, va a la spec \(≈90 %\)/,
 	]), []);
+	for (let point = 1; point <= 8; point += 1) assert.ok(block.includes(`(${point})`), `el bloque numera el punto (${point})`);
+	assert.doesNotMatch(block, /impacto alto|atajo liviano/, "la regla de impacto alto se retiró y el atajo liviano pregunta: no va en A3");
 	for (const skill of ["chiche-init", "chiche-run", "chiche-land", "design-system", "issue-triage"]) {
 		for (const harness of HARNESSES) {
-			if (delimitedBlock(await skillFile(harness, skill), "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 es solo de grill y chiche-spec`);
+			const markdown = await skillFile(harness, skill);
+			if (delimitedBlock(markdown, "autonomy-confidence") !== null) problems.push(`${harness}/${skill}: autonomy-confidence es solo de grill y chiche-spec`);
+			if (delimitedBlock(markdown, "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 se retiró`);
 		}
+	}
+	for (const skill of CONFIDENCE_SKILLS) {
+		for (const harness of HARNESSES) {
+			if (delimitedBlock(await skillFile(harness, skill), "autonomy-a2") !== null) problems.push(`${harness}/${skill}: autonomy-a2 se retiró en favor de autonomy-confidence`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-6 y CA-10: «impacto alto» no aparece en ningún SKILL.md de los cinco harnesses ni en agents; la descripción de --autonomy de grill y chiche-spec dice que A2 pregunta solo lo que queda debajo del umbral y es idéntica entre harnesses", async () => {
+	const grep = spawnSync("git", ["grep", "-n", "impacto alto", "--", "claude/*/SKILL.md", "codex/*/SKILL.md", "opencode/*/SKILL.md", "pi/*/SKILL.md", "antigravity/*/SKILL.md", "agents", "pi-extensions/subagent/agents"], { cwd: repoPath(""), encoding: "utf8" });
+	assert.equal(grep.status, 1, `git grep de «impacto alto» tiene que no encontrar nada (exit 1): exit ${grep.status}\n${grep.stdout}${grep.stderr}`);
+	const problems: string[] = [];
+	for (const skill of SKILLS) {
+		const bullets = new Map<Harness, string>();
+		for (const harness of HARNESSES) {
+			const args = section(await skillFile(harness, skill), /^(Argumentos|Argumentos Pi|Invocación)$/);
+			const bullet = args.split("\n").find((line) => line.startsWith("- `--autonomy <level>` — ")) ?? "";
+			if (!bullet) {
+				problems.push(`${harness}/${skill}: sin bullet --autonomy`);
+				continue;
+			}
+			if (/impacto alto/.test(bullet)) problems.push(`${harness}/${skill}: la descripción de --autonomy sigue hablando de impacto alto`);
+			if ((CONFIDENCE_SKILLS as readonly string[]).includes(skill) && !bullet.includes(BELOW_THRESHOLD_A2)) problems.push(`${harness}/${skill}: la descripción de --autonomy no dice «${BELOW_THRESHOLD_A2}»`);
+			if ((CONFIDENCE_SKILLS as readonly string[]).includes(skill) && !/«Tipo y confianza»/.test(bullet)) problems.push(`${harness}/${skill}: la descripción de --autonomy no apunta a «Tipo y confianza»`);
+			bullets.set(harness, await normalize(bullet, harness));
+		}
+		// Cross-harness: la descripción es la misma doctrina en los cinco, salvo la capa de interacción que ya divergía antes de #119:
+		// chiche-run en Codex y opencode (A3 corre inline) e issue-triage en Pi (el flag llega por `/issues` y despacha el orquestador).
+		if (skill === "chiche-run" || skill === "issue-triage") continue;
+		const [reference, ...rest] = [...bullets.entries()];
+		if (!reference) continue;
+		for (const [harness, bullet] of rest) if (bullet !== reference[1]) problems.push(`${reference[0]} vs ${harness}/${skill}: la descripción de --autonomy diverge — ${firstDifference(reference[1], bullet)}`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -988,7 +1051,7 @@ test("CA-16: las recetas de deploy son filas `deploy <ambiente>` de ## Comandos 
 		if (!/\*\*Recetas de deploy\*\*[^\n]*`deploy <ambiente>`[^\n]*`verificado`[^\n]*`unrehearsed`/.test(section(markdown, /^Fase 2 — /))) problems.push(`${harness}/chiche-init: la Fase 2 no documenta las recetas de deploy`);
 		// Reviews #113-7, #115-6, #115-17: el ejemplo no muestra rehearsed, staging queda unrehearsed y la stop list frena su propia receta.
 		if (/rehearsed 20/.test(template)) problems.push(`${harness}/chiche-init: el ejemplo muestra rehearsed, que esta capa no puede producir sin ensayo`);
-		if (!/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no queda unrehearsed con su deploy no probado`);
+		if (!/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no queda unrehearsed con su deploy no probado (y Umbral —, #119 CA-1)`);
 		if (!/^\| \.\/deploy\.sh staging \| deploy\\\.sh \|/m.test(template)) problems.push(`${harness}/chiche-init: la fila de deploy del ejemplo no frena ./deploy.sh staging`);
 		if (!/una fila `supervised` lleva `—`, salvo una fila de ambiente cuyo `deploy <ambiente>` no está `verificado`, que lleva `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no dice cuál de las dos reglas de Rehearsed manda`);
 		if (!/Una fila de ambiente cuyo `deploy <ambiente>` de `## Comandos` no está `verificado` queda `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no fija la regla del ambiente`);
@@ -1127,9 +1190,9 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const levels = "| run | unattended | 2026-11-05 | rehearsed 2026-11-05 |";
 	const variants: Array<[string, string]> = [
-		["traducido", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Accion | Patron | Motivo |\n|---|---|---|\n| npm publish | npm publish | no |\n`],
-		["sin-tabla", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n`],
-		["vacia", `## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n`],
+		["traducido", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Accion | Patron | Motivo |\n|---|---|---|\n| npm publish | npm publish | no |\n`],
+		["sin-tabla", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n`],
+		["vacia", `## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n`],
 	];
 	for (const [name, autonomy] of variants) {
 		const repo = join(dir, name);
@@ -1154,7 +1217,7 @@ test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel
 	const third = join(dir, "tercera");
 	mkdirSync(join(third, ".chiche"), { recursive: true });
 	git(third, "init", "-q", "-b", "main");
-	writeFileSync(join(third, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n| npm publish | npm publish | no |\n\nOtra tabla:\n| Col | Col |\n|---|---|\n| no es parada | x |\n`));
+	writeFileSync(join(third, ".chiche/project.md"), contract(`## Autonomy\n${LEVELS_HEADER}\n${levels}\n\n| Action | Pattern | Reason |\n|---|---|---|\n| npm publish | npm publish | no |\n\nOtra tabla:\n| Col | Col |\n|---|---|\n| no es parada | x |\n`));
 	for (const shell of shells(t)) {
 		const run = runResolve(command, third, "run", "", shell);
 		assert.match(run.stdout, /^parada: \| npm publish \|/m, shell);
@@ -1393,15 +1456,16 @@ test("review #113-6: la plantilla de chiche-init trae en los cinco harnesses los
 	assert.deepEqual(problems, []);
 });
 
-test("review #114-3, #115-10: en A3 grill deja [ASSUMED] las 1 a 3 decisiones abiertas sin atajo liviano, y A2/A3 no preguntan configuración, frontera ni cierre", async () => {
-	const { problems, blocks } = await sharedBlocks("autonomy-a2", ["grill", "chiche-spec"], { normalized: false });
+test("review #114-3, #115-10 (reescrito por #119 CA-6): en A3 grill deja [ASSUMED NN %] las 1 a 3 decisiones de producto debajo del umbral sin atajo liviano, y A2 omite configuración, frontera y cierre", async () => {
+	const { problems, blocks } = await sharedBlocks("autonomy-confidence", CONFIDENCE_SKILLS, { normalized: false });
 	assert.deepEqual(problems, []);
 	assert.equal(blocks.size, 10);
-	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-a2") ?? "";
+	const block = delimitedBlock(await skillFile("claude", "grill"), "autonomy-confidence") ?? "";
 	assert.deepEqual(missing(block, [
-		/con 1 a 3 las deja `\[ASSUMED\]` en el handoff, sin preguntar/,
-		/con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`/,
-		/En A2 y A3 no hay preguntas de configuración, de frontera de bloque ni de confirmación de cierre/,
+		/con 1 a 3 las deja `\[ASSUMED NN %\]` en el handoff, sin preguntar/,
+		new RegExp(`con más de 3 aborta con el listado y el diagnóstico \`${escapeRegExp(A3_UNAUTONOMIZABLE)}\``),
+		/A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite/,
+		new RegExp(escapeRegExp(`\`${PRODUCT_LEAK}\``)),
 	]), []);
 	assert.doesNotMatch(block, /atajo liviano/, "el atajo liviano pregunta: no va en A3");
 });
@@ -1683,7 +1747,7 @@ test("review #113-3, #116-11: la fila land solo acepta supervised (unattended re
 	const word = join(dir, "word");
 	mkdirSync(join(word, ".chiche"), { recursive: true });
 	git(word, "init", "-q", "-b", "main");
-	writeFileSync(join(word, ".chiche/project.md"), contract(`## Autonomy\n| Stage | Level | Since | Rehearsed |\n|---|---|---|---|\n| run | supervised | 2026-11-05 | — |\n`));
+	writeFileSync(join(word, ".chiche/project.md"), contract(`## Autonomy\n${LEVELS_HEADER}\n| run | supervised | 2026-11-05 | — |\n`));
 	for (const shell of shells(t)) {
 		const run = runResolve(command, land, "land", "", shell);
 		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
@@ -1710,12 +1774,14 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 		const spec = await skillFile(harness, "chiche-spec");
 		problems.push(...missing(spec, [
 			// #114-1, opción A: en A2 responder es aprobar, y la aprobación se escribe bajo el mismo gate.
-			/en A2, responder las preguntas de impacto alto es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
-			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta de impacto alto/,
-			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta de impacto alto/,
+			// Issue #119, CA-6: «impacto alto» pasa a «debajo del umbral».
+			// Review #123-8: la aprobación de A2 cuenta también las fugas que A2 pregunta.
+			/en A2, responder las preguntas \(las técnicas debajo del umbral y las fugas\) es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
+			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta \(una técnica debajo del umbral o una fuga\)/,
+			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta \(una técnica debajo del umbral o una fuga\)/,
 		]).map((problem) => `${harness}/chiche-spec: ${problem}`));
 		if (harness !== "pi" && !/`spec\.approved` en la transición a `aprobada`, la del menú o la de A2 \(una republicación/.test(spec)) problems.push(`${harness}/chiche-spec: el evento spec.approved no nombra la transición de A2`);
-		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas de impacto alto se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
+		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas \(técnicas debajo del umbral o fugas\) se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
 		const init = await skillFile(harness, "chiche-init");
 		// #116-2: la confirmación del costo autoriza el comando del host y nada más.
 		// El ensayo pago vive solo en Claude Code (review #115-16): los otros harnesses mandan ahí con el aviso literal.
@@ -2078,7 +2144,7 @@ test("#120 CA-1 y CA-4: ningún bloque autonomy-* de los 35 archivos expande `$<
 	for (const skill of SKILLS) {
 		for (const harness of HARNESSES) {
 			const markdown = await skillFile(harness, skill);
-			for (const name of ["autonomy-levels", "autonomy-resolve", "autonomy-contract", "autonomy-a2"]) {
+			for (const name of AUTONOMY_BLOCKS) {
 				const block = delimitedBlock(markdown, name);
 				if (block === null) continue;
 				for (const hit of unbracedExpansions(block)) problems.push(`${harness}/${skill} bloque ${name}: ${hit} es un subíndice o un modificador en zsh; va con llaves`);
@@ -2131,4 +2197,310 @@ test("review #121-2: un ~/.zshenv que imprime y activa KSH_ARRAYS no contamina l
 	const buggy = runResolve(old, work, "grill", "", zsh, { HOME: home });
 	assert.match(buggy.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `el bloque viejo sigue cayendo en zsh aunque ~/.zshenv active KSH_ARRAYS: ${buggy.stdout}`);
 	assert.match(buggy.stderr, ZSH_ERROR);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #119, capa 1: umbrales de confianza en el contrato y en el resolver
+
+const UMBRAL_INVALID = (stage: string, value: string): RegExp => new RegExp(`aviso: umbral ${stage} inválido \\(${escapeRegExp(value)}\\): rige 80`);
+
+// Las dos líneas de umbral van inmediatamente después de `nivel efectivo:` y antes de toda `parada:`.
+function thresholdLines(stdout: string): { grill: string | null; spec: string | null; ordered: boolean } {
+	const lines = stdout.split("\n");
+	const level = lines.findIndex((line) => line.startsWith("nivel efectivo: "));
+	const grill = lines.find((line) => line.startsWith("umbral grill: ")) ?? null;
+	const spec = lines.find((line) => line.startsWith("umbral spec: ")) ?? null;
+	const ordered = level !== -1 && lines[level + 1] === grill && lines[level + 2] === spec && lines.slice(0, level + 1).every((line) => !line.startsWith("parada: "));
+	return { grill: grill && grill.slice("umbral grill: ".length), spec: spec && spec.slice("umbral spec: ".length), ordered };
+}
+
+test("#119 CA-1: el template de la Fase 4 de los cinco chiche-init lleva la columna Umbral (80 en grill y spec, — en las demás) y autonomy-contract fija la regla 0–100 / — / 80", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-init");
+		const template = fencedBlocks(section(markdown, /^Fase 4 — /)).find((fence) => /^# Contrato de autonomia/m.test(fence.content))?.content ?? "";
+		problems.push(...missing(template, [
+			/^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|\n\|---\|---\|---\|---\|---\|$/m,
+			/^\| grill \| supervised \| 2026-07-02 \| — \| 80 \|$/m,
+			/^\| spec \| plan-approved \| 2026-07-02 \| unrehearsed \| 80 \|$/m,
+			/^\| run \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| review \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| land \| supervised \| 2026-07-02 \| — \| — \|$/m,
+			/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m,
+			/Umbral: entero de 0 a 100 en grill y spec \(80 recomendado\), — en las demas/,
+		]).map((problem) => `${harness}/chiche-init template: ${problem}`));
+		const block = delimitedBlock(markdown, "autonomy-contract") ?? "";
+		problems.push(...missing(block, [
+			/`Umbral` es un entero de 0 a 100 en las filas `grill` y `spec`[^\n]*y `—` en las demás/,
+			/una columna ausente o un `—` en `grill` o `spec` equivale a 80/,
+			/confianza `> umbral`/,
+		]).map((problem) => `${harness}/chiche-init autonomy-contract: ${problem}`));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-2: el bloque autonomy-resolve documenta las dos líneas de umbral, el default 80 y el aviso literal del valor inválido", async () => {
+	const block = await referenceBlock("autonomy-resolve");
+	assert.deepEqual(missing(block, [
+		/después de `nivel efectivo:`[^\n]*`umbral grill: <n>` y `umbral spec: <n>`/,
+		/`80 \(default\)`/,
+		/`umbral <stage> inválido \(<valor>\): rige 80`/,
+		/`grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos/,
+	]), []);
+	const command = await canonicalCommand();
+	assert.match(command, /printf 'umbral grill: %s\\n' "\$ug"\n\s*printf 'umbral spec: %s\\n' "\$us"/, "las dos líneas se imprimen con printf, en orden, después de la traza");
+	assert.ok(command.indexOf('echo "nivel efectivo: $nivel, leído de $src"') < command.indexOf("printf 'umbral grill: %s\\n'"), "umbral va después de nivel efectivo");
+	assert.ok(command.indexOf("printf 'umbral spec: %s\\n'") < command.indexOf("parada: %s"), "umbral va antes de las paradas");
+});
+
+test("#119 CA-2: el resolver imprime los dos umbrales en bash, sh y zsh: 70/90 de la columna, 80 (default) sin columna, con — o sin contrato, y 80 (default) con aviso ante abc, 120, -1 y 7.5", async (t) => {
+	const command = await canonicalCommand();
+	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-umbral-")));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	// Review #122-5: el contrato se commitea, así `git status --porcelain` vacío prueba de verdad que el comando no toca nada.
+	const seeded: string[] = [];
+	const repo = (name: string, text: string | null): string => {
+		const root = join(dir, name);
+		mkdirSync(join(root, ".chiche"), { recursive: true });
+		git(root, "init", "-q", "-b", "main");
+		if (text !== null) writeFileSync(join(root, ".chiche/project.md"), text);
+		git(root, "add", "-A");
+		git(root, "commit", "-q", "--allow-empty", "-m", "seed");
+		seeded.push(root);
+		return root;
+	};
+	const column = repo("columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | plan-approved | 2026-11-07 | rehearsed 2026-11-07 | 90 |\n| run | supervised | 2026-11-07 | — | — |")));
+	// Review #122-6: el umbral se lee del branch default, no del branch de trabajo; y con origin sin default no se lee nada.
+	const adversarial = repoWithRemote("umbral-base-branch", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | supervised | 2026-11-07 | — | 90 |")), contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 30 |\n| spec | supervised | 2026-11-07 | — | 10 |")));
+	t.after(() => rmSync(adversarial.root, { recursive: true, force: true }));
+	const emptyBare = join(dir, "vacio.git");
+	git(dir, "init", "-q", "--bare", emptyBare);
+	const noDefault = repo("sin-default", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | supervised | 2026-11-07 | — | 90 |")));
+	git(noDefault, "remote", "add", "origin", emptyBare);
+	const edges = repo("bordes", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 0 |\n| spec | supervised | 2026-11-07 | — | 100 |")));
+	const absent = repo("sin-columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — |\n| spec | supervised | 2026-11-07 | — |\n| run | supervised | 2026-11-07 | — |")));
+	const dash = repo("guion", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | — |\n| spec | supervised | 2026-11-07 | — | — |")));
+	const noRows = repo("sin-filas", contract(LEVELS_TABLE("| run | supervised | 2026-11-07 | — | — |")));
+	const noAutonomy = repo("sin-autonomy", contract(null));
+	const noContract = repo("sin-contrato", null);
+	const problems: string[] = [];
+	for (const shell of shells(t)) {
+		for (const stage of ["run", "none", "grill", "spec"]) {
+			const run = runResolve(command, column, stage, "", shell);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${stage}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "70" || spec !== "90") problems.push(`${shell} ${stage}: umbrales ${grill}/${spec}, esperados 70/90 (${JSON.stringify(run.stdout)})`);
+			if (!ordered) problems.push(`${shell} ${stage}: las líneas de umbral no van justo después de nivel efectivo y antes de las paradas (${JSON.stringify(run.stdout)})`);
+			if (/umbral/.test(run.stderr)) problems.push(`${shell} ${stage}: aviso de umbral sin motivo: ${run.stderr}`);
+			if (!/^parada: \| git push origin main \|/m.test(run.stdout)) problems.push(`${shell} ${stage}: la stop list se sigue imprimiendo`);
+		}
+		const flagged = runResolve(command, column, "run", "A3", shell);
+		const flaggedLines = thresholdLines(flagged.stdout);
+		if (flaggedLines.grill !== "70" || flaggedLines.spec !== "90" || !flaggedLines.ordered) problems.push(`${shell}: con --autonomy los umbrales siguen saliendo del contrato, en orden (${flagged.stdout})`);
+		if (/umbral/.test(flagged.stderr)) problems.push(`${shell}: con --autonomy no hay aviso de umbral: ${flagged.stderr}`);
+		const fromDefault = runResolve(command, adversarial.work, "run", "", shell);
+		const fromDefaultLines = thresholdLines(fromDefault.stdout);
+		if (fromDefaultLines.grill !== "70" || fromDefaultLines.spec !== "90") problems.push(`${shell}: el umbral sale de origin/main, no del branch (${fromDefault.stdout})`);
+		if (!/leído de origin\/main$/m.test(fromDefault.stdout)) problems.push(`${shell}: la fuente no es origin/main (${fromDefault.stdout})`);
+		const unresolved = runResolve(command, noDefault, "run", "", shell);
+		const unresolvedLines = thresholdLines(unresolved.stdout);
+		if (unresolvedLines.grill !== "80 (default)" || unresolvedLines.spec !== "80 (default)" || !unresolvedLines.ordered) problems.push(`${shell}: con origin sin default resoluble no se lee el working tree: 80 (default) (${unresolved.stdout})`);
+		if (/umbral/.test(unresolved.stderr)) problems.push(`${shell}: origin sin default no avisa de umbral: ${unresolved.stderr}`);
+		const edge = thresholdLines(runResolve(command, edges, "run", "", shell).stdout);
+		if (edge.grill !== "0" || edge.spec !== "100") problems.push(`${shell}: 0 y 100 son válidos (${edge.grill}/${edge.spec})`);
+		for (const [name, cwd] of [["sin columna", absent], ["con —", dash], ["sin filas grill/spec", noRows], ["sin ## Autonomy", noAutonomy], ["sin contrato", noContract]] as const) {
+			const run = runResolve(command, cwd, "run", "", shell);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${name}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "80 (default)" || spec !== "80 (default)") problems.push(`${shell} ${name}: umbrales ${grill}/${spec}, esperados 80 (default) (${JSON.stringify(run.stdout)})`);
+			if (!ordered) problems.push(`${shell} ${name}: líneas de umbral fuera de lugar (${JSON.stringify(run.stdout)})`);
+			if (/umbral/.test(run.stderr)) problems.push(`${shell} ${name}: un default no avisa: ${run.stderr}`);
+		}
+		for (const value of ["abc", "120", "-1", "7.5", "80 %"]) {
+			const bad = repo(`invalido-${shell.replace(/\W/g, "_")}-${value.replace(/\W/g, "_")}`, contract(LEVELS_TABLE(`| grill | supervised | 2026-11-07 | — | ${value} |\n| spec | supervised | 2026-11-07 | — | 75 |`)));
+			const run = runResolve(command, bad, "run", "", shell);
+			const { grill, spec } = thresholdLines(run.stdout);
+			if (run.status !== 0) problems.push(`${shell} ${value}: exit ${run.status} ${run.stderr}`);
+			if (grill !== "80 (default)") problems.push(`${shell} ${value}: umbral grill ${grill}, esperado 80 (default)`);
+			if (spec !== "75") problems.push(`${shell} ${value}: el umbral spec válido no se toca (${spec})`);
+			if (!UMBRAL_INVALID("grill", value).test(run.stderr)) problems.push(`${shell} ${value}: falta el aviso literal: ${JSON.stringify(run.stderr)}`);
+			if (/umbral spec/.test(run.stderr)) problems.push(`${shell} ${value}: avisa por spec sin motivo: ${run.stderr}`);
+		}
+		const badSpec = repo(`invalido-spec-${shell.replace(/\W/g, "_")}`, contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 60 |\n| spec | supervised | 2026-11-07 | — | 101 |")));
+		const run = runResolve(command, badSpec, "spec", "", shell);
+		const { grill, spec } = thresholdLines(run.stdout);
+		if (grill !== "60" || spec !== "80 (default)") problems.push(`${shell}: 101 en spec cae a 80 (default) sin tocar grill (${grill}/${spec})`);
+		if (!UMBRAL_INVALID("spec", "101").test(run.stderr)) problems.push(`${shell}: falta el aviso literal de spec: ${JSON.stringify(run.stderr)}`);
+	}
+	assert.deepEqual(problems, []);
+	for (const root of seeded) assert.equal(git(root, "status", "--porcelain"), "", `${root}: el comando no toca el working tree`);
+	assert.equal(git(adversarial.work, "status", "--porcelain"), "", "el comando no toca el branch de trabajo");
+});
+
+test("#119 CA-3: la Fase 3 de chiche-init pregunta los umbrales de grill y spec con la tool del harness (80 Recomendado / 70 / 90), con --autonomy ≥ A2 escribe 80, y la checklist gana la fila Umbrales de confianza", async () => {
+	const table = await interactionTable();
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-init");
+		const tool = escapeRegExp(table.questionTools[harness] ?? "");
+		const phase = section(markdown, /^Fase 3 — /);
+		problems.push(...missing(phase, [
+			/\*\*Umbrales de confianza\.\*\*/,
+			new RegExp(`\\*\\*Umbrales de confianza\\.\\*\\* Después de los niveles, preguntar el umbral de \`grill\` y el de \`spec\` con \`${tool}\`, una pregunta por stage`),
+			/`80 \(Recomendado\)` \/ `70` \/ `90`/,
+			/la respuesta libre \(Other(?:, con `allowOther: true`)?\) para otro entero de 0 a 100/,
+			/\*\*Umbrales de confianza\.\*\*[^\n]*`run`, `review`, `land` y los ambientes llevan `—`/,
+			/\*\*Umbrales de confianza\.\*\*[^\n]*Con `--autonomy` ≥ A2 no se pregunta: escribe 80 en `grill` y `spec`/,
+		]).map((problem) => `${harness}/chiche-init Fase 3: ${problem}`));
+		const levelsAt = phase.indexOf("**Nivel de autonomía por etapa.**");
+		const thresholdsAt = phase.indexOf("**Umbrales de confianza.**");
+		if (!(levelsAt !== -1 && thresholdsAt > levelsAt)) problems.push(`${harness}/chiche-init Fase 3: los umbrales se preguntan después de los niveles`);
+		const upgrade = section(markdown, /^Upgrade de contrato/);
+		problems.push(...missing(upgrade, [
+			/^\| Umbrales de confianza \| existe `## Autonomy` sin la columna `Umbral`[^\n]*agrega la columna con 80 en `grill` y `spec` y `—` en las demás filas, sin tocar ninguna otra celda[^\n]*con `--autonomy` ≥ A2 queda `mejora disponible` \|$/m,
+		]).map((problem) => `${harness}/chiche-init Upgrade: ${problem}`));
+		const phase4 = section(markdown, /^Fase 4 — /);
+		if (!/`## Autonomy` \(preservar verbatim[^\n]*la columna `Umbral` que agrega la fila `Umbrales de confianza`/.test(phase4)) problems.push(`${harness}/chiche-init Fase 4: la columna Umbral no es excepción declarada al verbatim de --update`);
+		if (!/Preservar `## Decisiones humanas`, `## Politicas de generacion`, `## Autonomy` \(salvo[^\n]*la columna `Umbral`/.test(section(markdown, /^MUST DO$/))) problems.push(`${harness}/chiche-init MUST DO: no nombra la columna Umbral como excepción`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-4: el contrato de este repo lleva Umbral 80 en grill y spec y — en run, review y land, con su decisión fechada; sembrado como origin/main, el resolver imprime umbral grill: 80 y umbral spec: 80 en bash, sh y zsh", async (t) => {
+	const contractText = await readRepoFile(".chiche/project.md");
+	const autonomy = section(contractText, /^Autonomy$/);
+	assert.match(autonomy, /^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|\n\|---\|---\|---\|---\|---\|$/m);
+	for (const stage of ["grill", "spec"]) assert.match(autonomy, new RegExp(`^\\| ${stage} \\| [a-z-]+ \\| \\d{4}-\\d{2}-\\d{2} \\| [^|]+ \\| 80 \\|$`, "m"), `fila ${stage} con Umbral 80`);
+	for (const stage of ["run", "review", "land"]) assert.match(autonomy, new RegExp(`^\\| ${stage} \\| supervised \\| \\d{4}-\\d{2}-\\d{2} \\| — \\| — \\|$`, "m"), `fila ${stage} con Umbral —`);
+	const decision = section(contractText, /^Decisiones humanas$/).split("\n").find((line) => /^- \d{4}-\d{2}-\d{2}: .*`Umbral`/.test(line)) ?? "";
+	assert.ok(decision, "## Decisiones humanas tiene una entrada fechada sobre la columna Umbral");
+	assert.match(decision, /issue #119/);
+	const command = await canonicalCommand();
+	const { root, work } = repoWithRemote("contrato-real", contractText, contractText);
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	for (const shell of shells(t)) {
+		for (const stage of ["run", "none"]) {
+			const run = runResolve(command, work, stage, "", shell);
+			assert.equal(run.status, 0, `${shell} ${stage}: ${run.stderr}`);
+			assert.match(run.stdout, /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, `${shell} ${stage}: ${run.stdout}`);
+			const { grill, spec, ordered } = thresholdLines(run.stdout);
+			assert.equal(grill, "80", `${shell} ${stage}: umbral grill del contrato real`);
+			assert.equal(spec, "80", `${shell} ${stage}: umbral spec del contrato real`);
+			assert.ok(ordered, `${shell} ${stage}: ${run.stdout}`);
+			assert.doesNotMatch(run.stderr, /umbral/, `${shell} ${stage}: ${run.stderr}`);
+		}
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Issue #119, capa 3: `--until pr` encadena grill → spec → run sin menú
+
+const UNTIL_REQUIRES_A3 = "--until pr exige --autonomy A3";
+const UNTIL_FLAG_SKILLS = ["grill", "chiche-spec"] as const;
+const UNTIL_FLAGLESS_SKILLS = ["chiche-run", "chiche-init", "chiche-land", "design-system", "issue-triage"] as const;
+
+test("#119 CA-12: grill y chiche-spec de los cinco harnesses aceptan [--until pr] (el grill lo propaga con --autonomy A3 al encadenar la spec; la spec lo exige con A3, aprueba sin menú y lanza el run sin el flag); otro valor aborta listando pr; los otros cinco skills no lo ganan", async () => {
+	const table = await interactionTable();
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const prefix = escapeRegExp(table.prefixes[harness]);
+		for (const skill of UNTIL_FLAG_SKILLS) {
+			const markdown = await skillFile(harness, skill);
+			const args = section(markdown, /^(Argumentos|Argumentos Pi)$/);
+			const signature = fencedBlocks(args)[0]?.content ?? "";
+			if (!new RegExp(`^${prefix}${skill} .*\\[--autonomy <level>\\] \\[--until pr\\]`, "m").test(signature)) problems.push(`${harness}/${skill}: la firma no lleva [--until pr] después de [--autonomy <level>]`);
+			if (!/^- `--until pr` — /m.test(args)) problems.push(`${harness}/${skill}: ## Argumentos no describe --until pr`);
+			if (!/`--until` con cualquier otro valor aborta listando el único válido \(`pr`\)/.test(args)) problems.push(`${harness}/${skill}: --until con otro valor no aborta listando pr`);
+		}
+		const grill = await skillFile(harness, "grill");
+		const closing = section(grill, /^(Cierre|Fase 3: cierre)$/);
+		if (!/`--autonomy A3 --until pr`/.test(closing)) problems.push(`${harness}/grill: el Cierre no propaga --autonomy A3 --until pr al encadenar la spec`);
+		if (!/sea cual sea el nivel/.test(closing)) problems.push(`${harness}/grill: el Cierre no dice que el nivel del grill no importa con --until pr`);
+		if (harness === "pi" && !/`until: "pr"`/.test(closing)) problems.push("pi/grill: el finalize no lleva until: \"pr\"");
+		const spec = await skillFile(harness, "chiche-spec");
+		const specArgs = section(spec, /^Argumentos$/);
+		if (!specArgs.includes(`\`${UNTIL_REQUIRES_A3}\``)) problems.push(`${harness}/chiche-spec: falta el diagnóstico literal ${UNTIL_REQUIRES_A3}`);
+		if (!/aborta antes de escribir/.test(specArgs)) problems.push(`${harness}/chiche-spec: --until pr sin A3 no aborta antes de escribir`);
+		const flow = delimitedBlock(spec, "chiche-spec-flow") ?? "";
+		problems.push(...missing(flow, [
+			/Con A3 y `--until pr`: sin fugas, la spec se publica `draft`, pasa a `state=approved` bajo el mismo gate de publicación, registra `spec\.published` y `spec\.approved`, y la corrida lanza `chiche-run <target> --autonomy A3` exactamente como la opción `chiche-run --autonomy A3` del menú, sin preguntar y sin `--until pr`/,
+			/con fugas aborta antes de publicar con el diagnóstico de la fuga/,
+			/Sin `--until pr`, A3 termina en `Spec lista`/,
+		]).map((problem) => `${harness}/chiche-spec chiche-spec-flow: ${problem}`));
+		if (!/o, con `--autonomy A3 --until pr`, al publicarse sin fugas/.test(flow)) problems.push(`${harness}/chiche-spec: **Estado** no nombra la transición de --until pr`);
+		if (!/o la de `--until pr` en A3\)/.test(delimitedBlock(spec, "chiche-spec-publication-gate") ?? "")) problems.push(`${harness}/chiche-spec: el gate de publicación no nombra la transición de --until pr`);
+		if (harness !== "pi" && !/también en la de `--until pr`, que es la de la propia corrida en A3/.test(spec)) problems.push(`${harness}/chiche-spec: el evento spec.approved no nombra --until pr`);
+		// Fase 0: el atajo repite la firma (issue-triage-gate lo exige) y por eso también lleva [--until pr].
+		if (!/^Atajo: .*\[--until pr\] saltea este menu\.$/m.test(spec)) problems.push(`${harness}/chiche-spec: el atajo de la Fase 0 no lleva [--until pr]`);
+		for (const skill of UNTIL_FLAGLESS_SKILLS) {
+			const markdown = await skillFile(harness, skill);
+			const args = section(markdown, /^(Argumentos|Argumentos Pi|Invocación)$/);
+			if (/--until/.test(fencedBlocks(args)[0]?.content ?? "")) problems.push(`${harness}/${skill}: la firma no gana --until`);
+			if (/^- `--until/m.test(markdown)) problems.push(`${harness}/${skill}: describe --until como flag propio`);
+			// chiche-run lo nombra para no volver a encadenar la spec (CA-13) e issue-triage para encadenar con él desde el veredicto (capa 4, CA-16).
+			if (skill !== "chiche-run" && skill !== "issue-triage" && /--until/.test(markdown)) problems.push(`${harness}/${skill}: nombra --until`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#119 CA-13: lanzado desde chiche-spec --until pr, chiche-run no vuelve a encadenar la spec y su traza repite until: pr, en los cinco harnesses", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const markdown = await skillFile(harness, "chiche-run");
+		const phase1 = section(markdown, /^Fase 1 — /);
+		problems.push(...missing(phase1, [
+			/^2\. \*\*Spec\*\*: [^\n]*Cuando esta sesión viene de `[^`]*chiche-spec --until pr` \(la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `nivel efectivo:`/m,
+			/^2\. \*\*Spec\*\*: [^\n]*[Ee]ste skill no acepta `--until`/m,
+		]).map((problem) => `${harness}/chiche-run Fase 1: ${problem}`));
+		if (harness === "claude" || harness === "antigravity" || harness === "pi") {
+			const launcher = section(markdown, /^Precondiciones del lanzador$/);
+			if (!/Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(launcher)) problems.push(`${harness}/chiche-run: las precondiciones del lanzador no cierran el doble encadenado`);
+			const traza = section(markdown, /^Traza$/);
+			if (!/^- Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `nivel efectivo:`[^\n]*el prompt del subagente lleva una línea que lo dice/m.test(traza)) problems.push(`${harness}/chiche-run: la traza del lanzador no suma until: pr`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+// Review de #124 (ronda 1): el flag --until pr no depende de una opción que A2/A3 no muestran, Codex y Pi tienen su
+// capa propia, la señal del run sale del contexto o del prompt, --until pr no mira k, y README y docs lo dicen.
+test("review #124: con --until pr el cierre del grill encadena sin esperar «Confirmar y crear spec SDD» (A2/A3 sin preguntar, A1 única confirmación), Pi dice <sessionId>, Codex termina con el comando listo, Pi lleva la marca en el task, --until pr no mira k, y README y docs lo documentan", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const grill = await skillFile(harness, "grill");
+		const bullet = grill.split("\n").find((line) => line.startsWith("- `--until pr` — ")) ?? "";
+		problems.push(...missing(bullet, [
+			/el cierre encadena la spec sin esperar la elección `Confirmar y crear spec SDD`: con A2 o A3 congela el handoff y encadena sin preguntar; con A1 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar[^\n]*sin `Confirmar` a secas/,
+			harness === "pi" ? /`\/skill:chiche-spec --from-grill <sessionId>`/ : /chiche-spec --from-grill <ruta>`/,
+		]).map((problem) => `${harness}/grill bullet --until pr: ${problem}`));
+		const closing = section(grill, /^(Cierre|Fase 3: cierre)$/);
+		if (!/(única confirmación|única forma de confirmar)[^\n]*(`Confirmar y crear spec SDD`|\*\*Confirmar y crear spec SDD\*\*|confirmar y crear spec SDD)/.test(closing)) problems.push(`${harness}/grill Cierre: con --until pr la única confirmación no es crear la spec`);
+		if (!/con A2 o A3 (el cierre congela el handoff y encadena sin preguntar|no hay pregunta de cierre|el cierre encadena sin preguntar)/.test(closing)) problems.push(`${harness}/grill Cierre: A2/A3 no encadenan sin preguntar con --until pr`);
+		const flow = delimitedBlock(await skillFile(harness, "chiche-spec"), "chiche-spec-flow") ?? "";
+		if (!/`--until pr` no mira `k`[^\n]*punto \(5\) de «Tipo y confianza»[^\n]*repite `debajo del umbral: <k>` antes de lanzar/.test(flow)) problems.push(`${harness}/chiche-spec: el flujo no fija que --until pr no mira k`);
+	}
+	const codex = await skillFile("codex", "chiche-spec");
+	if (!/Con `--autonomy A3 --until pr` pasa lo mismo que con la opción del menú: la spec queda `approved` y la corrida termina el turno con `\$chiche-run <target> --autonomy A3` en un bloque de código para que lo envíe el usuario; en Codex la cadena no llega sola al run y el reporte lo dice/.test(codex)) problems.push("codex/chiche-spec: --until pr no termina con el comando listo para enviar");
+	const pi = await skillFile("pi", "chiche-spec");
+	problems.push(...missing(pi, [
+		/Con `--autonomy A3 --until pr` no hay menú: sin fugas, persistí primero `state=approved` con `persist_sdd_spec` \(`mode: "interactive"`/,
+		/`\/skill:chiche-run <target> --autonomy A3 --inline` seguido de la línea `Lanzado desde \/skill:chiche-spec --until pr: el target ya es una spec approved; no encadenes chiche-spec y repetí until: pr en la traza`/,
+		/Sin la tool `subagent` \(o con `Unknown agent`\), el único camino es `launch_sdd_run`[^\n]*gate humano `Ejecutar ahora`[^\n]*la cadena frena ahí/,
+		/la de `--until pr` en A3, igual/,
+	]).map((problem) => `pi/chiche-spec: ${problem}`));
+	const tools = await readRepoFile("pi-extensions/grill-tools/index.ts");
+	if (!/unless until replaces it by A3/.test(tools)) problems.push("grill-tools: la description de autonomy no remite a until");
+	if (!/--until pr: chained with --autonomy A3 \(grill level \$\{receivedAutonomy \?\? "unset"\} replaced\)/.test(tools)) problems.push("grill-tools: el resultado del finalize no dice que el nivel se reemplazó");
+	for (const [path, grillRow, specRow] of [
+		["README.md", /Con `--until pr` la cadena sigue sola[^|]*encadena la spec en A3 sin esperar la elección de crearla[^|]*lanza el run sin menú/, /`--until pr` \(exige `--autonomy A3`\) aprueba la spec sin menú y lanza el run; con fugas aborta; en Codex termina con el comando `\$chiche-run` listo para enviar/],
+		["README.en.md", /With `--until pr` the chain keeps going on its own[^|]*chains the spec at A3 without waiting for the choice to create it[^|]*launches the run with no menu/, /`--until pr` \(requires `--autonomy A3`\) approves the spec with no menu and launches the run; with leaks it aborts; in Codex it ends with the `\$chiche-run` command ready to send/],
+	] as const) {
+		const markdown = await readRepoFile(path);
+		if (!grillRow.test(markdown.split("\n").find((line) => line.startsWith("| **`grill`** |")) ?? "")) problems.push(`${path}: la fila grill no nombra --until pr`);
+		if (!specRow.test(markdown.split("\n").find((line) => line.startsWith("| **`chiche-spec`** |")) ?? "")) problems.push(`${path}: la fila chiche-spec no nombra --until pr`);
+	}
+	const docs = await readRepoFile("docs/harness-interaction-differences.md");
+	if (!/`--until pr` \(issue #119, capa 3\) tiene dos diferencias de interacción\. En Codex, `\$chiche-run` exige invocación explícita[^\n]*listo para enviar[^\n]*En Pi, el run A3 lo lanza la tool `subagent` con un task literal[^\n]*la marca de `--until pr` viaja en una línea del task[^\n]*`launch_sdd_run` muestra su gate humano/.test(docs)) problems.push("docs/harness-interaction-differences.md: no registra las diferencias de --until pr en Codex y Pi");
+	assert.deepEqual(problems, []);
 });

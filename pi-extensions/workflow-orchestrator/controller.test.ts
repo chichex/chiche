@@ -76,6 +76,7 @@ function workflowResolution(overrides: Record<string, unknown> = {}) {
 		evidence: [],
 		risks: [],
 		artifacts: [],
+		verdict: null,
 		...overrides,
 	};
 }
