@@ -376,7 +376,8 @@ test("#102 CA-9: dispatch agrega --autonomy <código> a los args de cada ruta cu
 // spec + hasta el PR → --autonomy A3 --until pr; spec + hasta la spec → --autonomy A2; supervisado (accepted: false)
 // y fallback (selectedRoute ≠ recommendedRoute) → los argumentos de hoy. `/issues --autonomy` gana sobre el nivel.
 function verdict(until: "pr" | "spec", accepted: boolean) {
-	return { until, accepted, thresholds: { grill: 80, spec: 80 }, questions: [], assumed: [], forSpec: [], warnings: [] };
+	// Review #125-4: `until` sale de forSpec contra thresholds.spec; el protocolo rechaza un veredicto incoherente.
+	return { until, accepted, thresholds: { grill: 80, spec: 80 }, questions: [], assumed: [], forSpec: until === "spec" ? [{ text: "usa el store existente", confidence: 40 }] : [], warnings: [] };
 }
 
 test("#119 CA-18: dispatch construye los args del veredicto aceptado por ruta y destino, deja los de hoy con supervisado o fallback, y el --autonomy de /issues gana sobre el nivel del veredicto", () => {
@@ -402,10 +403,14 @@ test("#119 CA-18: dispatch construye los args del veredicto aceptado por ruta y 
 		const supervisedWithFlag = orchestrator.resolveWorkflowDispatch(resolution({ code: route, recommendedClassification: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict(until, false) }), undefined, { autonomy: "A2" });
 		assert.ok(supervisedWithFlag.ok);
 		assert.equal(supervisedWithFlag.request.skill.args, "#14 --autonomy A2", `${route} supervisado con /issues --autonomy A2`);
-		// /issues --autonomy gana sobre el nivel del veredicto; --until pr sigue al veredicto aceptado.
+		// Review #125-1: con /issues --autonomy el gate no ofrece → hasta y el despacho no aplica el veredicto: el flag gana y
+		// nada sube a A3 ni aborta por --until pr; un accepted: true que llegue igual se trata como supervisado.
 		const flagged = orchestrator.resolveWorkflowDispatch(accepted, undefined, { autonomy: "A1" });
 		assert.ok(flagged.ok);
-		assert.equal(flagged.request.skill.args, `#14 --autonomy A1${until === "pr" ? " --until pr" : ""}`, `${route} ${until}: el flag de /issues gana`);
+		assert.equal(flagged.request.skill.args, "#14 --autonomy A1", `${route} ${until}: el flag de /issues gana y no agrega --until pr`);
+		const flaggedA3 = orchestrator.resolveWorkflowDispatch(accepted, undefined, { autonomy: "A3" });
+		assert.ok(flaggedA3.ok);
+		assert.equal(flaggedA3.request.skill.args, "#14 --autonomy A3", `${route} ${until}: con flag no viaja --until pr`);
 	}
 	// Fallback: la ruta elegida no es la recomendada → argumentos de hoy aunque el veredicto esté aceptado.
 	const fallback = orchestrator.resolveWorkflowDispatch(resolution({ code: "spec", recommendedClassification: "grill", fallbackClassification: "spec", recommendedRoute: "grill", selectedRoute: "spec", stage: "spec", verdict: verdict("pr", true) }));

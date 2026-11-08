@@ -893,12 +893,22 @@ test("#119 CA-17: resolveWorkflow lleva verdict en grill/spec/join-*, null en st
 		assert.notEqual(existing.code, "grill", `${state}/${freshnessValue}: ruta artifact-aware`);
 		assert.equal(existing.verdict, null, `${state}/${freshnessValue}: una ruta artifact-aware no lleva veredicto`);
 	}
-	const confirmed = selectWorkflowRoute(grill, "recommended");
-	assert.deepEqual(confirmed.verdict, verdict);
-	const fallback = selectWorkflowRoute(grill, "fallback");
+	// Review #125-7: la opción elegida fija `accepted`: solo `recommended-until` (Confirmar → hasta) lo deja en true.
+	const emitted = resolveWorkflow(resolutionInput({ verdict: { ...verdict, accepted: true } }));
+	const supervised = selectWorkflowRoute(emitted, "recommended");
+	assert.equal(supervised.selectedRoute, "grill");
+	assert.deepEqual(supervised.verdict, { ...verdict, accepted: false }, "Confirmar <ruta> supervisado deja accepted en false");
+	const until = selectWorkflowRoute(emitted, "recommended-until");
+	assert.equal(until.selectedRoute, "grill");
+	assert.deepEqual(until.verdict, { ...verdict, accepted: true }, "Confirmar <ruta> → hasta deja accepted en true");
+	assert.notEqual(until.verdict, emitted.verdict, "se copia, no se comparte");
+	const fallback = selectWorkflowRoute(emitted, "fallback");
 	assert.equal(fallback.code, "spec");
-	assert.deepEqual(fallback.verdict, verdict, "el fallback conserva el veredicto emitido; el despacho decide con accepted");
-	const cancelled = selectWorkflowRoute(grill, "cancel");
+	assert.deepEqual(fallback.verdict, { ...verdict, accepted: false }, "el fallback nunca acepta el veredicto");
+	const cancelled = selectWorkflowRoute(emitted, "cancel");
 	assert.equal(cancelled.outcome, "stop");
 	assert.equal(cancelled.verdict, null);
+	// Una ruta artifact-aware recomendada no lleva veredicto aunque se elija → hasta.
+	const existing = resolveWorkflow(resolutionInput({ artifacts: [canonicalSpec("approved", "fresh")], verdict }));
+	assert.equal(selectWorkflowRoute(existing, "recommended-until").verdict, null);
 });

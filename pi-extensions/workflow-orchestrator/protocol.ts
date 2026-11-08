@@ -323,6 +323,8 @@ function verdictValue(
 	path: string,
 	diagnostics: WorkflowResolutionDiagnostic[],
 ): WorkflowVerdict | null | undefined {
+	// Review #125-9: el campo ausente ya es `missing-field` en la raíz; no sumar un `invalid-value` engañoso.
+	if (value === undefined) return undefined;
 	if (value === null) return null;
 	if (!allowed) {
 		diagnostics.push({ path, code: "invalid-value", message: "Verdict applies only to start resolutions with a new-work route (grill, spec, join-grill, join-spec)" });
@@ -340,7 +342,31 @@ function verdictValue(
 	const assumed = verdictItems(object.assumed, `${path}.assumed`, diagnostics);
 	const forSpec = verdictItems(object.forSpec, `${path}.forSpec`, diagnostics);
 	const warningsOk = stringArray(object.warnings, `${path}.warnings`, diagnostics);
-	if (!untilOk || !acceptedOk || !grillOk || !specOk || !warningsOk) return undefined;
+	// Review #125-4: `until` sale de `forSpec` contra `thresholds.spec` (k = 0 → pr; k > 0 → spec), `questions` lleva solo
+	// confianzas ≤ thresholds.grill y `assumed` solo > thresholds.grill: un veredicto incoherente no despacha nada.
+	let coherent = true;
+	if (grillOk && specOk) {
+		const grillThreshold = thresholds!.grill as number;
+		const specThreshold = thresholds!.spec as number;
+		const expectedUntil = forSpec.some((item) => item.confidence <= specThreshold) ? "spec" : "pr";
+		if (untilOk && object.until !== expectedUntil) {
+			diagnostics.push({ path: `${path}.until`, code: "invalid-value", message: `Expected until to be ${expectedUntil}: it follows forSpec against thresholds.spec` });
+			coherent = false;
+		}
+		questions.forEach((item, index) => {
+			if (item.confidence > grillThreshold) {
+				diagnostics.push({ path: `${path}.questions[${index}].confidence`, code: "invalid-value", message: "Expected a confidence at or below thresholds.grill" });
+				coherent = false;
+			}
+		});
+		assumed.forEach((item, index) => {
+			if (item.confidence <= grillThreshold) {
+				diagnostics.push({ path: `${path}.assumed[${index}].confidence`, code: "invalid-value", message: "Expected a confidence above thresholds.grill" });
+				coherent = false;
+			}
+		});
+	}
+	if (!untilOk || !acceptedOk || !grillOk || !specOk || !warningsOk || !coherent) return undefined;
 	return {
 		until: object.until as WorkflowVerdict["until"],
 		accepted: object.accepted as boolean,

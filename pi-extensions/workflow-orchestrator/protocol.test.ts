@@ -224,7 +224,8 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 	}
 	for (const route of ["spec", "join-grill", "join-spec"]) {
 		const stage = route.endsWith("grill") ? "grill" : "spec";
-		const result = validateWorkflowResolution({ ...withVerdict, code: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict({ until: "spec", accepted: false }) });
+		// Review #125-4: `until: "spec"` exige alguna técnica ≤ thresholds.spec.
+		const result = validateWorkflowResolution({ ...withVerdict, code: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict({ until: "spec", accepted: false, forSpec: [{ text: "usa el store existente", confidence: 40 }] }) });
 		assert.equal(result.ok, true, `${route}: ${JSON.stringify(result)}`);
 	}
 	const nullable = validateWorkflowResolution(startResolution());
@@ -236,6 +237,11 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 		{ name: "confidence 7.5", value: { ...withVerdict, verdict: verdict({ forSpec: [{ text: "x", confidence: 7.5 }] }) }, path: "$.verdict.forSpec[0].confidence", code: "invalid-value" },
 		{ name: "threshold 101", value: { ...withVerdict, verdict: verdict({ thresholds: { grill: 101, spec: 80 } }) }, path: "$.verdict.thresholds.grill", code: "invalid-value" },
 		{ name: "until x", value: { ...withVerdict, verdict: verdict({ until: "x" }) }, path: "$.verdict.until", code: "invalid-value" },
+		// Review #125-4: coherencia entre until, forSpec, questions, assumed y los umbrales.
+		{ name: "until spec sin técnicas debajo", value: { ...withVerdict, verdict: verdict({ until: "spec" }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "until pr con técnica debajo", value: { ...withVerdict, verdict: verdict({ until: "pr", forSpec: [{ text: "store", confidence: 40 }] }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "pregunta por encima del umbral grill", value: { ...withVerdict, verdict: verdict({ questions: [{ text: "x", confidence: 90 }] }) }, path: "$.verdict.questions[0].confidence", code: "invalid-value" },
+		{ name: "asumida debajo del umbral grill", value: { ...withVerdict, verdict: verdict({ assumed: [{ text: "x", confidence: 50 }] }) }, path: "$.verdict.assumed[0].confidence", code: "invalid-value" },
 		{ name: "accepted string", value: { ...withVerdict, verdict: verdict({ accepted: "yes" }) }, path: "$.verdict.accepted", code: "invalid-type" },
 		{ name: "extra field", value: { ...withVerdict, verdict: verdict({ level: "A3" }) }, path: "$.verdict.level", code: "extra-field" },
 		{ name: "missing warnings", value: { ...withVerdict, verdict: (({ warnings: _w, ...rest }) => rest)(verdict()) }, path: "$.verdict.warnings", code: "missing-field" },
@@ -248,6 +254,13 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 		assert.equal(result.ok, false, fixture.name);
 		if (result.ok) continue;
 		assert.ok(result.diagnostics.some((diagnostic) => diagnostic.path === fixture.path && diagnostic.code === fixture.code), `${fixture.name}: ${JSON.stringify(result.diagnostics)}`);
+	}
+	// Review #125-9: sin el campo, en un stop o en un start, solo sale missing-field en $.verdict (ningún invalid-value engañoso).
+	for (const base of [startResolution(), { ...startResolution(), outcome: "stop", code: "cancelled", selectedRoute: null, stage: null, mode: null }]) {
+		const { verdict: _v, ...absent } = base;
+		const result = validateWorkflowResolution(absent);
+		assert.equal(result.ok, false);
+		if (!result.ok) assert.deepEqual(result.diagnostics.filter((diagnostic) => diagnostic.path === "$.verdict").map((diagnostic) => diagnostic.code), ["missing-field"], JSON.stringify(result.diagnostics));
 	}
 	const schema = createSubmitWorkflowResolutionTool().parameters as { properties: Record<string, { anyOf?: Array<Record<string, unknown>> }> };
 	const verdictSchema = schema.properties.verdict?.anyOf?.[0] as { required?: string[]; additionalProperties?: boolean; properties?: Record<string, { enum?: string[] }> } | undefined;

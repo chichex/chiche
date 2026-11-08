@@ -169,7 +169,7 @@ const GrillSessionParams = Type.Object({
 	summary: Type.Optional(Type.String()),
 	handoffMarkdown: Type.Optional(Type.String({ description: "Required for finalize" })),
 	continueWithSpec: Type.Optional(Type.Boolean({ description: "After finalize, materialize chiche-spec --from-grill in this session" })),
-	autonomy: Type.Optional(Type.String({ description: "Autonomy level received by this grill (A1-A3 or its name); with continueWithSpec it is propagated as --autonomy <code>" })),
+	autonomy: Type.Optional(Type.String({ description: "Autonomy level received by this grill (A1-A3 or its name); with continueWithSpec it is propagated as --autonomy <code>, unless until replaces it by A3" })),
 	until: Type.Optional(Type.String({ description: "With continueWithSpec, \"pr\" chains chiche-spec with --autonomy A3 --until pr whatever the grill level was (issue #119, CA-12)" })),
 });
 
@@ -1490,6 +1490,7 @@ export default function grillTools(pi: ExtensionAPI) {
 			}
 			// Issue #119, CA-12: `--until pr` encadena la spec en A3 sea cual sea el nivel del grill; la spec aprueba y lanza el run.
 			let continuationUntil: "pr" | undefined;
+			const receivedAutonomy = continuationAutonomy;
 			if (params.until !== undefined) {
 				if (params.action !== "finalize") throw new Error("until is valid only for finalize");
 				if (!params.continueWithSpec) throw new Error("until requires continueWithSpec");
@@ -1635,7 +1636,7 @@ export default function grillTools(pi: ExtensionAPI) {
 					: undefined;
 				const continuationNote = continuation
 					? continuation.ok
-						? "\nNext stage: canonical chiche-spec queued in this session."
+						? `\nNext stage: canonical chiche-spec queued in this session.${continuationUntil ? ` --until pr: chained with --autonomy A3 (grill level ${receivedAutonomy ?? "unset"} replaced).` : ""}`
 						: `\nNext stage could not be materialized: ${continuation.message}`
 					: "";
 				return {

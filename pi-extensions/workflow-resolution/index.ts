@@ -1253,7 +1253,10 @@ export function resolveWorkflow(input: WorkflowResolutionInput): WorkflowResolut
 	return baseResolution(input, route, artifacts);
 }
 
-export type WorkflowSelection = "recommended" | "fallback" | "cancel";
+// Review #125-7: las cuatro opciones del gate (issue #119, CA-16): `recommended` es `Confirmar <ruta> supervisado`,
+// `recommended-until` es `Confirmar <ruta> → hasta <el PR | la spec>` (el único que deja `accepted: true`), `fallback`
+// y `cancel` como siempre; cancelar emite `verdict: null`.
+export type WorkflowSelection = "recommended" | "recommended-until" | "fallback" | "cancel";
 
 export function selectWorkflowRoute(
 	resolution: WorkflowResolutionV1,
@@ -1273,7 +1276,7 @@ export function selectWorkflowRoute(
 	if (resolution.outcome !== "start" || resolution.recommendedRoute === null) return { ...resolution };
 
 	const artifactAwareRoute = resolution.recommendedRoute !== resolution.recommendedClassification;
-	const route = selection === "recommended" || artifactAwareRoute
+	const route = selection === "recommended" || selection === "recommended-until" || artifactAwareRoute
 		? resolution.recommendedRoute
 		: resolution.fallbackClassification;
 	if (route === null) return { ...resolution };
@@ -1285,7 +1288,9 @@ export function selectWorkflowRoute(
 		selectedRoute: route,
 		stage: dispatch.stage,
 		mode: dispatch.mode,
-		// Issue #119, CA-17: el veredicto viaja solo con una ruta nueva en start; el despacho decide con `accepted`.
-		verdict: dispatch.outcome === "start" && routeCarriesVerdict(route) ? resolution.verdict : null,
+		// Issue #119, CA-17: el veredicto viaja solo con una ruta nueva en start; `accepted` lo fija la opción elegida (review #125-7).
+		verdict: dispatch.outcome === "start" && routeCarriesVerdict(route) && resolution.verdict
+			? { ...cloneVerdict(resolution.verdict), accepted: selection === "recommended-until" && route === resolution.recommendedRoute }
+			: null,
 	};
 }

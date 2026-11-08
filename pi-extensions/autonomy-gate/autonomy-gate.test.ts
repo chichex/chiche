@@ -1775,12 +1775,13 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 		problems.push(...missing(spec, [
 			// #114-1, opción A: en A2 responder es aprobar, y la aprobación se escribe bajo el mismo gate.
 			// Issue #119, CA-6: «impacto alto» pasa a «debajo del umbral».
-			/en A2, responder las preguntas debajo del umbral es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
-			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta debajo del umbral/,
-			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta debajo del umbral/,
+			// Review #123-8: la aprobación de A2 cuenta también las fugas que A2 pregunta.
+			/en A2, responder las preguntas \(las técnicas debajo del umbral y las fugas\) es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`\./,
+			/\*\*Estado\.\*\* La publicación nace siempre `draft`\. Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta \(una técnica debajo del umbral o una fuga\)/,
+			/el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta \(una técnica debajo del umbral o una fuga\)/,
 		]).map((problem) => `${harness}/chiche-spec: ${problem}`));
 		if (harness !== "pi" && !/`spec\.approved` en la transición a `aprobada`, la del menú o la de A2 \(una republicación/.test(spec)) problems.push(`${harness}/chiche-spec: el evento spec.approved no nombra la transición de A2`);
-		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas debajo del umbral se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
+		if (harness === "pi" && !/en A2, la transición a `state=approved` por respuestas \(técnicas debajo del umbral o fugas\) se persiste con `persist_sdd_spec` \(`mode: "interactive"`\)/.test(spec)) problems.push("pi/chiche-spec: la aprobación de A2 no nombra persist_sdd_spec interactive");
 		const init = await skillFile(harness, "chiche-init");
 		// #116-2: la confirmación del costo autoriza el comando del host y nada más.
 		// El ensayo pago vive solo en Claude Code (review #115-16): los otros harnesses mandan ahí con el aviso literal.
@@ -2256,14 +2257,26 @@ test("#119 CA-2: el resolver imprime los dos umbrales en bash, sh y zsh: 70/90 d
 	const command = await canonicalCommand();
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-umbral-")));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	// Review #122-5: el contrato se commitea, así `git status --porcelain` vacío prueba de verdad que el comando no toca nada.
+	const seeded: string[] = [];
 	const repo = (name: string, text: string | null): string => {
 		const root = join(dir, name);
 		mkdirSync(join(root, ".chiche"), { recursive: true });
 		git(root, "init", "-q", "-b", "main");
 		if (text !== null) writeFileSync(join(root, ".chiche/project.md"), text);
+		git(root, "add", "-A");
+		git(root, "commit", "-q", "--allow-empty", "-m", "seed");
+		seeded.push(root);
 		return root;
 	};
 	const column = repo("columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | plan-approved | 2026-11-07 | rehearsed 2026-11-07 | 90 |\n| run | supervised | 2026-11-07 | — | — |")));
+	// Review #122-6: el umbral se lee del branch default, no del branch de trabajo; y con origin sin default no se lee nada.
+	const adversarial = repoWithRemote("umbral-base-branch", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | supervised | 2026-11-07 | — | 90 |")), contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 30 |\n| spec | supervised | 2026-11-07 | — | 10 |")));
+	t.after(() => rmSync(adversarial.root, { recursive: true, force: true }));
+	const emptyBare = join(dir, "vacio.git");
+	git(dir, "init", "-q", "--bare", emptyBare);
+	const noDefault = repo("sin-default", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 70 |\n| spec | supervised | 2026-11-07 | — | 90 |")));
+	git(noDefault, "remote", "add", "origin", emptyBare);
 	const edges = repo("bordes", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | 0 |\n| spec | supervised | 2026-11-07 | — | 100 |")));
 	const absent = repo("sin-columna", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — |\n| spec | supervised | 2026-11-07 | — |\n| run | supervised | 2026-11-07 | — |")));
 	const dash = repo("guion", contract(LEVELS_TABLE("| grill | supervised | 2026-11-07 | — | — |\n| spec | supervised | 2026-11-07 | — | — |")));
@@ -2282,7 +2295,17 @@ test("#119 CA-2: el resolver imprime los dos umbrales en bash, sh y zsh: 70/90 d
 			if (!/^parada: \| git push origin main \|/m.test(run.stdout)) problems.push(`${shell} ${stage}: la stop list se sigue imprimiendo`);
 		}
 		const flagged = runResolve(command, column, "run", "A3", shell);
-		if (thresholdLines(flagged.stdout).grill !== "70") problems.push(`${shell}: con --autonomy los umbrales siguen saliendo del contrato (${flagged.stdout})`);
+		const flaggedLines = thresholdLines(flagged.stdout);
+		if (flaggedLines.grill !== "70" || flaggedLines.spec !== "90" || !flaggedLines.ordered) problems.push(`${shell}: con --autonomy los umbrales siguen saliendo del contrato, en orden (${flagged.stdout})`);
+		if (/umbral/.test(flagged.stderr)) problems.push(`${shell}: con --autonomy no hay aviso de umbral: ${flagged.stderr}`);
+		const fromDefault = runResolve(command, adversarial.work, "run", "", shell);
+		const fromDefaultLines = thresholdLines(fromDefault.stdout);
+		if (fromDefaultLines.grill !== "70" || fromDefaultLines.spec !== "90") problems.push(`${shell}: el umbral sale de origin/main, no del branch (${fromDefault.stdout})`);
+		if (!/leído de origin\/main$/m.test(fromDefault.stdout)) problems.push(`${shell}: la fuente no es origin/main (${fromDefault.stdout})`);
+		const unresolved = runResolve(command, noDefault, "run", "", shell);
+		const unresolvedLines = thresholdLines(unresolved.stdout);
+		if (unresolvedLines.grill !== "80 (default)" || unresolvedLines.spec !== "80 (default)" || !unresolvedLines.ordered) problems.push(`${shell}: con origin sin default resoluble no se lee el working tree: 80 (default) (${unresolved.stdout})`);
+		if (/umbral/.test(unresolved.stderr)) problems.push(`${shell}: origin sin default no avisa de umbral: ${unresolved.stderr}`);
 		const edge = thresholdLines(runResolve(command, edges, "run", "", shell).stdout);
 		if (edge.grill !== "0" || edge.spec !== "100") problems.push(`${shell}: 0 y 100 son válidos (${edge.grill}/${edge.spec})`);
 		for (const [name, cwd] of [["sin columna", absent], ["con —", dash], ["sin filas grill/spec", noRows], ["sin ## Autonomy", noAutonomy], ["sin contrato", noContract]] as const) {
@@ -2310,7 +2333,8 @@ test("#119 CA-2: el resolver imprime los dos umbrales en bash, sh y zsh: 70/90 d
 		if (!UMBRAL_INVALID("spec", "101").test(run.stderr)) problems.push(`${shell}: falta el aviso literal de spec: ${JSON.stringify(run.stderr)}`);
 	}
 	assert.deepEqual(problems, []);
-	for (const root of [column, absent, noAutonomy]) assert.equal(git(root, "status", "--porcelain").trim().replace(/^\?\? \.chiche\/$/m, ""), "", "el comando no toca el working tree");
+	for (const root of seeded) assert.equal(git(root, "status", "--porcelain"), "", `${root}: el comando no toca el working tree`);
+	assert.equal(git(adversarial.work, "status", "--porcelain"), "", "el comando no toca el branch de trabajo");
 });
 
 test("#119 CA-3: la Fase 3 de chiche-init pregunta los umbrales de grill y spec con la tool del harness (80 Recomendado / 70 / 90), con --autonomy ≥ A2 escribe 80, y la checklist gana la fila Umbrales de confianza", async () => {
@@ -2324,7 +2348,7 @@ test("#119 CA-3: la Fase 3 de chiche-init pregunta los umbrales de grill y spec 
 			/\*\*Umbrales de confianza\.\*\*/,
 			new RegExp(`\\*\\*Umbrales de confianza\\.\\*\\* Después de los niveles, preguntar el umbral de \`grill\` y el de \`spec\` con \`${tool}\`, una pregunta por stage`),
 			/`80 \(Recomendado\)` \/ `70` \/ `90`/,
-			/la respuesta libre \(Other\) para otro entero de 0 a 100/,
+			/la respuesta libre \(Other(?:, con `allowOther: true`)?\) para otro entero de 0 a 100/,
 			/\*\*Umbrales de confianza\.\*\*[^\n]*`run`, `review`, `land` y los ambientes llevan `—`/,
 			/\*\*Umbrales de confianza\.\*\*[^\n]*Con `--autonomy` ≥ A2 no se pregunta: escribe 80 en `grill` y `spec`/,
 		]).map((problem) => `${harness}/chiche-init Fase 3: ${problem}`));
@@ -2426,15 +2450,57 @@ test("#119 CA-13: lanzado desde chiche-spec --until pr, chiche-run no vuelve a e
 		const markdown = await skillFile(harness, "chiche-run");
 		const phase1 = section(markdown, /^Fase 1 — /);
 		problems.push(...missing(phase1, [
-			/^2\. \*\*Spec\*\*: [^\n]*Lanzado desde `[^`]*chiche-spec --until pr`[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `nivel efectivo:`/m,
+			/^2\. \*\*Spec\*\*: [^\n]*Cuando esta sesión viene de `[^`]*chiche-spec --until pr` \(la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `nivel efectivo:`/m,
 			/^2\. \*\*Spec\*\*: [^\n]*[Ee]ste skill no acepta `--until`/m,
 		]).map((problem) => `${harness}/chiche-run Fase 1: ${problem}`));
 		if (harness === "claude" || harness === "antigravity" || harness === "pi") {
 			const launcher = section(markdown, /^Precondiciones del lanzador$/);
-			if (!/Lanzado desde `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(launcher)) problems.push(`${harness}/chiche-run: las precondiciones del lanzador no cierran el doble encadenado`);
+			if (!/Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(launcher)) problems.push(`${harness}/chiche-run: las precondiciones del lanzador no cierran el doble encadenado`);
 			const traza = section(markdown, /^Traza$/);
-			if (!/^- Lanzado desde `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `nivel efectivo:`/m.test(traza)) problems.push(`${harness}/chiche-run: la traza del lanzador no suma until: pr`);
+			if (!/^- Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `nivel efectivo:`[^\n]*el prompt del subagente lleva una línea que lo dice/m.test(traza)) problems.push(`${harness}/chiche-run: la traza del lanzador no suma until: pr`);
 		}
 	}
+	assert.deepEqual(problems, []);
+});
+
+// Review de #124 (ronda 1): el flag --until pr no depende de una opción que A2/A3 no muestran, Codex y Pi tienen su
+// capa propia, la señal del run sale del contexto o del prompt, --until pr no mira k, y README y docs lo dicen.
+test("review #124: con --until pr el cierre del grill encadena sin esperar «Confirmar y crear spec SDD» (A2/A3 sin preguntar, A1 única confirmación), Pi dice <sessionId>, Codex termina con el comando listo, Pi lleva la marca en el task, --until pr no mira k, y README y docs lo documentan", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const grill = await skillFile(harness, "grill");
+		const bullet = grill.split("\n").find((line) => line.startsWith("- `--until pr` — ")) ?? "";
+		problems.push(...missing(bullet, [
+			/el cierre encadena la spec sin esperar la elección `Confirmar y crear spec SDD`: con A2 o A3 congela el handoff y encadena sin preguntar; con A1 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar[^\n]*sin `Confirmar` a secas/,
+			harness === "pi" ? /`\/skill:chiche-spec --from-grill <sessionId>`/ : /chiche-spec --from-grill <ruta>`/,
+		]).map((problem) => `${harness}/grill bullet --until pr: ${problem}`));
+		const closing = section(grill, /^(Cierre|Fase 3: cierre)$/);
+		if (!/(única confirmación|única forma de confirmar)[^\n]*(`Confirmar y crear spec SDD`|\*\*Confirmar y crear spec SDD\*\*|confirmar y crear spec SDD)/.test(closing)) problems.push(`${harness}/grill Cierre: con --until pr la única confirmación no es crear la spec`);
+		if (!/con A2 o A3 (el cierre congela el handoff y encadena sin preguntar|no hay pregunta de cierre|el cierre encadena sin preguntar)/.test(closing)) problems.push(`${harness}/grill Cierre: A2/A3 no encadenan sin preguntar con --until pr`);
+		const flow = delimitedBlock(await skillFile(harness, "chiche-spec"), "chiche-spec-flow") ?? "";
+		if (!/`--until pr` no mira `k`[^\n]*punto \(5\) de «Tipo y confianza»[^\n]*repite `debajo del umbral: <k>` antes de lanzar/.test(flow)) problems.push(`${harness}/chiche-spec: el flujo no fija que --until pr no mira k`);
+	}
+	const codex = await skillFile("codex", "chiche-spec");
+	if (!/Con `--autonomy A3 --until pr` pasa lo mismo que con la opción del menú: la spec queda `approved` y la corrida termina el turno con `\$chiche-run <target> --autonomy A3` en un bloque de código para que lo envíe el usuario; en Codex la cadena no llega sola al run y el reporte lo dice/.test(codex)) problems.push("codex/chiche-spec: --until pr no termina con el comando listo para enviar");
+	const pi = await skillFile("pi", "chiche-spec");
+	problems.push(...missing(pi, [
+		/Con `--autonomy A3 --until pr` no hay menú: sin fugas, persistí primero `state=approved` con `persist_sdd_spec` \(`mode: "interactive"`/,
+		/`\/skill:chiche-run <target> --autonomy A3 --inline` seguido de la línea `Lanzado desde \/skill:chiche-spec --until pr: el target ya es una spec approved; no encadenes chiche-spec y repetí until: pr en la traza`/,
+		/Sin la tool `subagent` \(o con `Unknown agent`\), el único camino es `launch_sdd_run`[^\n]*gate humano `Ejecutar ahora`[^\n]*la cadena frena ahí/,
+		/la de `--until pr` en A3, igual/,
+	]).map((problem) => `pi/chiche-spec: ${problem}`));
+	const tools = await readRepoFile("pi-extensions/grill-tools/index.ts");
+	if (!/unless until replaces it by A3/.test(tools)) problems.push("grill-tools: la description de autonomy no remite a until");
+	if (!/--until pr: chained with --autonomy A3 \(grill level \$\{receivedAutonomy \?\? "unset"\} replaced\)/.test(tools)) problems.push("grill-tools: el resultado del finalize no dice que el nivel se reemplazó");
+	for (const [path, grillRow, specRow] of [
+		["README.md", /Con `--until pr` la cadena sigue sola[^|]*encadena la spec en A3 sin esperar la elección de crearla[^|]*lanza el run sin menú/, /`--until pr` \(exige `--autonomy A3`\) aprueba la spec sin menú y lanza el run; con fugas aborta; en Codex termina con el comando `\$chiche-run` listo para enviar/],
+		["README.en.md", /With `--until pr` the chain keeps going on its own[^|]*chains the spec at A3 without waiting for the choice to create it[^|]*launches the run with no menu/, /`--until pr` \(requires `--autonomy A3`\) approves the spec with no menu and launches the run; with leaks it aborts; in Codex it ends with the `\$chiche-run` command ready to send/],
+	] as const) {
+		const markdown = await readRepoFile(path);
+		if (!grillRow.test(markdown.split("\n").find((line) => line.startsWith("| **`grill`** |")) ?? "")) problems.push(`${path}: la fila grill no nombra --until pr`);
+		if (!specRow.test(markdown.split("\n").find((line) => line.startsWith("| **`chiche-spec`** |")) ?? "")) problems.push(`${path}: la fila chiche-spec no nombra --until pr`);
+	}
+	const docs = await readRepoFile("docs/harness-interaction-differences.md");
+	if (!/`--until pr` \(issue #119, capa 3\) tiene dos diferencias de interacción\. En Codex, `\$chiche-run` exige invocación explícita[^\n]*listo para enviar[^\n]*En Pi, el run A3 lo lanza la tool `subagent` con un task literal[^\n]*la marca de `--until pr` viaja en una línea del task[^\n]*`launch_sdd_run` muestra su gate humano/.test(docs)) problems.push("docs/harness-interaction-differences.md: no registra las diferencias de --until pr en Codex y Pi");
 	assert.deepEqual(problems, []);
 });

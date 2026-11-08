@@ -1220,7 +1220,7 @@ test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"p
 		/--until spec: valor inválido; válido: pr/,
 	);
 	sentMessages = [];
-	await tool.execute(
+	const finalized = await tool.execute(
 		"finalize-continue-until",
 		{ action: "finalize", sessionId: id, continueWithSpec: true, until: "pr", autonomy: "plan-approved", handoffMarkdown: "# Grill — Continuar hasta el PR\n\n## Handoff\nListo.\n" },
 		undefined,
@@ -1231,6 +1231,31 @@ test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"p
 	// El grill corrió en A2 y aun así la spec recibe A3: --until pr manda sobre el nivel del grill (#119 CA-12).
 	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(id)} --autonomy A3 --until pr`), sentMessages[0]!.content.slice(-120));
 	assertQueuedChicheSpec(sentMessages[0]!.content);
+	// Review #124-6: el resultado del finalize dice que el nivel recibido se reemplazó por A3.
+	const finalizedText = finalized.content.map((item) => ("text" in item ? item.text : "")).join("\n");
+	assert.match(finalizedText, /--until pr: chained with --autonomy A3 \(grill level A2 replaced\)/, finalizedText);
+	// Review #124-6: `until` sin `autonomy` es el caso común desde pi/grill sin --autonomy: la spec recibe A3 igual.
+	const plain = await tool.execute(
+		"create-continue-until-plain",
+		{ action: "create", topic: "Continuar hasta el PR sin nivel", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const plainId = plain.details.snapshot.id;
+	t.after(() => removeStoredSnapshot(plainId));
+	await tool.execute("configure-continue-until-plain", { action: "configure", sessionId: plainId, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
+	sentMessages = [];
+	const plainFinalized = await tool.execute(
+		"finalize-continue-until-plain",
+		{ action: "finalize", sessionId: plainId, continueWithSpec: true, until: "pr", handoffMarkdown: "# Grill — Sin nivel\n\n## Handoff\nListo.\n" },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	assert.equal(sentMessages.length, 1);
+	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(plainId)} --autonomy A3 --until pr`), sentMessages[0]!.content.slice(-120));
+	assert.match(plainFinalized.content.map((item) => ("text" in item ? item.text : "")).join("\n"), /grill level unset replaced/);
 });
 
 test("issue #103 S11: grill_session finalize con continueWithSpec encola chiche-spec --from-grill en la misma sesión", { skip: !PI_PACKAGE_ROOT }, async (t) => {

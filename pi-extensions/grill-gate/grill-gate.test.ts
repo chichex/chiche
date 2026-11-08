@@ -450,6 +450,20 @@ test("#119 CA-7: el template del handoff y el contrato visible del cierre termin
 		])) problems.push(`${harness}/grill: cierre ${problem}`);
 	}
 	const pi = await grillSkill("pi");
-	for (const problem of missing(pi, [/`— asumida NN %`[^\n]*viaja en el texto de `agreement`[^\n]*`grill_session` no cambia/])) problems.push(`pi/grill: ${problem}`);
+	// Review #123-6: en una sesión pausada también viaja `— preguntada`, al final del texto de agreement.
+	for (const problem of missing(pi, [/`— preguntada` o `— asumida NN %` van al final del texto de cada decisión del `handoffMarkdown` y, en una sesión pausada, viajan al final del texto de `agreement`[^\n]*`grill_session` no cambia/])) problems.push(`pi/grill: ${problem}`);
 	assert.deepEqual(problems, []);
+});
+
+// Review #123-4: en Pi la poda `risk-pruned` y la política `explicit-only` quedan atadas al umbral, como en los otros cuatro.
+test("review #123: en pi/grill risk-pruned asume solo decisiones de producto con confianza > umbral grill, explicit-only equivale a umbral 100 y ningún [ASSUMED] queda sin porcentaje en las reglas de poda", async () => {
+	const pi = await grillSkill("pi");
+	assert.deepEqual(missing(pi, [
+		/Marcá como `\[ASSUMED NN %\]` una decisión de producto cuya opción recomendada supere el umbral \(confianza `> umbral grill`, ver «Tipo y confianza»\)/,
+		/Una decisión técnica no se asume ni se pregunta: va a `\*\*Para la spec\.\*\*`/,
+		/Preguntá las decisiones de producto con confianza `≤ umbral grill`[^\n]*el umbral manda, no la lista/,
+		/`explicit-only` \(equivale a umbral 100: se pregunta toda decisión de producto\)/,
+		/usá `risk-pruned`, atada al umbral: convertí en `\[ASSUMED NN %\]` cada decisión de producto cuya recomendada supere `umbral grill`[^\n]*una con confianza `≤ umbral grill` sigue explícita aunque sea barata de corregir/,
+	]).map((problem) => `pi/grill: ${problem}`), []);
+	assert.deepEqual(present(pi, [/Marcá como `\[ASSUMED\]` una opción respaldada/, /Preguntá solo decisiones que cambien materialmente/, /convertí cada elección respaldada, de bajo riesgo y reversible en `\[ASSUMED\]`/]).map((problem) => `pi/grill: ${problem}`), []);
 });

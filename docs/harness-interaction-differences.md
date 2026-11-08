@@ -31,6 +31,8 @@ En Codex, el sandbox por defecto (`codex sandbox -P :workspace`, verificado en C
 
 En Codex y opencode, donde el menú final de `chiche-spec` puede ir en texto plano (4 opciones en Codex, o sin la tool `question` en opencode), la primera opción numerada lleva `(Recomendado)` con la misma regla que la tool de preguntas: `chiche-run --autonomy A3` cuando el reporte dice `debajo del umbral: 0` y `fugas: 0`, y `chiche-run` en cualquier otro caso, con el motivo en la línea de la pregunta (issue #119, CA-9).
 
+`--until pr` (issue #119, capa 3) tiene dos diferencias de interacción. En Codex, `$chiche-run` exige invocación explícita (`allow_implicit_invocation: false`), así que `$chiche-spec --autonomy A3 --until pr` aprueba la spec y termina el turno con el comando `$chiche-run <target> --autonomy A3` listo para enviar, en vez de lanzar el run; cuando el usuario lo envía en la misma sesión, el run sabe por el contexto que viene de `--until pr`. En Pi, el run A3 lo lanza la tool `subagent` con un task literal y el hijo corre con `--no-session`, así que la marca de `--until pr` viaja en una línea del task, no en el contexto; sin la tool, `launch_sdd_run` muestra su gate humano `Ejecutar ahora` y la cadena frena ahí.
+
 ## Qué normaliza el gate
 
 Sobre los templates de artefactos (bloques de código con marker

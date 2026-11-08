@@ -411,9 +411,15 @@ test("#119 CA-15 y CA-16: issue-triage imprime el bloque Veredicto literal para 
 		assert.match(actionable, /sin veredicto[^\n]*`Confirmar <ruta recomendada> \(Recomendado\)`/, `${harness}: las rutas artifact-aware conservan el gate de hoy`);
 		assert.match(actionable, /`--autonomy` recibido[^\n]*gana sobre el nivel del veredicto/, `${harness}: el flag recibido gana`);
 		assert.match(actionable, /`accepted`[^\n]*`Confirmar <ruta> → hasta/, `${harness}: accepted true solo con → hasta`);
+		// Review #125-2, #125-1, #125-8: cancelar emite verdict null; con flag recibido no se ofrece → hasta; la opción nombra los niveles.
+		assert.match(actionable, /cancelar emite `verdict: null`/, `${harness}: cancelar no deja accepted false`);
+		assert.match(actionable, /Con un `--autonomy` recibido por este skill no se ofrece `→ hasta`/, `${harness}: con flag recibido sigue ofreciendo → hasta`);
+		assert.match(actionable, /`grill A2 → spec A3 → run A3`[^\n]*`spec A3 → run A3`/, `${harness}: la opción no nombra los niveles que impone`);
+		if (harness === "codex") assert.match(actionable, /En Codex, `→ hasta el PR` termina con el comando `\$chiche-run <target> --autonomy A3` listo para enviar/, "codex: hasta el PR no termina en PR");
 		blocks.set(harness, harness === "antigravity" ? block : normalizeArtifactAwareBlock(block, harness as Harness, interaction));
 	}
-	for (const harness of HARNESSES.slice(1)) assert.equal(blocks.get(harness), blocks.get("claude"), `${harness} diverge de claude en triage-verdict`);
+	// Review #125-6: Antigravity también se compara (su bloque no lleva invocaciones ni tool, así que el crudo es el normalizado).
+	for (const harness of ALL_HARNESSES.slice(1)) assert.equal(blocks.get(harness), blocks.get("claude"), `${harness} diverge de claude en triage-verdict`);
 });
 
 test("#119 CA-16: la tabla stage-chain lleva los cinco casos del veredicto en los harnesses que encadenan, y WorkflowResolutionV1 declara verdict en el contrato de los cinco", async () => {
@@ -428,7 +434,7 @@ test("#119 CA-16: la tabla stage-chain lleva los cinco casos del veredicto en lo
 		assert.match(spec, /`Confirmar → hasta la spec`[^|]*`--autonomy A2`/, `${harness}: spec + hasta la spec`);
 		for (const row of [grill, spec]) {
 			assert.match(row, /`supervisado`[^|]*`--autonomy <level>` si vino/, `${harness}: supervisado → los argumentos de hoy`);
-			assert.match(row, /`--autonomy <level>` recibido gana sobre el nivel del veredicto/, `${harness}: el flag recibido gana`);
+			assert.match(row, /un `--autonomy <level>` recibido \(que gana sobre el veredicto: el gate no ofrece `→ hasta`/, `${harness}: el flag recibido gana y no ofrece → hasta`);
 		}
 		assert.equal(args.get("join-grill"), grill, `${harness}: join-grill usa el issue canónico con los mismos args`);
 		assert.equal(args.get("join-spec"), spec, `${harness}: join-spec usa el issue canónico con los mismos args`);
@@ -439,6 +445,7 @@ test("#119 CA-16: la tabla stage-chain lleva los cinco casos del veredicto en lo
 		assert.match(contract, /verdict: WorkflowVerdict \| null;/, `${harness}: el tipo declara verdict`);
 		assert.match(contract, /type VerdictItem = \{ text: string; confidence: number \}/, `${harness}: VerdictItem`);
 		assert.match(contract, /until: "pr" \| "spec"; accepted: boolean; thresholds: \{ grill: number; spec: number \}; questions: VerdictItem\[\]; assumed: VerdictItem\[\]; forSpec: VerdictItem\[\]; warnings: string\[\]/, `${harness}: WorkflowVerdict`);
+		assert.match(contract, /un veredicto incoherente \(`until` tiene que salir de `forSpec` contra `thresholds.spec`/, `${harness}: la prosa del tipo no fija la coherencia (review #125-4)`);
 	}
 	const pi = await readRepoFile("pi/issue-triage/SKILL.md");
 	assert.match(pi, /`\/issues --autonomy <level>`[^\n]*gana sobre el nivel del veredicto/, "pi: /issues --autonomy gana");
