@@ -342,7 +342,7 @@ test("CA-7: --assume y --subagent no aparecen en los cinco harnesses, agents, el
 });
 
 // ---------------------------------------------------------------------------
-// Capa 3 (CA-13 a CA-17): ensayo de niveles, stop list y recetas de deploy
+// Stop list y recetas de deploy (issue #102, capa 3) y, desde el issue #130, la ausencia del ensayo de niveles
 
 // El nombre del host retirado se arma por partes para que este archivo no aparezca en el grep de CA-1.
 const RETIRED_HOST = ["rehearsal", "host"].join("-");
