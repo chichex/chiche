@@ -1,59 +1,71 @@
-// Issue #102, CA-2 y CA-9: gramática del dial de autonomía en Pi. `/issues
-// --autonomy <level>` parsea el flag (antes descartaba sus args) y el
-// orquestador lo propaga al despachar.
+// Issue #130, CA-25: gramática de los controles de autonomía en Pi. El dial por
+// niveles (`--autonomy`, A1 a A3) se retiró en 6.0.0: quedan la posición del run
+// (`mode`), la confianza (`confidence`) y la cadena (`--until pr`). `/issues` no
+// lleva ningún flag y rechaza `--autonomy` con el diagnóstico de retiro.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseAutonomyLevel, parseIssuesCommandArgs, withAutonomy } from "./autonomy.ts";
+import * as grammar from "./autonomy.ts";
 
-test("parseAutonomyLevel acepta código o palabra sin distinguir mayúsculas y devuelve el código canónico", () => {
-	for (const [token, code, name] of [
-		["A1", "A1", "supervised"],
-		["a1", "A1", "supervised"],
-		["supervised", "A1", "supervised"],
-		["Plan-Approved", "A2", "plan-approved"],
-		["a2", "A2", "plan-approved"],
-		["UNATTENDED", "A3", "unattended"],
-		["A3", "A3", "unattended"],
-	] as const) {
-		const parsed = parseAutonomyLevel(token);
-		assert.deepEqual(parsed, { ok: true, code, name }, token);
+const { parseConfidence, parseIssuesCommandArgs, parseRunMode, withFlag } = grammar;
+
+test("#130 CA-25: parseRunMode acepta ask, pr y pr-reviewed tal cual y rechaza cualquier otro token listando los válidos", () => {
+	for (const mode of ["ask", "pr", "pr-reviewed"] as const) {
+		assert.deepEqual(parseRunMode(mode), { ok: true, mode }, mode);
+	}
+	// Los niveles retirados y las variantes de mayúsculas no son posiciones: la gramática es la del comando canónico.
+	for (const token of ["", "PR", "Ask", "pr-review", "reviewed", "A3", "a2", "unattended", "plan-approved", "supervised", "ask,pr"]) {
+		assert.deepEqual(parseRunMode(token), { ok: false, message: `--mode ${token}: valor inválido; válidos: ask, pr, pr-reviewed` }, token);
 	}
 });
 
-test("parseAutonomyLevel rechaza A0/A4/A5 con el diagnóstico literal y cualquier otro token listando los válidos", () => {
-	for (const token of ["A0", "manual", "a4", "auto-land", "A5", "auto-deploy"]) {
-		assert.deepEqual(parseAutonomyLevel(token), { ok: false, message: `--autonomy ${token}: no soportado todavía (v1 honra A1–A3)` }, token);
+test("#130 CA-25: parseConfidence acepta un entero de 0 a 100 y rechaza lo que no es entero o queda fuera de rango", () => {
+	for (const [value, confidence] of [[0, 0], [1, 1], [80, 80], [100, 100], ["0", 0], ["80", 80], ["100", 100]] as const) {
+		assert.deepEqual(parseConfidence(value), { ok: true, confidence }, String(value));
 	}
-	for (const token of ["", "extreme", "A33", "supervised,plan-approved"]) {
-		const parsed = parseAutonomyLevel(token);
-		assert.equal(parsed.ok, false, token);
-		if (!parsed.ok) assert.equal(parsed.message, `--autonomy ${token}: valor inválido; válidos: supervised (A1), plan-approved (A2), unattended (A3)`);
+	for (const value of [-1, 101, 7.5, Number.NaN, Number.POSITIVE_INFINITY, "", "abc", "080", "7.5", "-1", "101", "80 %", " 80", "A2"]) {
+		assert.deepEqual(parseConfidence(value), { ok: false, message: `--confidence ${String(value)}: valor inválido; válidos: un entero de 0 a 100` }, String(value));
+	}
+	for (const value of [null, true, {}, [80]]) {
+		const parsed = parseConfidence(value);
+		assert.equal(parsed.ok, false, JSON.stringify(value));
+		if (!parsed.ok) assert.match(parsed.message, /^--confidence .*: valor inválido; válidos: un entero de 0 a 100$/);
 	}
 });
 
-test("parseIssuesCommandArgs lee --autonomy <level> de /issues, tolera espacios y rechaza valor ausente, repetido o tokens desconocidos", () => {
-	assert.deepEqual(parseIssuesCommandArgs(""), { ok: true, autonomy: undefined });
-	assert.deepEqual(parseIssuesCommandArgs("   "), { ok: true, autonomy: undefined });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy A2"), { ok: true, autonomy: "A2" });
-	assert.deepEqual(parseIssuesCommandArgs("  --autonomy   unattended "), { ok: true, autonomy: "A3" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy=plan-approved"), { ok: true, autonomy: "A2" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy"), { ok: false, message: "--autonomy: falta el nivel; válidos: supervised (A1), plan-approved (A2), unattended (A3)" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy --otro"), { ok: false, message: "--autonomy: falta el nivel; válidos: supervised (A1), plan-approved (A2), unattended (A3)" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy A2 --autonomy A3"), { ok: false, message: "--autonomy: repetido" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy A4"), { ok: false, message: "--autonomy A4: no soportado todavía (v1 honra A1–A3)" });
-	assert.deepEqual(parseIssuesCommandArgs("#12 --autonomy A2"), { ok: false, message: "/issues no acepta argumentos además de --autonomy <level>: #12" });
+test("#130 CA-25: parseIssuesCommandArgs no acepta flags: sin argumentos pasa, --autonomy se rechaza con el diagnóstico de retiro y cualquier otro token como argumento desconocido", () => {
+	assert.deepEqual(parseIssuesCommandArgs(""), { ok: true });
+	assert.deepEqual(parseIssuesCommandArgs("   "), { ok: true });
+	const retired = { ok: false, message: "--autonomy se retiró en 6.0.0: ya no hace falta" };
+	for (const args of [
+		"--autonomy A2",
+		"  --autonomy   unattended ",
+		"--autonomy=plan-approved",
+		"--autonomy",
+		"--autonomy=",
+		"--autonomy --otro",
+		"--autonomy A2 --autonomy A3",
+		"--autonomy A4",
+		"--autonomy extreme",
+		"#12 --autonomy A2",
+		"--until pr --autonomy A3",
+	]) {
+		assert.deepEqual(parseIssuesCommandArgs(args), retired, args);
+	}
+	// `/issues` no gana ningún flag nuevo: los controles viven en grill, chiche-spec y chiche-run.
+	assert.deepEqual(parseIssuesCommandArgs("#12"), { ok: false, message: "/issues no acepta argumentos: #12" });
+	assert.deepEqual(parseIssuesCommandArgs("--until pr"), { ok: false, message: "/issues no acepta argumentos: --until pr" });
+	assert.deepEqual(parseIssuesCommandArgs("--confidence 80"), { ok: false, message: "/issues no acepta argumentos: --confidence 80" });
+	assert.deepEqual(parseIssuesCommandArgs("--mode pr-reviewed"), { ok: false, message: "/issues no acepta argumentos: --mode pr-reviewed" });
+	// `--autonomyx` no es el flag retirado: es un token desconocido más.
+	assert.deepEqual(parseIssuesCommandArgs("--autonomyx A2"), { ok: false, message: "/issues no acepta argumentos: --autonomyx A2" });
 });
 
-test("withAutonomy agrega el flag canónico al final de los args y no toca los args sin nivel", () => {
-	assert.equal(withAutonomy("#14", undefined), "#14");
-	assert.equal(withAutonomy("#14", "A2"), "#14 --autonomy A2");
-	assert.equal(withAutonomy("", "A3"), "--autonomy A3");
-	assert.equal(withAutonomy("--from-grill \"id\"", "A1"), "--from-grill \"id\" --autonomy A1");
-});
-
-// Issue #119, CA-18: `/issues` no gana flags nuevos; `--until pr` se rechaza como token desconocido.
-test("#119 CA-18: parseIssuesCommandArgs no gana --until: lo rechaza como argumento desconocido", () => {
-	assert.deepEqual(parseIssuesCommandArgs("--until pr"), { ok: false, message: "/issues no acepta argumentos además de --autonomy <level>: --until pr" });
-	assert.deepEqual(parseIssuesCommandArgs("--autonomy A2 --until pr"), { ok: false, message: "/issues no acepta argumentos además de --autonomy <level>: --until pr" });
+test("#130 CA-25: withFlag agrega el flag con su valor al final de los args, deja los args intactos sin valor y no pierde el 0", () => {
+	assert.equal(withFlag("#14", "--mode", undefined), "#14");
+	assert.equal(withFlag("#14", "--mode", "pr"), "#14 --mode pr");
+	assert.equal(withFlag("", "--mode", "pr-reviewed"), "--mode pr-reviewed");
+	assert.equal(withFlag("--from-grill \"id\"", "--until", "pr"), "--from-grill \"id\" --until pr");
+	assert.equal(withFlag("--from-grill \"id\"", "--confidence", 0), "--from-grill \"id\" --confidence 0");
+	assert.equal(withFlag(withFlag("--from-grill \"id\"", "--until", "pr"), "--confidence", 100), "--from-grill \"id\" --until pr --confidence 100");
 });

@@ -20,7 +20,7 @@ import {
 } from "./direct-launch.ts";
 import type { DirectGrillRequestV1, DirectRunRequestV1 } from "./direct-protocol.ts";
 import { resolveWorkflowDispatchForCwd } from "./dispatch.ts";
-import { type AutonomyCode, parseAutonomyLevel, withAutonomy } from "./autonomy.ts";
+import { type AutonomyCode, parseAutonomyLevel } from "./autonomy.ts";
 import {
 	startFreshStage as startFreshStageDefault,
 	type StartFreshStageRequest,
@@ -42,9 +42,6 @@ export type BeginIssueTriageResult =
 
 export interface IssueTriageRequest {
 	issueNumbers: number[];
-	// Issue #102, CA-9: nivel de `/issues --autonomy <level>`; viaja a los args de
-	// issue-triage y, al despachar, a los del skill del stage elegido.
-	autonomy?: string;
 }
 
 export interface WorkflowControllerDependencies {
@@ -176,7 +173,6 @@ interface ActiveTriageAttempt {
 	sessionId: string;
 	status: "open" | "validating" | "claimed";
 	idleExpiresAt: number;
-	autonomy?: AutonomyCode;
 }
 
 type DispatchReceipt =
@@ -434,7 +430,7 @@ export function createWorkflowController(
 					const resolution = terminalResult.details;
 					if (activeAttempt !== attempt) throw new Error("submit_workflow_resolution attempt expired during validation");
 					if (resolution.outcome === "start" && resolution.selectedRoute !== null) {
-						const dispatch = await resolveWorkflowDispatchForCwd(resolution, { autonomy: attempt.autonomy });
+						const dispatch = await resolveWorkflowDispatchForCwd(resolution);
 						if (!dispatch.ok) throw new Error(`${dispatch.code}: ${dispatch.message}`);
 						queueReceipt({
 							kind: "workflow",
@@ -560,12 +556,6 @@ export function createWorkflowController(
 			if (!validIssueNumbers(input.issueNumbers)) {
 				return { ok: false, code: "invalid-issues", message: "Issue selection must contain 1-12 unique positive integers" };
 			}
-			let autonomy: AutonomyCode | undefined;
-			if (input.autonomy !== undefined) {
-				const parsed = parseAutonomyLevel(input.autonomy);
-				if (!parsed.ok) return { ok: false, code: "invalid-autonomy", message: parsed.message };
-				autonomy = parsed.code;
-			}
 			const sessionId = contextSessionId(context);
 			if (!sessionId) {
 				return { ok: false, code: "origin-session-unbound", message: "Issue triage requires a persisted origin session" };
@@ -578,12 +568,11 @@ export function createWorkflowController(
 				sessionId,
 				status: "open",
 				idleExpiresAt: now() + triageAttemptTtlMs,
-				autonomy,
 			};
 			activeAttempt = attempt;
 			const materialized = await materializeSkill(
 				"issue-triage",
-				withAutonomy(input.issueNumbers.map((number) => `#${number}`).join(" "), autonomy),
+				input.issueNumbers.map((number) => `#${number}`).join(" "),
 				{
 					commands: pi.getCommands() as readonly SkillCommandInfo[],
 					readFile: dependencies.readSkillFile,

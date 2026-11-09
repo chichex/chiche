@@ -853,8 +853,10 @@ test("launch_grill authorizes a qualified issue target and dispatches it through
 	assert.deepEqual(starts, [directGrillRequest()]);
 });
 
-// Review #114-9 (issue #102, CA-9): el cableado de --autonomy entre /issues, la materialización y el despacho.
-test("review #114-9: beginIssueTriage materializa issue-triage con --autonomy, rechaza un nivel fuera de la escala y lleva attempt.autonomy hasta el despacho", async () => {
+// Issue #130, CA-25 (antes review #114-9): /issues ya no lleva flags. issue-triage se materializa sin flags de
+// autonomía, un `autonomy` heredado en el pedido no viaja a ningún lado y el despacho solo agrega `--until pr`
+// cuando el veredicto vino aceptado.
+test("#130 CA-25: beginIssueTriage materializa issue-triage sin flags de autonomía, no propaga un autonomy heredado y el despacho solo agrega --until pr con el veredicto aceptado", async () => {
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
 	const commands = new Map<string, { handler: (args: string, context: unknown) => Promise<void> }>();
 	let activeTools = ["read"];
@@ -881,20 +883,19 @@ test("review #114-9: beginIssueTriage materializa issue-triage con --autonomy, r
 	} as never);
 	const context = { cwd: "/workspace/skills", sessionManager: { getSessionId: () => "origin" } };
 
-	const invalid = await controller.beginIssueTriage({ issueNumbers: [12], autonomy: "A4" }, context as never);
-	assert.deepEqual(invalid, { ok: false, code: "invalid-autonomy", message: "--autonomy A4: no soportado todavía (v1 honra A1–A3)" });
-	assert.equal(sent.length, 0, "un nivel inválido no materializa nada");
-
-	const queued = await controller.beginIssueTriage({ issueNumbers: [12, 13], autonomy: "plan-approved" }, context as never);
+	// Un caller viejo que todavía manda `autonomy` no consigue que viaje: el campo ya no existe en el pedido.
+	const queued = await controller.beginIssueTriage({ issueNumbers: [12, 13], autonomy: "A3" } as never, context as never);
 	assert.deepEqual(queued, { ok: true, code: "queued" });
-	assert.match(sent[0]!, /#12 #13 --autonomy A2$/, "issue-triage se materializa con el flag");
+	assert.match(sent[0]!, /#12 #13$/, "issue-triage se materializa solo con los issues");
+	assert.doesNotMatch(sent[0]!, /--autonomy|--confidence|--mode|--until/, "issue-triage no recibe flags de autonomía");
 
-	const handoff = workflowResolution({ sources: [{ repository: "chichex/chiche", number: 12 }, { repository: "chichex/chiche", number: 13 }], canonicalIssue: { repository: "chichex/chiche", number: 12 } });
+	const accepted = { until: "pr", accepted: true, thresholds: { grill: 80, spec: 80 }, questions: [], assumed: [], forSpec: [], warnings: [] };
+	const handoff = workflowResolution({ sources: [{ repository: "chichex/chiche", number: 12 }, { repository: "chichex/chiche", number: 13 }], canonicalIssue: { repository: "chichex/chiche", number: 12 }, verdict: accepted });
 	const result = await tools.get("submit_workflow_resolution")!.execute("terminal", handoff, undefined, undefined, context) as { terminate?: boolean };
 	assert.equal(result.terminate, true);
 	assert.deepEqual(sent.slice(1), ["/__sdd-dispatch autonomy-receipt"]);
 	await commands.get("__sdd-dispatch")!.handler("autonomy-receipt", { ...context, async waitForIdle() {}, ui: { notify() {} } });
-	assert.deepEqual(started, [{ name: "chiche-spec", args: "#12 --autonomy A2" }], "attempt.autonomy llega al despacho del stage elegido");
+	assert.deepEqual(started, [{ name: "chiche-spec", args: "#12 --until pr" }], "el despacho agrega solo --until pr, por el veredicto aceptado");
 });
 
 test("review #114-7: launch_sdd_run acepta autonomy opcional, lo valida con la escala y lo pasa al resolver del run directo", async () => {
