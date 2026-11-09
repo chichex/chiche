@@ -609,11 +609,11 @@ test("#134 CA-7: el reporte de los cinco chiche-init suma la línea publicacion,
 const DECLARED_SPEC_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/specs/` y `<carpeta>/grills/` se leen primero, antes de los cuatro lugares y en el mismo orden, y lo nuevo se escribe en `<carpeta>/specs/`; con la carpeta default la lista y la conducta son las de arriba.";
 const DECLARED_GRILL_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), el handoff, el cuestionario y la carpeta de capturas se escriben en `<carpeta>/grills/` y ese lugar se lee primero, antes de los cuatro de arriba; con la carpeta default la lista y la conducta son las de arriba.";
 const DECLARED_TRIAGE_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/grills/` y `<carpeta>/specs/` se inventarían primero, antes de los cuatro lugares; con la carpeta default la lista es la de arriba.";
-const DECLARED_RUN_BULLET = "   - **Carpeta declarada**: si `## Publicacion` del contrato declara una `carpeta` dentro del repo (ver «Publicación efectiva»), la spec target, el handoff canónico, su carpeta de capturas y las specs predecesoras se buscan también en `<carpeta>/specs/` y `<carpeta>/grills/`, antes que en los cuatro lugares, con la misma identidad por markers y referencias. Un artefacto de entrada sin trackear que vive ahí entra al PRIMER commit en su misma ruta relativa (ej. `docs/sdd/specs/x.md`); los del common-dir siguen yendo a `.chiche/specs/` y `.chiche/grills/`.";
+const DECLARED_RUN_BULLET = "   - **Carpeta declarada**: si la `carpeta` que imprimió el comando canónico de «Publicación efectiva» en el paso 1 está dentro del repo, la spec target, el handoff canónico, su carpeta de capturas y las specs predecesoras se buscan también en `<carpeta>/specs/` y `<carpeta>/grills/`, antes que en los cuatro lugares, con la misma identidad por markers y referencias. Un artefacto de entrada sin trackear que vive ahí entra al PRIMER commit en su misma ruta relativa (ej. `docs/sdd/specs/x.md`); los del common-dir siguen yendo a `.chiche/specs/` y `.chiche/grills/`.";
 const DECLARED_LAND = "Una copia sin trackear en la `carpeta` que `## Publicacion` del contrato declare dentro del repo (`<carpeta>/<kind>/<nombre>`) no vive en los common-dirs: la cubre la clasificación de paths sucios de abajo, que la resuelve como `ya aterrizado` cuando su `git hash-object` es igual a `git rev-parse origin/<default>:<carpeta>/<kind>/<nombre>`.";
 const CODE_REVIEW_PLACES = "4. `<carpeta>/specs/` si `## Publicacion` del contrato declara una `carpeta`, y después `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia)";
 const EVENTS_IDENTITY = "La identidad events-v1 de una spec local es `.sdd/specs/<slug>.md` sea cual sea la marca del lugar donde vive: `.chiche/` o `.sdd/`, del árbol o del common-dir, o la carpeta declarada en `## Publicacion` del contrato.";
-const SPEC_REPORT_LINE = "- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>]";
+const SPEC_REPORT_LINE = "- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>] [· staging huérfano: #NN]";
 const CODE_REVIEW_HARNESSES = ["codex", "opencode", "pi", "antigravity"] as const;
 
 test("#134 CA-8 y CA-9: el Destino de chiche-spec corre el comando canónico y aplica specs (auto, issue sin consultar, local con issue=#NN sin editar el issue), --out manda, y una creación fallida cae a <carpeta>/specs/ con el aviso literal del reporte", async () => {
@@ -625,7 +625,7 @@ test("#134 CA-8 y CA-9: el Destino de chiche-spec corre el comando canónico y a
 		problems.push(...missing(flow, [
 			/^\*\*Destino\.\*\* `--out` fuerza el destino y manda sobre la fila `specs`\. Sin `--out`, correr el comando canónico de «Publicación efectiva» y aplicar `specs` sin preguntar\. Con `auto`, la regla de siempre:$/m,
 			/^3\. Si no, o si `gh` no está disponible o falla → `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md` si hay issue de origen\), con su ruta absoluta en el reporte; con la carpeta default es `<git-common-dir>\/chiche\/specs\/<slug>\.md`\.$/m,
-			/^Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs\. Con `local`, escribir siempre `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md`\), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue\. Si crear o editar el issue falla \(con `issue`, o con `auto` cuando eligió issue\), la spec se escribe en `<carpeta>\/specs\/` y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>`; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación\.$/m,
+			/^Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs\. Con `local`, escribir siempre `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md`\), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue\. Si crear o editar el issue falla \(con `issue`, o con `auto` cuando eligió issue\), la spec se escribe en `<carpeta>\/specs\/` con el marker que ya tenía \(`issue=none`, o la referencia del issue de origen\) y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>` y nombra el issue de staging huérfano si lo hubo, para que el reintento lo reuse en vez de crear otro; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación\.$/m,
 		]).map((problem) => at(`Destino: ${problem}`)));
 		if (!/`local` = `<git-common-dir>\/chiche\/specs\/` \(o `<carpeta>\/specs\/` si `## Publicacion` del contrato declara una carpeta\)/.test(markdown)) problems.push(at("--out local no nombra la carpeta declarada"));
 		if (!/También `## Publicacion`, que fija el destino de la spec y la carpeta de los borradores \(ver «Publicación efectiva»\)\./.test(markdown)) problems.push(at("la Fase 1 no lee ## Publicacion"));
@@ -681,6 +681,83 @@ test("#134 CA-14: el bloque chiche-events de grill, chiche-spec, chiche-run y ch
 			const events = delimitedBlock(await skillFile(harness, skill), "chiche-events") ?? "";
 			if (!events.includes(EVENTS_IDENTITY)) problems.push(`${harness}/${skill}: chiche-events no fija la identidad en la carpeta declarada`);
 		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Review de #139: la carpeta declarada llega a toda la prosa que lee o escribe borradores
+
+const GRILLS_PLACEHOLDER = "En el resto de este skill, `<grills>` es ese destino: `<git-common-dir>/chiche/grills/`, o `<carpeta>/grills/` con una carpeta declarada.";
+const EXCLUDED_BLOCKS = ["grill-drafts", "publication-resolve", "chiche-events"] as const;
+
+function outsideBlocks(markdown: string, names: readonly string[]): string {
+	let out = markdown;
+	for (const name of names) out = out.replace(new RegExp(`<!-- ${escapeRegExp(name)}:start -->\\n[\\s\\S]*?\\n<!-- ${escapeRegExp(name)}:end -->`, "g"), "");
+	return out;
+}
+
+test("#139-2: fuera de los bloques compartidos, grill escribe en `<grills>` (el destino de «Dónde viven los borradores») y toda lista de lectura del common-dir nombra `<carpeta>/grills/`; en Pi la tool upsertea en `<grills>`", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/grill: ${problem}`;
+		const markdown = await skillFile(harness, "grill");
+		const drafts = delimitedBlock(markdown, "grill-drafts") ?? "";
+		if (!drafts.includes(GRILLS_PLACEHOLDER)) problems.push(at("grill-drafts no define `<grills>`"));
+		const prose = outsideBlocks(markdown, EXCLUDED_BLOCKS);
+		for (const [index, line] of prose.split("\n").entries()) {
+			if (line.includes("<git-common-dir>/chiche/grills/") && !line.includes("`<carpeta>/grills/")) problems.push(at(`línea ${index + 1} fija el common-dir sin nombrar la carpeta declarada: ${line.slice(0, 90)}`));
+		}
+		// Pi retoma con `select_grill_session` y no tiene la lista del resume; codex y opencode conjugan «listar».
+		if (harness !== "pi" && !/list(?:á|ar) por fecha los handoffs de `<carpeta>\/grills\/\*\.md` primero si `## Publicacion` del contrato declara una `carpeta`, y después de los cuatro lugares/.test(prose)) problems.push(at("el resume sin ruta no lista la carpeta declarada primero"));
+		// Pi explora los handoffs previos con `select_grill_session`, sin la lista de lugares.
+		if (prose.includes("handoffs previos en") && !/handoffs previos en `<carpeta>\/grills\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/grills\/`, `\.sdd\/grills\/`, `<git-common-dir>\/chiche\/grills\/` y `<git-common-dir>\/sdd\/grills\/`/.test(prose)) problems.push(at("la exploración no busca handoffs previos en la carpeta declarada"));
+		// codex y opencode conjugan «escribir»; en Pi escribe la tool (`upsertea`, abajo).
+		if (harness !== "pi" && !/Para pausar o guardar, escrib(?:í|ir) `<grills>\/<fecha>-<slug>\.md`/.test(prose)) problems.push(at("pausar o guardar no escribe en `<grills>`"));
+		if (!/`<grills>\/<fecha>-<slug>-cuestionario\.md`/.test(prose)) problems.push(at("el cuestionario no va a `<grills>`"));
+		if (harness === "pi" && !/cada `pause` y `finalize` upsertea `<grills>\/<fecha>-<slug>\.md`/.test(prose)) problems.push(at("la tool de Pi no upsertea en `<grills>`"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#139-3: la Fase 0, la Fase 2 y `--from-grill` de chiche-spec miran la carpeta declarada antes que los cuatro lugares (Pi elige handoffs con sus tools y solo revisa specs)", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-spec: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-spec");
+		const patterns = [
+			/Revisar `<carpeta>\/specs\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/specs\/`, `\.sdd\/specs\/`, `<git-common-dir>\/chiche\/specs\/` y `<git-common-dir>\/sdd\/specs\/`: si ya hay una spec para este mismo pedido/,
+		];
+		if (harness !== "pi") {
+			patterns.push(
+				/un handoff finalizado en `<carpeta>\/grills\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/grills\/`, `\.sdd\/grills\/`, `<git-common-dir>\/chiche\/grills\/` o `<git-common-dir>\/sdd\/grills\/`, o en la ruta indicada/,
+				/listar `<carpeta>\/grills\/\*\.md` \(si hay carpeta declarada\), `\.chiche\/grills\/\*\.md`, `\.sdd\/grills\/\*\.md`, `<git-common-dir>\/chiche\/grills\/\*\.md` y `<git-common-dir>\/sdd\/grills\/\*\.md`/,
+			);
+		}
+		// Solo Claude Code y Antigravity chequean los handoffs antes de imprimir el menú; Codex y opencode listan en la opción.
+		if (harness === "claude" || harness === "antigravity") {
+			patterns.push(/chequear rápido si hay handoffs en `<carpeta>\/grills\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/grills\/`, `\.sdd\/grills\/`, `<git-common-dir>\/chiche\/grills\/` o `<git-common-dir>\/sdd\/grills\/`/);
+		}
+		problems.push(...missing(markdown, patterns).map((problem) => at(problem)));
+		// Ninguna lista de lectura de handoffs o specs queda sin la carpeta declarada.
+		for (const [index, line] of markdown.split("\n").entries()) {
+			if (/`\.chiche\/(?:grills|specs)\/\*?(?:\.md)?`, `\.sdd\/(?:grills|specs)\//.test(line) && !line.includes("<carpeta>/") && !line.includes("<!-- ")) problems.push(at(`línea ${index + 1} lista los cuatro lugares sin la carpeta declarada: ${line.slice(0, 80)}`));
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#139-8: en chiche-run el bloque publication-resolve va entre la Fase 0 y la Fase 1, y el paso 1 dice cuándo correr el comando canónico", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-run: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-run");
+		const block = markdown.indexOf("<!-- publication-resolve:start -->");
+		const phase1 = markdown.indexOf("\n## Fase 1 — Precondiciones (bloqueante)\n");
+		const phase0 = markdown.indexOf("\n## Fase 0 — ");
+		if (!(phase0 !== -1 && phase0 < block && block !== -1 && block < phase1)) problems.push(at("el bloque publication-resolve no está entre la Fase 0 y la Fase 1"));
+		if (!/^1\. \*\*Contrato\*\*: leer `\.chiche\/project\.md`[^\n]*Correr ahí el comando canónico de «Publicación efectiva» y anotar su `carpeta`: es la que usan los pasos siguientes\.[^\n]*$/m.test(markdown)) problems.push(at("el paso 1 de la Fase 1 no corre el comando canónico"));
+		if (!/\*\*Carpeta declarada\*\*: si la `carpeta` que imprimió el comando canónico de «Publicación efectiva» en el paso 1 está dentro del repo/.test(markdown)) problems.push(at("el bullet «Carpeta declarada» no remite al comando ya corrido"));
 	}
 	assert.deepEqual(problems, []);
 });

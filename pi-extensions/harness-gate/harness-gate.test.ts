@@ -382,7 +382,8 @@ export function validateTemplateLine(line: string, expectedType: TemplateType): 
 // `.sdd/project.md` en su prosa y en su comando canónico; los conteos de «una sola frase de fallback» lo excluyen.
 // Issue #134, CA-3: `publication-resolve` lee `## Publicacion` del contrato con el mismo fallback a
 // `.sdd/project.md` (lo gatea publication-gate), así que también queda fuera del conteo de la frase única.
-function withoutAutonomyResolve(markdown: string): string {
+// Saca los dos resolvers compartidos; el nombre lo dice (review #139-9).
+function withoutSharedResolvers(markdown: string): string {
 	return markdown
 		.replace(/<!-- autonomy-resolve:start -->\n[\s\S]*?\n<!-- autonomy-resolve:end -->/, "")
 		.replace(/<!-- publication-resolve:start -->\n[\s\S]*?\n<!-- publication-resolve:end -->/, "");
@@ -1621,18 +1622,20 @@ test("#84 CA-13, #103 CA-5: grill escribe handoff, cuestionario y capturas en <g
 	for (const harness of HARNESSES) {
 		const file = `${harness}/grill/SKILL.md`;
 		const markdown = await readRepoFile(file);
-		if (!/`<git-common-dir>\/chiche\/grills\/<fecha>-<slug>\.md`/.test(markdown)) problems.push(`${file}: el handoff no se escribe en <git-common-dir>/chiche/grills/<fecha>-<slug>.md`);
-		if (!/`<git-common-dir>\/chiche\/grills\/<fecha>-<slug>-cuestionario\.md`/.test(markdown)) problems.push(`${file}: el cuestionario no se escribe en <git-common-dir>/chiche/grills/`);
-		if (/`(?:<git-common-dir>\/sdd|\.sdd|\.chiche)\/grills\/<fecha>-<slug>(?:-cuestionario)?\.md`/.test(markdown)) problems.push(`${file}: todavía escribe fuera de <git-common-dir>/chiche/grills/<fecha>-<slug>.md`);
+		// Issue #134 (review #139-2): el destino de escritura es `<grills>`, definido en grill-drafts como <git-common-dir>/chiche/grills/
+		// o <carpeta>/grills/ con una carpeta declarada; la reanudación lista la carpeta declarada primero y después los cuatro lugares.
+		if (!/`<grills>\/<fecha>-<slug>\.md`/.test(markdown)) problems.push(`${file}: el handoff no se escribe en <grills>/<fecha>-<slug>.md`);
+		if (!/`<grills>\/<fecha>-<slug>-cuestionario\.md`/.test(markdown)) problems.push(`${file}: el cuestionario no se escribe en <grills>/`);
+		if (/`(?:<git-common-dir>\/(?:sdd|chiche)|\.sdd|\.chiche)\/grills\/<fecha>-<slug>(?:-cuestionario)?\.md`/.test(markdown)) problems.push(`${file}: todavía escribe en una ruta fija en vez de <grills>/<fecha>-<slug>.md`);
 		if (/handoffs? (?:previos )?(?:de los dos lugares|en `\.sdd\/grills\/` y `<git-common-dir>\/sdd\/grills\/`)/.test(markdown)) problems.push(`${file}: todavía lista los handoffs de dos lugares`);
-		if (harness !== "pi" && !/list(?:á|ar) por fecha los handoffs de los cuatro lugares \(`\.chiche\/grills\/\*\.md`, `\.sdd\/grills\/\*\.md`, `<git-common-dir>\/chiche\/grills\/\*\.md` y `<git-common-dir>\/sdd\/grills\/\*\.md`\)/.test(markdown)) {
-			problems.push(`${file}: la reanudación no lista los handoffs de los cuatro lugares`);
+		if (harness !== "pi" && !/list(?:á|ar) por fecha los handoffs de `<carpeta>\/grills\/\*\.md` primero si `## Publicacion` del contrato declara una `carpeta`, y después de los cuatro lugares \(`\.chiche\/grills\/\*\.md`, `\.sdd\/grills\/\*\.md`, `<git-common-dir>\/chiche\/grills\/\*\.md` y `<git-common-dir>\/sdd\/grills\/\*\.md`\)/.test(markdown)) {
+			problems.push(`${file}: la reanudación no lista la carpeta declarada y los cuatro lugares`);
 		}
-		if (harness === "pi" && !/handoffs portables de cada root conocido bajo `\.chiche\/grills\/` y `\.sdd\/grills\/` y de `<git-common-dir>\/chiche\/grills\/` y `<git-common-dir>\/sdd\/grills\/`/.test(markdown)) {
+		if (harness === "pi" && !/handoffs portables de cada root conocido bajo `<carpeta>\/grills\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/grills\/` y `\.sdd\/grills\/` y de `<git-common-dir>\/chiche\/grills\/` y `<git-common-dir>\/sdd\/grills\/`/.test(markdown)) {
 			problems.push(`${file}: /grills y select_grill_session no combinan los cuatro lugares`);
 		}
 		const design = delimitedDoctrine(markdown, "grill-design");
-		if (!/se copian a `<git-common-dir>\/chiche\/grills\/<nombre-real-del-handoff>\/`/.test(design)) problems.push(`${file}: las capturas no se copian a <git-common-dir>/chiche/grills/`);
+		if (!/se copian a `<grills>\/<nombre-real-del-handoff>\/`/.test(design)) problems.push(`${file}: las capturas no se copian a <grills>/`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -1647,7 +1650,8 @@ test("#84 CA-14, #103 CA-5: chiche-spec escribe la spec local en <git-common-dir
 		if (/`<git-common-dir>\/sdd\/specs\/(?:issue-NN-)?<slug>\.md`/.test(flow)) problems.push(`${file}: chiche-spec-flow todavía escribe en <git-common-dir>/sdd/specs/`);
 		if (!/`local` = `<git-common-dir>\/chiche\/specs\/`/.test(markdown)) problems.push(`${file}: --out local no apunta a <git-common-dir>/chiche/specs/`);
 		if (/`local` = `\.sdd\/specs\/`/.test(markdown)) problems.push(`${file}: --out local todavía apunta a .sdd/specs/`);
-		if (!/Revisar `\.chiche\/specs\/`, `\.sdd\/specs\/`, `<git-common-dir>\/chiche\/specs\/` y `<git-common-dir>\/sdd\/specs\/`/.test(markdown)) problems.push(`${file}: la búsqueda de una spec previa no mira los cuatro lugares`);
+		// Issue #134 (review #139-3): la carpeta declarada se revisa antes que los cuatro lugares.
+		if (!/Revisar `<carpeta>\/specs\/` \(si `## Publicacion` del contrato declara una `carpeta`\), `\.chiche\/specs\/`, `\.sdd\/specs\/`, `<git-common-dir>\/chiche\/specs\/` y `<git-common-dir>\/sdd\/specs\/`/.test(markdown)) problems.push(`${file}: la búsqueda de una spec previa no mira la carpeta declarada y los cuatro lugares`);
 		if (/`\.sdd\/grills\/` (?:o|y) (?:en )?`<git-common-dir>\/sdd\/grills\/`|`\.sdd\/specs\/` y `<git-common-dir>\/sdd\/specs\/`|`\.sdd\/grills\/\*\.md` y `<git-common-dir>\/sdd\/grills\/\*\.md`/.test(markdown)) {
 			problems.push(`${file}: todavía enumera dos lugares de handoffs o specs`);
 		}
@@ -1765,7 +1769,7 @@ test("#103 L30 (a), T7c: los skills leen el contrato de .chiche/project.md con u
 			const file = `${harness}/${skill}/SKILL.md`;
 			// Issue #102 CA-4: el bloque `autonomy-resolve` lee el contrato del branch default con el mismo
 			// fallback a `.sdd/project.md` (prosa y comando canónico); autonomy-gate lo verifica, así que queda fuera del conteo.
-			const markdown = withoutAutonomyResolve(await readRepoFile(file));
+			const markdown = withoutSharedResolvers(await readRepoFile(file));
 			if (!markdown.includes("`.chiche/project.md`")) problems.push(`${file}: no lee .chiche/project.md`);
 			if ((markdown.match(/\.sdd\/project\.md/g) ?? []).length !== 1) problems.push(`${file}: debe nombrar .sdd/project.md una sola vez, en la frase de fallback`);
 			if (!CONTRACT_FALLBACK_SENTENCE.test(markdown)) problems.push(`${file}: falta la frase de fallback del contrato`);
@@ -1811,7 +1815,7 @@ test("review #107-2 (3): el enganche y el reporte de coding-policies y design-sy
 		}
 		if (!/^- enganche: <no intentado> \| contrato \(\.chiche\/project\.md o su fallback\) <agregado\|actualizado\|ya estaba\|omitido\|sin seccion\|no existe> · /m.test(designText)) problems.push(`${design}: el enum del reporte no dice «contrato (.chiche/project.md o su fallback)»`);
 		if (/\| \.chiche\/project\.md <agregado/.test(designText)) problems.push(`${design}: el enum del reporte todavía nombra solo .chiche/project.md`);
-		for (const [file, text] of [[policies, policiesText], [design, withoutAutonomyResolve(designText)]] as const) {
+		for (const [file, text] of [[policies, policiesText], [design, withoutSharedResolvers(designText)]] as const) {
 			if ((text.match(/\.sdd\/project\.md/g) ?? []).length !== 1) problems.push(`${file}: debe nombrar .sdd/project.md una sola vez, en la frase de fallback`);
 		}
 	}

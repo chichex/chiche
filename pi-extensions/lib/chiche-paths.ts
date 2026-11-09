@@ -26,7 +26,7 @@ export type ArtifactLocation = "tracked" | "local";
 export interface ArtifactDirs {
 	/** `<root>/.chiche/<kind>`. */
 	tracked: string;
-	/** `<git-common-dir>/chiche/<kind>`: el destino de todo artefacto nuevo. */
+	/** `<git-common-dir>/chiche/<kind>`: el destino de todo artefacto nuevo salvo con una carpeta declarada (ver `artifactWriteDir`). */
 	local: string;
 	/** `<root>/.sdd/<kind>`, solo lectura. */
 	legacyTracked: string;
@@ -107,7 +107,8 @@ export function publicationFolder(contract: string): string | null {
 	let value = "";
 	for (const line of lines.slice(start + 1)) {
 		if (line.startsWith("## ")) break;
-		const match = /^\|\s*carpeta\s*\|([^|]*)\|/.exec(line);
+		// Una fila GFM sin el `|` de cierre vale igual, como `cut -d'|' -f3` en el comando canónico (review #139-5).
+		const match = /^\|\s*carpeta\s*\|([^|]*)/.exec(line);
 		if (match) {
 			value = (match[1] ?? "").trim();
 			break;
@@ -126,13 +127,18 @@ export function declaredArtifactDir(root: string, kind: ArtifactKind, contract: 
 	return folder === null ? undefined : join(resolve(root), folder, kind);
 }
 
-/** El contrato de la raíz operativa: `.chiche/project.md`, con fallback a `.sdd/project.md`; vacío si no hay o no se puede leer. */
-async function readContractText(root: string, readContract: ContractReader): Promise<string> {
+/**
+ * El contrato de la raíz operativa: `.chiche/project.md`, con fallback a
+ * `.sdd/project.md` solo si el primero no existe (ENOENT). Un contrato que no
+ * se puede leer por otro motivo no declara nada y vale como vacío, igual que
+ * `hasCanonicalContract` del orquestador.
+ */
+export async function readProjectContract(root: string, readContract: ContractReader = defaultContractReader): Promise<string> {
 	for (const directory of [TRACKED_DIR.chiche, TRACKED_DIR.sdd]) {
 		try {
 			return await readContract(join(resolve(root), directory, "project.md"));
-		} catch {
-			// el siguiente lugar
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "";
 		}
 	}
 	return "";
@@ -150,7 +156,7 @@ export async function resolveArtifactDirs(root: string, kind: ArtifactKind, runG
 	const base = commonDir
 		? { ...dirs, local: localArtifactDir(commonDir, kind), legacyLocal: localArtifactDir(commonDir, kind, "sdd") }
 		: dirs;
-	const declared = declaredArtifactDir(root, kind, await readContractText(root, readContract));
+	const declared = declaredArtifactDir(root, kind, await readProjectContract(root, readContract));
 	return declared ? { ...base, declared } : base;
 }
 
@@ -184,7 +190,7 @@ export function artifactReadDirs(dirs: ArtifactDirs): ArtifactReadDir[] {
 	});
 }
 
-/** Acepta solo una ruta absoluta directamente bajo alguno de los cuatro lugares. */
+/** Acepta solo una ruta absoluta directamente bajo alguno de los lugares de lectura (la carpeta declarada y los cuatro de siempre). */
 export function isArtifactPath(dirs: ArtifactDirs, path: string): boolean {
 	if (!isAbsolute(path)) return false;
 	const parent = dirname(resolve(path));
@@ -200,7 +206,7 @@ async function markdownFiles(directory: string): Promise<string[]> {
 	}
 }
 
-/** Une los Markdown de los cuatro lugares; ante el mismo nombre gana el primero en precedencia. */
+/** Une los Markdown de los lugares de lectura (la carpeta declarada primero, después los cuatro de siempre); ante el mismo nombre gana el primero en precedencia. */
 export async function listArtifacts(dirs: ArtifactDirs): Promise<ArtifactEntry[]> {
 	const byName = new Map<string, ArtifactEntry>();
 	for (const directory of artifactReadDirs(dirs)) {
@@ -215,7 +221,8 @@ export async function listArtifacts(dirs: ArtifactDirs): Promise<ArtifactEntry[]
  * Ruta de un artefacto por nombre: el archivo existente con la misma
  * precedencia que `listArtifacts`, o `artifactWriteDir(dirs)/<name>` (la
  * carpeta declarada, o `<git-common-dir>/chiche/<kind>`) si todavía no existe. Ejemplo: `x.md` solo en `.sdd/specs/` resuelve ahí y
- * se actualiza en su lugar; `nueva.md` resuelve al lugar local de chiche.
+ * se actualiza en su lugar; `nueva.md` resuelve a `artifactWriteDir(dirs)`: la
+ * carpeta declarada si la hay, y si no el lugar local de chiche.
  * `statPort` es el seam para tests y para quien ya inyecta su propio `stat`.
  */
 export async function resolveArtifactName(dirs: ArtifactDirs, name: string, statPort: StatPort = stat): Promise<string> {

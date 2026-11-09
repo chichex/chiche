@@ -295,6 +295,8 @@ test("#134 CA-13: publicationFolder lee la carpeta de ## Publicacion: relativa n
 	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("docs/../x")), null, "un segmento .. es inválido");
 	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("<otro>/x")), null, "otro placeholder es inválido");
 	assert.equal(publicationFolder("# Contrato\n\n## Comandos\n"), null, "sin la sección no hay carpeta");
+	// Review #139-5: una fila GFM sin el `|` de cierre vale igual que en el comando canónico (`cut -d'|' -f3`).
+	assert.equal(publicationFolder("## Publicacion\n| Clave | Valor |\n|---|---|\n| carpeta | docs/sdd/\n"), "docs/sdd");
 	assert.equal(publicationFolder(""), null);
 });
 

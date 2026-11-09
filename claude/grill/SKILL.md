@@ -121,7 +121,7 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
 
 - Toda elección pasa por `AskUserQuestion`: hasta 4 preguntas por llamada, 2 a 4 opciones por pregunta, la recomendada primera y marcada "(Recommended)", `multiSelect` solo cuando las respuestas pueden coexistir. "Other" es automático: siempre hay respuesta libre.
 - El diálogo de `AskUserQuestion` no arrastra contexto: cada pregunta tiene que poder responderse leyendo solo la pantalla actual. Lo que la pregunta referencia (mapa, propuesta, contrato) tiene que estar ya renderizado como mensaje visible en el chat — nunca pidas confirmar algo que todavía no escribiste.
-- Persistí sesiones únicamente como Markdown en `<git-common-dir>/chiche/grills/` (ver "Persistencia y reanudación"), con ediciones normales de archivos. No crees el directorio hasta que el usuario guarde, pause o exporte.
+- Persistí sesiones únicamente como Markdown en `<grills>/` (ver "Persistencia y reanudación"), con ediciones normales de archivos. No crees el directorio hasta que el usuario guarde, pause o exporte.
 
 ## Principios
 
@@ -137,7 +137,7 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
 Antes de entrevistar:
 
 1. Explorá el codebase cuando el tema dependa de él y resolvé todos los hechos comprobables relevantes. Los hechos los averigua el agente, nunca el usuario: si más adelante una pregunta de la frontera necesita un hecho del entorno todavía sin comprobar, se averigua sin frenar la ronda (ver "Entrevista por rondas").
-2. Buscá `CONTEXT-MAP.md`, `CONTEXT.md`, `docs/adr/` y handoffs previos en `.chiche/grills/`, `.sdd/grills/`, `<git-common-dir>/chiche/grills/` y `<git-common-dir>/sdd/grills/`. Leé los relevantes para entender vocabulario y decisiones ya tomadas; son solo lectura, este skill nunca los escribe.
+2. Buscá `CONTEXT-MAP.md`, `CONTEXT.md`, `docs/adr/` y handoffs previos en `<carpeta>/grills/` (si `## Publicacion` del contrato declara una `carpeta`), `.chiche/grills/`, `.sdd/grills/`, `<git-common-dir>/chiche/grills/` y `<git-common-dir>/sdd/grills/`. Leé los relevantes para entender vocabulario y decisiones ya tomadas; son solo lectura, este skill nunca los escribe.
 3. Construí un árbol provisional de decisiones con secciones y dependencias explícitas: qué pregunta desbloquea a cuáles.
 4. Estimá preguntas mínimas, probables y máximas. La cifra operativa es la probable; presentala como estimación, no como promesa — una respuesta puede abrir o cerrar ramas.
 5. Diagnosticá la modalidad recomendada:
@@ -182,7 +182,7 @@ Un bloque es una sección coherente del árbol de decisiones. La entrevista va p
 
 Las ramas se preguntan únicamente cuando el inventario y el repo no las resuelven: una pantalla que ya existe en los mocks, o un componente que ya está en el UI kit, es un hecho, no una decisión. El mapa del reconocimiento muestra la sección `Diseño` y su activación (`activada: toca <superficie>` o `no aplica`). Los pedidos sin UI no ven ninguna pregunta nueva. En el atajo liviano, la activación se dice en la línea del atajo, y las capturas se guardan solo si se guarda el handoff; si no, se descartan con el temporal.
 
-**Capturas de referencia.** El agente renderiza con el navegador del harness las referencias renderizables del inventario —mocks HTML, bundle `design-sync/`, el Design de Claude Design, Storybook— para las pantallas que el tema toca: en Claude Code con Playwright MCP (`browser_navigate` a la ruta o URL, `browser_take_screenshot`); en los demás harnesses, con el navegador headless que `## Verificacion autonoma` del contrato declare. Un proyecto de Claude Design se materializa primero con `DesignSync` `get_file` en el temporal y se navega por `file://`. Sin navegador disponible, se le pide la captura al usuario o se registra la referencia por ruta, sin captura. Las capturas que el usuario adjunte como archivo o ruta se guardan tal cual. Sin referencia renderizable ni adjunta, nunca se inventa una captura: la rama lo registra como hecho. Las capturas viven en el scratch, un directorio temporal fuera del repo (ej. `mktemp -d`), hasta guardar, pausar o finalizar; recién ahí se copian a `<git-common-dir>/chiche/grills/<nombre-real-del-handoff>/`, con el mismo nombre base que el `.md` que quedó escrito (en Pi, incluido el sufijo de colisión que agrega la tool), y el handoff las referencia por ruta relativa (`<nombre-real-del-handoff>/<pantalla>.png`). Al guardar, pausar o finalizar, el scratch se borra solo si la copia salió bien (`cp -R -- "<scratch>/." "<destino>/" && rm -rf -- "<scratch>"`): si la copia falla, se conserva y el reporte nombra su ruta y las capturas que no se copiaron, porque las adjuntas o las de Claude Design no siempre se vuelven a renderizar. Al cerrar sin guardar, el comando de cierre empieza con `trap 'rm -rf -- "<scratch>"' EXIT`, que borra el scratch aunque ese comando falle.
+**Capturas de referencia.** El agente renderiza con el navegador del harness las referencias renderizables del inventario —mocks HTML, bundle `design-sync/`, el Design de Claude Design, Storybook— para las pantallas que el tema toca: en Claude Code con Playwright MCP (`browser_navigate` a la ruta o URL, `browser_take_screenshot`); en los demás harnesses, con el navegador headless que `## Verificacion autonoma` del contrato declare. Un proyecto de Claude Design se materializa primero con `DesignSync` `get_file` en el temporal y se navega por `file://`. Sin navegador disponible, se le pide la captura al usuario o se registra la referencia por ruta, sin captura. Las capturas que el usuario adjunte como archivo o ruta se guardan tal cual. Sin referencia renderizable ni adjunta, nunca se inventa una captura: la rama lo registra como hecho. Las capturas viven en el scratch, un directorio temporal fuera del repo (ej. `mktemp -d`), hasta guardar, pausar o finalizar; recién ahí se copian a `<grills>/<nombre-real-del-handoff>/`, con el mismo nombre base que el `.md` que quedó escrito (en Pi, incluido el sufijo de colisión que agrega la tool), y el handoff las referencia por ruta relativa (`<nombre-real-del-handoff>/<pantalla>.png`). Al guardar, pausar o finalizar, el scratch se borra solo si la copia salió bien (`cp -R -- "<scratch>/." "<destino>/" && rm -rf -- "<scratch>"`): si la copia falla, se conserva y el reporte nombra su ruta y las capturas que no se copiaron, porque las adjuntas o las de Claude Design no siempre se vuelven a renderizar. Al cerrar sin guardar, el comando de cierre empieza con `trap 'rm -rf -- "<scratch>"' EXIT`, que borra el scratch aunque ese comando falle.
 
 **Handoff.** Mientras la sesión está `paused`, las decisiones de diseño viven en `## Decisiones resueltas` con prefijo `Diseño:`, y la ruta de cada captura va en la decisión `Diseño:` que la usa. Con la rama activada, el contrato visible del cierre incluye el diseño, y el handoff `finalized` lo persiste en `## Diseño`. Si un handoff trae más de un `## Diseño` (una revisión importada), el vigente es el último.
 <!-- grill-design:end -->
@@ -219,9 +219,9 @@ Mismo ciclo, pero con exactamente una pregunta por llamada a `AskUserQuestion`, 
 ## Persistencia y reanudación
 
 <!-- publication-resolve:start -->
-**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues, o `none` cuando no hay repo de issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, sin `|` (es una celda de tabla), que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
 
-**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (o `none` sin `origin` o con un remote que no es de GitHub) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Un valor envuelto en backticks se lee sin ellos. La fila `repo` acepta `none` como valor explícito (sin repo de issues). Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (host `github.com` o `ssh.github.com`, con usuario y puerto opcionales; un alias SSH como `github.com-work` o cualquier otro host cuenta como remote que no es de GitHub y da `none`, igual que sin `origin`) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no es `none` ni cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
 
 ```bash
 (
@@ -232,16 +232,16 @@ Mismo ciclo, pero con exactamente una pregunta por llamada a `AskUserQuestion`, 
   if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
   defrepo=none
   url=$(git remote get-url origin 2>/dev/null) || url=''
-  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^.*github\.com[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\1#p')
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
   [ -z "$cand" ] || defrepo=$cand
   defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
   contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
   contract=$(printf '%s\n' "$contract" | tr -d '\r')
   section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
-  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
   specs='auto (default)'
   case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
   carpeta="$defcarpeta (default)"
@@ -255,7 +255,7 @@ Mismo ciclo, pero con exactamente una pregunta por llamada a `AskUserQuestion`, 
        esac ;;
   esac
   repo="$defrepo (default)"
-  case $vrepo in '') ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  case $vrepo in '') ;; none) repo=none ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
   crear="$defcrear (default)"
   case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
@@ -268,10 +268,10 @@ Mismo ciclo, pero con exactamente una pregunta por llamada a `AskUserQuestion`, 
 <!-- publication-resolve:end -->
 
 <!-- grill-drafts:start -->
-**Dónde viven los borradores.** El handoff, el cuestionario y la carpeta de capturas se escriben en `<git-common-dir>/chiche/grills/`, fuera del working tree: `<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`, el mismo directorio para todos los worktrees del repo, así que `git status` queda limpio en cada uno. Fuera de un repo git, en `.chiche/grills/` del cwd. Para leer o retomar se miran los cuatro lugares, en este orden: `.chiche/grills/` y `.sdd/grills/` del árbol, con lo que un PR ya commiteó, y `<git-common-dir>/chiche/grills/` y `<git-common-dir>/sdd/grills/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Todo guardado se escribe en `<git-common-dir>/chiche/grills/`, aunque el handoff retomado venga de otro de los cuatro lugares. El borrador no se ve en el editor ni viaja con un clon nuevo, así que cada vez que se guarda, pausa o finaliza, el reporte imprime su ruta absoluta. Si el harness no puede escribir en `<git-common-dir>/chiche/`, su capa de interacción dice cómo pedir permiso o caer a `.chiche/` del cwd. Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), el handoff, el cuestionario y la carpeta de capturas se escriben en `<carpeta>/grills/` y ese lugar se lee primero, antes de los cuatro de arriba; con la carpeta default la lista y la conducta son las de arriba.
+**Dónde viven los borradores.** El handoff, el cuestionario y la carpeta de capturas se escriben en `<git-common-dir>/chiche/grills/`, fuera del working tree: `<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`, el mismo directorio para todos los worktrees del repo, así que `git status` queda limpio en cada uno. Fuera de un repo git, en `.chiche/grills/` del cwd. Para leer o retomar se miran los cuatro lugares, en este orden: `.chiche/grills/` y `.sdd/grills/` del árbol, con lo que un PR ya commiteó, y `<git-common-dir>/chiche/grills/` y `<git-common-dir>/sdd/grills/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Todo guardado se escribe en `<git-common-dir>/chiche/grills/`, aunque el handoff retomado venga de otro de los cuatro lugares. El borrador no se ve en el editor ni viaja con un clon nuevo, así que cada vez que se guarda, pausa o finaliza, el reporte imprime su ruta absoluta. Si el harness no puede escribir en `<git-common-dir>/chiche/`, su capa de interacción dice cómo pedir permiso o caer a `.chiche/` del cwd. Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), el handoff, el cuestionario y la carpeta de capturas se escriben en `<carpeta>/grills/` y ese lugar se lee primero, antes de los cuatro de arriba; con la carpeta default la lista y la conducta son las de arriba. En el resto de este skill, `<grills>` es ese destino: `<git-common-dir>/chiche/grills/`, o `<carpeta>/grills/` con una carpeta declarada.
 <!-- grill-drafts:end -->
 
-Para pausar o guardar, escribí `<git-common-dir>/chiche/grills/<fecha>-<slug>.md` con:
+Para pausar o guardar, escribí `<grills>/<fecha>-<slug>.md` con:
 
 ```markdown
 # Grill — <tema>
@@ -303,7 +303,7 @@ Al pausar o guardar, con el handoff ya escrito, registrá `grill.paused` (ver "L
 
 Para retomar:
 
-1. Si no se indicó una ruta, listá por fecha los handoffs de los cuatro lugares (`.chiche/grills/*.md`, `.sdd/grills/*.md`, `<git-common-dir>/chiche/grills/*.md` y `<git-common-dir>/sdd/grills/*.md`).
+1. Si no se indicó una ruta, listá por fecha los handoffs de `<carpeta>/grills/*.md` primero si `## Publicacion` del contrato declara una `carpeta`, y después de los cuatro lugares (`.chiche/grills/*.md`, `.sdd/grills/*.md`, `<git-common-dir>/chiche/grills/*.md` y `<git-common-dir>/sdd/grills/*.md`).
 2. Pedí elegir con `AskUserQuestion` solo si hay más de un candidato razonable; si hay más de 4, ofrecé los más recientes como opciones y el resto vía "Other".
 3. Leé el archivo completo y contrastá sus hechos con el estado actual del repo; si difieren, mostrá la contradicción y resolvela antes de avanzar. Los handoffs viejos pueden traer una sección `## Modo`: ignorala, ya no existe.
 4. Mostrá el tema, los bloques cerrados con sus decisiones resueltas (agrupadas por su prefijo de bloque), el bloque en curso y los bloques pendientes, y seguí por el bloque en curso con su próxima frontera.
@@ -315,11 +315,11 @@ Para retomar:
 
 Disponible al pausar y como acción del cierre. Sirve cuando las decisiones pendientes las tiene que responder un tercero sin agente (un PM, un cliente, otro equipo): el formato está pensado para copiar y pegar en un Google Doc.
 
-Escribí `<git-common-dir>/chiche/grills/<fecha>-<slug>-cuestionario.md`:
+Escribí `<grills>/<fecha>-<slug>-cuestionario.md`:
 
 ```markdown
 # Cuestionario — <tema>
-<!-- Generado por grill. Sesión de origen: <git-common-dir>/chiche/grills/<fecha>-<slug>.md -->
+<!-- Generado por grill. Sesión de origen: <grills>/<fecha>-<slug>.md -->
 
 Cómo responder: escribí tu respuesta debajo de cada "Respuesta:". Si una opción te
 sirve tal cual, alcanza con nombrarla; si no, respondé con tus palabras.
@@ -357,7 +357,7 @@ Cerrá solo cuando todos los bloques estén resueltos.
    Si elige ajustar: retomá solo la rama elegida con el ciclo de entrevista, recalculá las decisiones dependientes si el cambio las invalida, y volvé a renderizar el contrato actualizado antes de pedir confirmación otra vez.
    Por debajo de 100 este paso no existe: con el contrato ya visible, el handoff se congela sin preguntar, con lo decidido y lo asumido (paso 3).
 
-3. **Persistencia final.** Tras confirmar (con o sin encadenado) o, por debajo de 100, sin esperar confirmación, guardá el mismo contenido del contrato como handoff `finalized` en `<git-common-dir>/chiche/grills/<fecha>-<slug>.md` con el formato de "Persistencia y reanudación", e informá la ruta absoluta. Con el handoff `finalized` escrito, registrá `grill.finalized` (ver "Log de eventos").
+3. **Persistencia final.** Tras confirmar (con o sin encadenado) o, por debajo de 100, sin esperar confirmación, guardá el mismo contenido del contrato como handoff `finalized` en `<grills>/<fecha>-<slug>.md` con el formato de "Persistencia y reanudación", e informá la ruta absoluta. Con el handoff `finalized` escrito, registrá `grill.finalized` (ver "Log de eventos").
 
 4. **Encadenar la spec.** Si eligió crear la spec, cargá el skill `chiche-spec` y continuá con `--from-grill <ruta-del-handoff>`, más `--confidence <n>` solo si esta corrida lo recibió. Con `--until pr` no hace falta haber elegido crear la spec: por debajo de 100 el cierre congela el handoff y encadena sin preguntar, con 100 la única confirmación del paso 2 es `Confirmar y crear spec SDD`, y el encadenado es `/chiche-spec --from-grill <ruta-del-handoff> --until pr`, más `--confidence <n>` solo si esta corrida lo recibió; no se le agrega ningún otro flag. Sin `--until pr` y por debajo de 100, el cierre termina con el handoff congelado y su ruta, sin encadenar la spec. Este es el último paso del cierre. El handoff `finalized` es fuente autoritativa: la spec no vuelve a preguntar decisiones ya cerradas, y sigue exigiendo `.chiche/project.md`.
 

@@ -2173,3 +2173,14 @@ test("#134 CA-13: con una carpeta declarada, grill_session pause escribe el hand
 	assert.match(readFileSync(paused.details.repoHandoffPath, "utf8"), /state=paused/);
 	assert.equal(existsSync(join(common, "chiche", "grills")), false, "nada en <git-common-dir>/chiche/grills");
 });
+
+// Review #139-1: el inventario de Pi (/grills, select_grill_session) también lee la carpeta declarada.
+test("#139-1: un handoff que vive solo en <carpeta>/grills/ aparece en el inventario del proyecto (clon nuevo, sin snapshot)", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const { base, main } = repoWithLinkedWorktree("declared-inventory");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	mkdirSync(join(main, "docs", "sdd", "grills"), { recursive: true });
+	writeFileSync(join(main, "docs", "sdd", "grills", "solo-carpeta.md"), canonicalHandoff("carpeta-declarada-sola", "finalized", "Handoff solo en la carpeta declarada", main));
+	const labels = await selectLabels(main, { status: "all", scope: "current-project", query: "carpeta-declarada" });
+	assert.equal(labels.filter((label) => label.includes("Handoff solo en la carpeta declarada")).length, 1, `el handoff de la carpeta declarada aparece una vez: ${JSON.stringify(labels)}`);
+});

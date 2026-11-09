@@ -882,3 +882,43 @@ test("ronda 2 (#116-22) y #130 CA-25: un pedido de grill con autonomy o con mode
 		if (!withMode.ok) assert.deepEqual(withMode.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.mode", "extra-field"]]);
 	}
 });
+
+// Review #139-4: la ruta lógica `.chiche/specs/<x>.md` resuelve a la carpeta declarada, como en persist_sdd_spec.
+test("#139-4: /chiche-run resuelve la ruta lógica .chiche/specs/<x>.md en la carpeta declarada en ## Publicacion cuando no existe en los cuatro lugares", async () => {
+	const temporary = await mkdtemp(join(tmpdir(), "direct-chiche-run-declared-"));
+	try {
+		const project = await realpath(temporary);
+		await mkdir(join(project, ".chiche"), { recursive: true });
+		await mkdir(join(project, "docs", "sdd", "specs"), { recursive: true });
+		await writeFile(join(project, ".chiche", "project.md"), [
+			"# Contract",
+			"<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->",
+			"",
+			"## Publicacion",
+			"| Clave | Valor |",
+			"|---|---|",
+			"| carpeta | docs/sdd/ |",
+			"",
+		].join("\n"), "utf8");
+		await writeFile(join(project, "docs", "sdd", "specs", "declarada.md"), [
+			"# Spec — Declarada",
+			"<!-- Generada. Estado: aprobada -->",
+			"<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=none; grill=none; superseded-by=none -->",
+			"",
+		].join("\n"), "utf8");
+		const dependencies = {
+			resolveGitRoot: async () => project,
+			resolveRepository: async () => "chichex/chiche",
+			resolveGitCommonDir: async () => join(project, ".git"),
+		};
+		const resolved = await orchestrator.resolveDirectRunRequest(".chiche/specs/declarada.md", project, dependencies);
+		assert.equal(resolved.ok, true, resolved.ok ? "" : `${resolved.code}: ${resolved.message}`);
+		if (resolved.ok && resolved.request.target.type === "spec") {
+			assert.equal(resolved.request.target.canonicalReference, "chichex/chiche:docs/sdd/specs/declarada.md");
+		} else if (resolved.ok) {
+			assert.fail(`target inesperado: ${JSON.stringify(resolved.request.target)}`);
+		}
+	} finally {
+		await rm(temporary, { recursive: true, force: true });
+	}
+});

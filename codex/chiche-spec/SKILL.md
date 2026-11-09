@@ -19,7 +19,7 @@ Dos ideas fuerza:
 $chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]
 ```
 
-- `--from-grill [ruta.md]` — usa como fuente autoritativa un handoff finalizado en `.chiche/grills/`, `.sdd/grills/`, `<git-common-dir>/chiche/grills/` o `<git-common-dir>/sdd/grills/`, o en la ruta indicada. Si no trae referencia, listar los handoffs `finalized` del proyecto y pedir elegir solo cuando haya más de uno. La raíz operativa es la que fija «Dónde viven los borradores».
+- `--from-grill [ruta.md]` — usa como fuente autoritativa un handoff finalizado en `<carpeta>/grills/` (si `## Publicacion` del contrato declara una `carpeta`), `.chiche/grills/`, `.sdd/grills/`, `<git-common-dir>/chiche/grills/` o `<git-common-dir>/sdd/grills/`, o en la ruta indicada. Si no trae referencia, listar los handoffs `finalized` del proyecto y pedir elegir solo cuando haya más de uno. La raíz operativa es la que fija «Dónde viven los borradores».
 - `--out local|issue` — fuerza el destino de la spec por encima de la regla automática. `local` = `<git-common-dir>/chiche/specs/` (o `<carpeta>/specs/` si `## Publicacion` del contrato declara una carpeta); `issue` = actualizar el issue de origen (o crear uno nuevo si el pedido fue libre) **sin crear una copia en `.sdd/specs/`** (salvo `Llevar a issue` desde el menú, que publica una spec local y conserva el `.md`).
 - `--confidence <n>` — confianza de esta corrida, un entero de 0 a 100; manda sobre la fila `spec` de `## Autonomy` del contrato. Las inferencias técnicas y las fugas con confianza `≤ <n>` se preguntan antes de publicar y las que la superan quedan `[ASSUMED NN %]`: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y termina en el menú final; por debajo de 100 no hay menú. Si falta el contrato, con confianza menor que 100 corre `$chiche-init --defaults` y con 100 ofrece `$chiche-init`. El flag no se propaga a `$chiche-run`, que lee su posición del contrato. Las decisiones ya confirmadas por grill nunca se degradan a supuestos. Ver «Controles de autonomía», «Controles efectivos» y «Tipo y confianza».
 - `--until pr` — hasta dónde llega la cadena; no exige ni cambia ningún otro control: qué se pregunta lo sigue decidiendo la confianza. Con el flag, la spec se publica `draft`, pasa a `approved` bajo el gate de publicación (registra `spec.published` y `spec.approved`) y lanza `$chiche-run <target>` sin flags: el run lee su posición del contrato (ver «Flujo sin fricción»). Con 100 y `--until pr` pregunta todo, no muestra el menú, aprueba y lanza el run. Sin `--until pr` termina en `Spec lista`. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag no existe en `chiche-run`: al lanzarlo no se le pasa.
@@ -135,9 +135,9 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
 - Sin `--triage-route`, una `ruta de spec` se trata igual que `update-existing-spec`.
 
 <!-- publication-resolve:start -->
-**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues, o `none` cuando no hay repo de issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, sin `|` (es una celda de tabla), que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
 
-**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (o `none` sin `origin` o con un remote que no es de GitHub) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Un valor envuelto en backticks se lee sin ellos. La fila `repo` acepta `none` como valor explícito (sin repo de issues). Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (host `github.com` o `ssh.github.com`, con usuario y puerto opcionales; un alias SSH como `github.com-work` o cualquier otro host cuenta como remote que no es de GitHub y da `none`, igual que sin `origin`) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no es `none` ni cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
 
 ```bash
 (
@@ -148,16 +148,16 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
   if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
   defrepo=none
   url=$(git remote get-url origin 2>/dev/null) || url=''
-  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^.*github\.com[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\1#p')
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
   [ -z "$cand" ] || defrepo=$cand
   defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
   contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
   contract=$(printf '%s\n' "$contract" | tr -d '\r')
   section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
-  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
   specs='auto (default)'
   case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
   carpeta="$defcarpeta (default)"
@@ -171,7 +171,7 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
        esac ;;
   esac
   repo="$defrepo (default)"
-  case $vrepo in '') ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  case $vrepo in '') ;; none) repo=none ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
   crear="$defcrear (default)"
   case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
@@ -209,7 +209,7 @@ Luego usar `request_user_input` — una pregunta, "¿De dónde sale la spec?":
 
 1. `De una descripcion (Recomendado)` — el usuario escribe el pedido (vía Other o en el mensaje siguiente).
 2. `De un issue abierto` — correr `gh issue list --state open --limit 20`, mostrar la lista y preguntar cuál.
-3. `De un grill cerrado` — listar `.chiche/grills/*.md`, `.sdd/grills/*.md`, `<git-common-dir>/chiche/grills/*.md` y `<git-common-dir>/sdd/grills/*.md`, filtrar los que declaren `Estado: finalized` y elegir el handoff sin mutarlo.
+3. `De un grill cerrado` — listar `<carpeta>/grills/*.md` (si hay carpeta declarada), `.chiche/grills/*.md`, `.sdd/grills/*.md`, `<git-common-dir>/chiche/grills/*.md` y `<git-common-dir>/sdd/grills/*.md`, filtrar los que declaren `Estado: finalized` y elegir el handoff sin mutarlo.
 
 ## Fase 1 — Raíz y contrato primero (bloqueante)
 
@@ -225,7 +225,7 @@ Luego usar `request_user_input` — una pregunta, "¿De dónde sale la spec?":
 1. Si el pedido es `#NN` o URL: `gh issue view NN --json title,body,comments,labels` (usar la URL con `-R` si es de otro repo). Guardar el número: importa para el destino en Fase 6. Los comments cuentan como fuente — a veces desambiguan el body.
 2. Si la fuente es grill: leer el Markdown finalizado completo. Tratar hechos comprobados y decisiones resueltas como fuente confirmada (las decisiones técnicas anotadas en `**Para la spec.**` no: van a la tabla de la Fase 3, ver sus Reglas); conservar restricciones, no-objetivos, supuestos, riesgos, pendientes y contexto recomendado. Si el archivo no declara `Estado: finalized` o no tiene `## Handoff`, frenar y pedir que se cierre el grill. No re-preguntar decisiones confirmadas. Si el encabezado `Fuente` referencia un issue, heredarlo como issue de origen de la spec.
 3. Explorar el código con lectura de archivos y shell y llamadas paralelas solo cuando sean independientes: relevar qué existe hoy, archivos potenciales, convenciones, tests previos, dependencias y blast radius. La spec se escribe contra el código real, no contra la idea del código.
-4. Revisar `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/`: si ya hay una spec para este mismo pedido, issue o ruta de handoff, avisar y tratar la corrida como actualización, no crear otra.
+4. Revisar `<carpeta>/specs/` (si `## Publicacion` del contrato declara una `carpeta`), `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/`: si ya hay una spec para este mismo pedido, issue o ruta de handoff, avisar y tratar la corrida como actualización, no crear otra.
 
 ## Fase 3 — Inferencias sobre la mesa
 
@@ -386,7 +386,7 @@ $chiche-spec no frena a validar lo que ya puede escribir: las inferencias técni
 2. Si no, y el repo ya usa issues como specs — `gh issue list --state all --limit 50 --search "SDD-Tracking in:body"` o `gh issue list --state all --limit 50 --search "Chiche-Tracking in:body"` devuelve al menos uno → crear issue: primero un staging no-SDD; con el número devuelto, reemplazar `issue=none` y recién entonces publicar la spec canónica.
 3. Si no, o si `gh` no está disponible o falla → `<carpeta>/specs/<slug>.md` (o `<carpeta>/specs/issue-NN-<slug>.md` si hay issue de origen), con su ruta absoluta en el reporte; con la carpeta default es `<git-common-dir>/chiche/specs/<slug>.md`.
 
-Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs. Con `local`, escribir siempre `<carpeta>/specs/<slug>.md` (o `<carpeta>/specs/issue-NN-<slug>.md`), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue. Si crear o editar el issue falla (con `issue`, o con `auto` cuando eligió issue), la spec se escribe en `<carpeta>/specs/` y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>`; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación.
+Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs. Con `local`, escribir siempre `<carpeta>/specs/<slug>.md` (o `<carpeta>/specs/issue-NN-<slug>.md`), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue. Si crear o editar el issue falla (con `issue`, o con `auto` cuando eligió issue), la spec se escribe en `<carpeta>/specs/` con el marker que ya tenía (`issue=none`, o la referencia del issue de origen) y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>` y nombra el issue de staging huérfano si lo hubo, para que el reintento lo reuse en vez de crear otro; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación.
 
 **Menú final (solo con confianza `100`).** Después del reporte `Spec lista`, mostrar el link del issue o la ruta del `.md` y ofrecer, con la tool de preguntas del harness (o en texto plano donde no la hay):
 
@@ -473,7 +473,7 @@ Spec lista: <ruta local y/o issue #NN actualizado>
 - inferencias: <N> sobre la mesa · <A> asumidas · <D> del handoff confirmadas
 - confianza spec: <n> · preguntadas: <k> · fugas: <f>
 - revisar primero: <fugas y asumidas del grill con NN ≤ confianza grill; después las [ASSUMED NN %], de menor a mayor confianza | ninguna>
-- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>]
+- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>] [· staging huérfano: #NN]
 <si hubo que correr $chiche-init, hay CA NULA que exigen prueba humana, o una politica de
 generacion condiciona la ejecucion (particion por tamaño, coverage), una linea por cada uno>
 ```

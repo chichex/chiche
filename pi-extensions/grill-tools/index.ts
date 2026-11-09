@@ -408,9 +408,9 @@ function isInside(parent: string, candidate: string): boolean {
 // CA-13). Una ruta relativa es la ruta lógica `.chiche/specs/<x>.md` o
 // `.sdd/specs/<x>.md`, o `<carpeta>/specs/<x>.md` con una carpeta declarada: el
 // nombre se resuelve con la precedencia de lectura (si ya existe en alguno de
-// los cuatro lugares, se actualiza en su lugar) y si no existe se escribe en
-// `<git-common-dir>/chiche/specs/`. Una ruta absoluta tiene que caer
-// directamente bajo uno de los cuatro lugares.
+// los lugares de lectura, se actualiza en su lugar) y si no existe se escribe en
+// la carpeta declarada o, sin ella, en `<git-common-dir>/chiche/specs/`. Una
+// ruta absoluta tiene que caer directamente bajo uno de los lugares de lectura.
 async function confinedSpecPath(projectPath: string, dirs: ArtifactDirs, requestedPath: string): Promise<string> {
 	const cleaned = requestedPath.trim().replace(/^@/, "");
 	if (!cleaned) throw new Error("Local destination path is required");
@@ -462,7 +462,7 @@ async function ensureSafeSpecDestination(projectPath: string, dirs: ArtifactDirs
 	const directory = dirname(resolve(path));
 	const place = artifactReadDirs(dirs).find((entry) => resolve(entry.path) === directory);
 	if (!place) {
-		throw new Error("Refusing a spec destination outside .chiche/specs, .sdd/specs, <git-common-dir>/chiche/specs and <git-common-dir>/sdd/specs");
+		throw new Error("Refusing a spec destination outside .chiche/specs, .sdd/specs, <git-common-dir>/chiche/specs, <git-common-dir>/sdd/specs and the folder declared in ## Publicacion");
 	}
 	await mkdir(directory, { recursive: true });
 	const directoryCanonical = await realpath(directory);
@@ -875,7 +875,8 @@ async function readHandoffCandidates(
 	const sharing = new Map<string, { directories: string[]; roots: string[] }>();
 	for (const projectPath of roots) {
 		const dirs = dirsByRoot.get(projectPath)!;
-		for (const { path: file, directory } of await pairedHandoffFiles([dirs.tracked, dirs.legacyTracked])) {
+		// Review #139-1: la carpeta declarada en ## Publicacion viaja con el árbol y se inventaría con los trackeados.
+		for (const { path: file, directory } of await pairedHandoffFiles([...(dirs.declared ? [dirs.declared] : []), dirs.tracked, dirs.legacyTracked])) {
 			const candidate = await read(join(directory, file), projectPath);
 			const grill = candidate.markdown === undefined ? null : handoffIdentity(candidate.path, candidate.markdown, candidate.repository, projectPath).grill;
 			tracked.push({ candidate, grill, superseded: false });

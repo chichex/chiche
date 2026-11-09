@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { artifactReadDirs, localArtifactDir, resolveArtifactName, resolveGitCommonDir, trackedArtifactDirs } from "../lib/chiche-paths.ts";
+import { artifactReadDirs, declaredArtifactDir, localArtifactDir, readProjectContract, resolveArtifactName, resolveGitCommonDir, trackedArtifactDirs } from "../lib/chiche-paths.ts";
 import { parseSddArtifact } from "../chiche-artifacts/index.ts";
 import { inspectMarkdownArtifact } from "../workflow-resolution/index.ts";
 import {
@@ -385,6 +385,9 @@ export async function resolveDirectRunRequest(
 	} catch {
 		specDirs = trackedArtifactDirs(originRoot, "specs");
 	}
+	// Review #139-4: la carpeta declarada en ## Publicacion resuelve la ruta lógica igual que en persist_sdd_spec.
+	const declared = declaredArtifactDir(originRoot, "specs", await readProjectContract(originRoot, (path) => readPort(path, "utf8")));
+	if (declared) specDirs = { ...specDirs, declared };
 	const places = artifactReadDirs(specDirs);
 	// Canonical draft directory -> its logical directory (`.chiche/specs` or `.sdd/specs`).
 	const draftDirectories = new Map<string, string>();
@@ -394,7 +397,7 @@ export async function resolveDirectRunRequest(
 		draftDirectories.set(directory, logical.split(sep).join("/"));
 	}
 	let candidate = isAbsolute(target) ? resolve(target) : resolve(originRoot, target);
-	if (!isAbsolute(target) && (dirname(candidate) === specDirs.tracked || dirname(candidate) === specDirs.legacyTracked)) {
+	if (!isAbsolute(target) && (dirname(candidate) === specDirs.tracked || dirname(candidate) === specDirs.legacyTracked || (specDirs.declared !== undefined && dirname(candidate) === specDirs.declared))) {
 		candidate = await resolveArtifactName(specDirs, basename(candidate), statPort);
 	}
 	let path: string;
