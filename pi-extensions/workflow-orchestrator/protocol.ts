@@ -85,7 +85,8 @@ const RESOLUTION_FIELDS = [
 const VERDICT_FIELDS = ["until", "accepted", "thresholds", "questions", "assumed", "forSpec", "warnings"] as const;
 const VERDICT_THRESHOLD_FIELDS = ["grill", "spec"] as const;
 const VERDICT_ITEM_FIELDS = ["text", "confidence"] as const;
-const VERDICT_UNTIL = ["pr", "spec"] as const;
+// Issue #130, CA-25: la cadena tiene un solo destino; "spec" dejó de ser un valor.
+const VERDICT_UNTIL = ["pr"] as const;
 
 const ISSUE_FIELDS = ["repository", "number"] as const;
 const EVIDENCE_FIELDS = ["kind", "reference", "detail"] as const;
@@ -315,7 +316,7 @@ function verdictItems(value: unknown, path: string, diagnostics: WorkflowResolut
 
 // Issue #119, CA-17: `verdict` es null en stop, error y toda ruta artifact-aware; en una ruta nueva
 // (grill, spec, join-grill, join-spec) con outcome start es el veredicto del triage. Un `confidence`
-// o un umbral fuera de 0–100 y un `until` desconocido son `invalid-value`; el campo ausente es
+// o un umbral fuera de 0–100 y un `until` distinto de "pr" son `invalid-value`; el campo ausente es
 // `missing-field` como los demás (lo exige `exactWorkflowObject`).
 function verdictValue(
 	value: unknown,
@@ -342,17 +343,11 @@ function verdictValue(
 	const assumed = verdictItems(object.assumed, `${path}.assumed`, diagnostics);
 	const forSpec = verdictItems(object.forSpec, `${path}.forSpec`, diagnostics);
 	const warningsOk = stringArray(object.warnings, `${path}.warnings`, diagnostics);
-	// Review #125-4: `until` sale de `forSpec` contra `thresholds.spec` (k = 0 → pr; k > 0 → spec), `questions` lleva solo
-	// confianzas ≤ thresholds.grill y `assumed` solo > thresholds.grill: un veredicto incoherente no despacha nada.
+	// Review #125-4: `questions` lleva solo confianzas ≤ thresholds.grill y `assumed` solo > thresholds.grill: un veredicto
+	// incoherente no despacha nada. Issue #130, CA-25: `until` ya no se deriva de `forSpec` contra `thresholds.spec`.
 	let coherent = true;
-	if (grillOk && specOk) {
+	if (grillOk) {
 		const grillThreshold = thresholds!.grill as number;
-		const specThreshold = thresholds!.spec as number;
-		const expectedUntil = forSpec.some((item) => item.confidence <= specThreshold) ? "spec" : "pr";
-		if (untilOk && object.until !== expectedUntil) {
-			diagnostics.push({ path: `${path}.until`, code: "invalid-value", message: `Expected until to be ${expectedUntil}: it follows forSpec against thresholds.spec` });
-			coherent = false;
-		}
 		questions.forEach((item, index) => {
 			if (item.confidence > grillThreshold) {
 				diagnostics.push({ path: `${path}.questions[${index}].confidence`, code: "invalid-value", message: "Expected a confidence at or below thresholds.grill" });

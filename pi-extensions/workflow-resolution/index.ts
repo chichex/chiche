@@ -392,16 +392,17 @@ export interface EvidenceRef {
 }
 
 // Issue #119, CA-17: el veredicto del triage para una ruta nueva (grill, spec, join-grill, join-spec).
-// `until` sale de `k` (técnicas ≤ umbral spec): "pr" con k = 0, "spec" con k > 0. `accepted` es true
-// solo cuando el humano eligió `Confirmar <ruta> → hasta <el PR | la spec>` ([DEVIATION] de la spec:
-// el despacho de Pi necesita saber qué opción se eligió y el protocolo no lo lleva en otro lado).
+// Issue #130, CA-25: `until` tiene un solo valor, "pr" (la cadena llega al PR o no se encadena); `thresholds`
+// lleva las confianzas de `grill` y de `spec` con las que se armó el veredicto. `accepted` es true solo cuando
+// el humano eligió `Confirmar <ruta> → hasta el PR` ([DEVIATION] de la spec #119: el despacho de Pi necesita
+// saber qué opción se eligió y el protocolo no lo lleva en otro lado).
 export interface VerdictItem {
 	text: string;
 	confidence: number;
 }
 
 export interface WorkflowVerdict {
-	until: "pr" | "spec";
+	until: "pr";
 	accepted: boolean;
 	thresholds: { grill: number; spec: number };
 	questions: VerdictItem[];
@@ -1253,8 +1254,8 @@ export function resolveWorkflow(input: WorkflowResolutionInput): WorkflowResolut
 	return baseResolution(input, route, artifacts);
 }
 
-// Review #125-7: las cuatro opciones del gate (issue #119, CA-16): `recommended` es `Confirmar <ruta> supervisado`,
-// `recommended-until` es `Confirmar <ruta> → hasta <el PR | la spec>` (el único que deja `accepted: true`), `fallback`
+// Review #125-7: las cuatro opciones del gate (issue #119, CA-16; issue #130, CA-24): `recommended` es `Confirmar <ruta>`,
+// `recommended-until` es `Confirmar <ruta> → hasta el PR` (el único que deja `accepted: true`), `fallback`
 // y `cancel` como siempre; cancelar emite `verdict: null`.
 export type WorkflowSelection = "recommended" | "recommended-until" | "fallback" | "cancel";
 

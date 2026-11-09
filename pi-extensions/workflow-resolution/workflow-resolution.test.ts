@@ -869,7 +869,7 @@ test("#103 CA-1: superseded-by=.sdd/specs/<x>.md y .chiche/specs/<x>.md resuelve
 // Issue #119, CA-17: el resolver puro copia el veredicto del input solo en una ruta nueva (grill, spec, join-*)
 // con outcome start; en stop, error y toda ruta artifact-aware queda null, y cancelar lo anula.
 test("#119 CA-17: resolveWorkflow lleva verdict en grill/spec/join-*, null en stop, error y rutas artifact-aware; selectWorkflowRoute lo conserva al confirmar y lo anula al cancelar; el round-trip JSON lo preserva", () => {
-	const verdict = { until: "spec" as const, accepted: false, thresholds: { grill: 80, spec: 70 }, questions: [{ text: "¿aplica a juegos 2D, 3D o todos?", confidence: 35 }], assumed: [{ text: "parametrizable, con tecla y tamaño", confidence: 95 }], forSpec: [{ text: "usa el store existente", confidence: 60 }], warnings: ["sin tests en el área"] };
+	const verdict = { until: "pr" as const, accepted: false, thresholds: { grill: 80, spec: 70 }, questions: [{ text: "¿aplica a juegos 2D, 3D o todos?", confidence: 35 }], assumed: [{ text: "parametrizable, con tecla y tamaño", confidence: 95 }], forSpec: [{ text: "usa el store existente", confidence: 60 }], warnings: ["sin tests en el área"] };
 	const grill = resolveWorkflow(resolutionInput({ verdict }));
 	assert.equal(grill.code, "grill");
 	assert.deepEqual(grill.verdict, verdict);
@@ -893,14 +893,14 @@ test("#119 CA-17: resolveWorkflow lleva verdict en grill/spec/join-*, null en st
 		assert.notEqual(existing.code, "grill", `${state}/${freshnessValue}: ruta artifact-aware`);
 		assert.equal(existing.verdict, null, `${state}/${freshnessValue}: una ruta artifact-aware no lleva veredicto`);
 	}
-	// Review #125-7: la opción elegida fija `accepted`: solo `recommended-until` (Confirmar → hasta) lo deja en true.
+	// Review #125-7: la opción elegida fija `accepted`: solo `recommended-until` (Confirmar → hasta el PR) lo deja en true.
 	const emitted = resolveWorkflow(resolutionInput({ verdict: { ...verdict, accepted: true } }));
-	const supervised = selectWorkflowRoute(emitted, "recommended");
-	assert.equal(supervised.selectedRoute, "grill");
-	assert.deepEqual(supervised.verdict, { ...verdict, accepted: false }, "Confirmar <ruta> supervisado deja accepted en false");
+	const plainConfirm = selectWorkflowRoute(emitted, "recommended");
+	assert.equal(plainConfirm.selectedRoute, "grill");
+	assert.deepEqual(plainConfirm.verdict, { ...verdict, accepted: false }, "Confirmar <ruta> deja accepted en false");
 	const until = selectWorkflowRoute(emitted, "recommended-until");
 	assert.equal(until.selectedRoute, "grill");
-	assert.deepEqual(until.verdict, { ...verdict, accepted: true }, "Confirmar <ruta> → hasta deja accepted en true");
+	assert.deepEqual(until.verdict, { ...verdict, accepted: true }, "Confirmar <ruta> → hasta el PR deja accepted en true");
 	assert.notEqual(until.verdict, emitted.verdict, "se copia, no se comparte");
 	const fallback = selectWorkflowRoute(emitted, "fallback");
 	assert.equal(fallback.code, "spec");
@@ -908,7 +908,7 @@ test("#119 CA-17: resolveWorkflow lleva verdict en grill/spec/join-*, null en st
 	const cancelled = selectWorkflowRoute(emitted, "cancel");
 	assert.equal(cancelled.outcome, "stop");
 	assert.equal(cancelled.verdict, null);
-	// Una ruta artifact-aware recomendada no lleva veredicto aunque se elija → hasta.
+	// Una ruta artifact-aware recomendada no lleva veredicto aunque se elija → hasta el PR.
 	const existing = resolveWorkflow(resolutionInput({ artifacts: [canonicalSpec("approved", "fresh")], verdict }));
 	assert.equal(selectWorkflowRoute(existing, "recommended-until").verdict, null);
 });
