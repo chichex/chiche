@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: adherence-chiche-spec
-description: chiche-spec en A3 lee el contrato del fixture y escribe la spec con inferencias [ASSUMED]; el conteo de preguntas no es observable acá (AskUserQuestion no existe en un eval) y se cubre con rehearsal-host.
+description: chiche-spec en A3 lee el contrato del fixture y escribe la spec con inferencias [ASSUMED]; el conteo de preguntas no es observable acá (AskUserQuestion no existe en un eval).
 tags: [adherence, chiche-spec]
 runs: 1
 context:
