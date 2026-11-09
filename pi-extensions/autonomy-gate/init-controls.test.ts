@@ -107,11 +107,11 @@ async function initSkills(): Promise<Map<Harness, InitSkill>> {
 // CA-22: --defaults reemplaza al modo sin preguntas
 
 const DEFAULTS_FLAG =
-	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run`, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa) y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
+	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run`, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa) y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
 
 test("#130 CA-22: --defaults reemplaza al modo sin preguntas en los cinco chiche-init: firma, lanzador, lo que escribe (80, 80 y ask) y lo que no hace (políticas, migraciones, design-system, coding-policies)", async () => {
 	const problems: string[] = [];
-	for (const [harness, skill] of await initSkills()) {
+	for (const [, skill] of await initSkills()) {
 		const at = (problem: string) => `${skill.path}: ${problem}`;
 		const args = section(skill.doctrine, /^Argumentos$/);
 		const [signature] = fencedBlocks(args);
@@ -162,8 +162,6 @@ test("#130 CA-22: --defaults reemplaza al modo sin preguntas en los cinco chiche
 			/si el usuario no las eligió \(o corrió con `--defaults`\), la sección queda vacía/,
 		]).map((problem) => at(`MUST NOT DO: ${problem}`)));
 
-		// El flag propio de chiche-init es el único de autonomía de su firma: los de las otras etapas no son suyos.
-		if (/--confidence|--mode\b|--until/.test(args)) problems.push(at(`${harness}: Argumentos nombra un flag de otra etapa`));
 	}
 	assert.deepEqual(problems, []);
 });
@@ -241,6 +239,71 @@ test("#130 CA-21: la doctrina de la Fase 3 es idéntica entre harnesses tras nor
 	for (const [harness, skill] of skills) {
 		const actual = phase3(skill, harness);
 		if (actual !== expected) problems.push(`claude vs ${harness}: ${firstDifference(expected, actual)}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// CA-23: «Upgrade de contrato» migra el formato viejo de ## Autonomy
+
+const UPGRADE_ROWS = [
+	"Políticas de generación",
+	"Baseline de coverage",
+	"Políticas de la tecnología",
+	"Capacidad de Git/PR",
+	"Señal de vida de procesos largos",
+	"Coding policies",
+	"Diseño",
+	"Directorio .chiche/",
+	"Autonomy",
+	"Stop list",
+];
+
+const AUTONOMY_ROW =
+	"| Autonomy | no existe la sección `## Autonomy`, o su tabla de controles tiene el formato viejo (la columna `Level`) — la Fase 3 hace sus tres preguntas (la confianza de `grill`, la de `spec` y la posición del run) y la Fase 4 escribe la tabla de controles; sobre un formato viejo reescribe solo esa tabla, con las líneas de explicación y las tres filas del template de la Fase 4, conserva la stop list verbatim (su párrafo y su tabla) y anota la migración en `## Decisiones humanas` con la fecha y los tres valores elegidos; con un `## Limites` presente, `## Autonomy` se escribe solo junto con la migración de `Stop list` (elegir `Autonomy` arrastra `Stop list`); con `--defaults` no se escribe ni se migra y queda `mejora disponible` |";
+
+const VERBATIM_EXCEPTION = "salvo el prefijo `FAILED` del ensayo de la stop list y la migración de formato que hace la fila `Autonomy`";
+
+test("#130 CA-23: «Upgrade de contrato» ofrece la fila Autonomy sobre un contrato de formato viejo (tres preguntas, tabla nueva, stop list verbatim, nota fechada; con --defaults no migra), sin las filas Ensayo de niveles ni Umbrales de confianza, y --update preserva ## Autonomy salvo el prefijo FAILED y esa migración", async () => {
+	const problems: string[] = [];
+	for (const [, skill] of await initSkills()) {
+		const at = (problem: string) => `${skill.path}: ${problem}`;
+		const upgrade = section(skill.doctrine, /^Upgrade de contrato\b/);
+		const rows = upgrade.split("\n").filter((line) => line.startsWith("| ")).slice(1).map((line) => line.split("|")[1]?.trim() ?? "");
+		if (rows.join(" · ") !== UPGRADE_ROWS.join(" · ")) problems.push(at(`filas de la checklist: ${rows.join(" · ")}`));
+		if (!upgrade.split("\n").includes(AUTONOMY_ROW)) problems.push(at("la fila Autonomy no describe la migración del formato viejo"));
+		problems.push(...missing(upgrade, [
+			/^\| Stop list \| existe `## Limites` en prosa — `--update` propone una fila de la stop list por bullet, con el `Pattern` inferido, y pide confirmación fila por fila;/m,
+			/\*\*Regla de mantenimiento del skill\*\*: al agregarle una capacidad nueva a este skill, sumar SIEMPRE su fila a esta checklist\./,
+		]).map((problem) => at(`Upgrade de contrato: ${problem}`)));
+
+		const phase4 = section(skill.doctrine, /^Fase 4 — /);
+		problems.push(...missing(phase4, [
+			new RegExp(`\`## Autonomy\` \\(preservar verbatim, ${escapeRegExp(VERBATIM_EXCEPTION)}\\) y un \`## Limites\` sin migrar, que se preserva verbatim hasta que la fila \`Stop list\` lo migre`),
+			/Ese prefijo es, junto con la migración de formato de la fila `Autonomy`, la excepción al verbatim de `## Autonomy` en `--update`\.$/m,
+		]).map((problem) => at(`Fase 4: ${problem}`)));
+
+		const mustDo = section(skill.doctrine, /^MUST DO$/);
+		if (!mustDo.split("\n").includes(`- Preservar \`## Decisiones humanas\`, \`## Politicas de generacion\`, \`## Autonomy\` (${VERBATIM_EXCEPTION}) y un \`## Limites\` sin migrar en \`--update\`.`)) {
+			problems.push(at("MUST DO no preserva ## Autonomy con las dos excepciones"));
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// CA-14 en chiche-init: no queda el modelo de niveles fuera de los bloques compartidos
+
+test("#130 CA-14: fuera de los bloques autonomy-* ningún chiche-init nombra --autonomy, los niveles, el umbral de confianza ni el ensayo de niveles, y sus flags de autonomía son solo --defaults", async () => {
+	const problems: string[] = [];
+	for (const [, skill] of await initSkills()) {
+		for (const name of SHARED_BLOCKS) {
+			if (!skill.raw.includes(`<!-- ${name}:start -->`) || !skill.raw.includes(`<!-- ${name}:end -->`)) problems.push(`${skill.path}: falta el bloque ${name}`);
+		}
+		for (const line of retiredWords(skill.doctrine)) problems.push(`${skill.path}: ${line.slice(0, 200)}`);
+		// Los flags de las otras etapas no son de chiche-init: solo los nombran los bloques compartidos.
+		const foreign = skill.doctrine.split("\n").filter((line) => /--confidence|--mode\b|--until\b/.test(line));
+		for (const line of foreign) problems.push(`${skill.path}: flag de otra etapa fuera de los bloques compartidos: ${line.slice(0, 200)}`);
 	}
 	assert.deepEqual(problems, []);
 });
