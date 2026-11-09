@@ -24,8 +24,9 @@ import { test, type TestContext } from "node:test";
 import type { Harness } from "../harness-gate/interaction.ts";
 import { HARNESSES, escapeRegExp, fencedBlocks, firstDifference, normalizeInvocations, parseInteractionTable } from "../harness-gate/interaction.ts";
 
-// Skills que llevan el bloque `publication-resolve`. La capa 1 lo pone solo en chiche-init.
-const PUBLICATION_SKILLS = ["chiche-init"] as const;
+// Skills que llevan el bloque `publication-resolve`: chiche-init lo escribe (capa 1) y, desde la capa 2,
+// lo leen los que escriben o inventarían borradores. chiche-land y code-review solo nombran la sección.
+const PUBLICATION_SKILLS = ["chiche-init", "chiche-spec", "grill", "chiche-run", "issue-triage"] as const;
 const BLOCK = "publication-resolve";
 const KEYS = ["specs", "carpeta", "repo", "crear issue"] as const;
 const DEFAULT_TEMPLATE = "gh issue create --repo {repo} --title {title} --body-file {body}";
@@ -598,6 +599,88 @@ test("#134 CA-7: el reporte de los cinco chiche-init suma la línea publicacion,
 			continue;
 		}
 		problems.push(...missing(row, [/`## Publicacion`/, /`auto`, `issue` o `local`|`auto`, `issue` or `local`/, /\.md/, /`\{title\}`/, /`\{body\}`/, /`owner\/repo`/]).map((problem) => `${path}: ${problem}`));
+	}
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Capa 2 (CA-8 a CA-14): destino y carpeta
+
+const DECLARED_SPEC_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/specs/` y `<carpeta>/grills/` se leen primero, antes de los cuatro lugares y en el mismo orden, y lo nuevo se escribe en `<carpeta>/specs/`; con la carpeta default la lista y la conducta son las de arriba.";
+const DECLARED_GRILL_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), el handoff, el cuestionario y la carpeta de capturas se escriben en `<carpeta>/grills/` y ese lugar se lee primero, antes de los cuatro de arriba; con la carpeta default la lista y la conducta son las de arriba.";
+const DECLARED_TRIAGE_DRAFTS = "Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/grills/` y `<carpeta>/specs/` se inventarían primero, antes de los cuatro lugares; con la carpeta default la lista es la de arriba.";
+const DECLARED_RUN_BULLET = "   - **Carpeta declarada**: si `## Publicacion` del contrato declara una `carpeta` dentro del repo (ver «Publicación efectiva»), la spec target, el handoff canónico, su carpeta de capturas y las specs predecesoras se buscan también en `<carpeta>/specs/` y `<carpeta>/grills/`, antes que en los cuatro lugares, con la misma identidad por markers y referencias. Un artefacto de entrada sin trackear que vive ahí entra al PRIMER commit en su misma ruta relativa (ej. `docs/sdd/specs/x.md`); los del common-dir siguen yendo a `.chiche/specs/` y `.chiche/grills/`.";
+const DECLARED_LAND = "Una copia sin trackear en la `carpeta` que `## Publicacion` del contrato declare dentro del repo (`<carpeta>/<kind>/<nombre>`) no vive en los common-dirs: la cubre la clasificación de paths sucios de abajo, que la resuelve como `ya aterrizado` cuando su `git hash-object` es igual a `git rev-parse origin/<default>:<carpeta>/<kind>/<nombre>`.";
+const CODE_REVIEW_PLACES = "4. `<carpeta>/specs/` si `## Publicacion` del contrato declara una `carpeta`, y después `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia)";
+const EVENTS_IDENTITY = "La identidad events-v1 de una spec local es `.sdd/specs/<slug>.md` sea cual sea la marca del lugar donde vive: `.chiche/` o `.sdd/`, del árbol o del common-dir, o la carpeta declarada en `## Publicacion` del contrato.";
+const SPEC_REPORT_LINE = "- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>]";
+const CODE_REVIEW_HARNESSES = ["codex", "opencode", "pi", "antigravity"] as const;
+
+test("#134 CA-8 y CA-9: el Destino de chiche-spec corre el comando canónico y aplica specs (auto, issue sin consultar, local con issue=#NN sin editar el issue), --out manda, y una creación fallida cae a <carpeta>/specs/ con el aviso literal del reporte", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-spec: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-spec");
+		const flow = delimitedBlock(markdown, "chiche-spec-flow") ?? "";
+		problems.push(...missing(flow, [
+			/^\*\*Destino\.\*\* `--out` fuerza el destino y manda sobre la fila `specs`\. Sin `--out`, correr el comando canónico de «Publicación efectiva» y aplicar `specs` sin preguntar\. Con `auto`, la regla de siempre:$/m,
+			/^3\. Si no, o si `gh` no está disponible o falla → `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md` si hay issue de origen\), con su ruta absoluta en el reporte; con la carpeta default es `<git-common-dir>\/chiche\/specs\/<slug>\.md`\.$/m,
+			/^Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs\. Con `local`, escribir siempre `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md`\), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue\. Si crear o editar el issue falla \(con `issue`, o con `auto` cuando eligió issue\), la spec se escribe en `<carpeta>\/specs\/` y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>`; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación\.$/m,
+		]).map((problem) => at(`Destino: ${problem}`)));
+		if (!/`local` = `<git-common-dir>\/chiche\/specs\/` \(o `<carpeta>\/specs\/` si `## Publicacion` del contrato declara una carpeta\)/.test(markdown)) problems.push(at("--out local no nombra la carpeta declarada"));
+		if (!/También `## Publicacion`, que fija el destino de la spec y la carpeta de los borradores \(ver «Publicación efectiva»\)\./.test(markdown)) problems.push(at("la Fase 1 no lee ## Publicacion"));
+		const report = section(markdown, /^Reporte$/);
+		if (!report.split("\n").includes(SPEC_REPORT_LINE)) problems.push(at("el reporte no trae la línea «- publicacion: …»"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-10: los bloques de borradores de chiche-spec y grill leen primero <carpeta>/specs/ o <carpeta>/grills/ y escriben lo nuevo en <carpeta>/, con la conducta de hoy para la carpeta default", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const spec = delimitedBlock(await skillFile(harness, "chiche-spec"), "chiche-spec-drafts") ?? "";
+		if (!spec.includes(DECLARED_SPEC_DRAFTS)) problems.push(`${harness}/chiche-spec: chiche-spec-drafts no lee ni escribe la carpeta declarada`);
+		const grill = delimitedBlock(await skillFile(harness, "grill"), "grill-drafts") ?? "";
+		if (!grill.includes(DECLARED_GRILL_DRAFTS)) problems.push(`${harness}/grill: grill-drafts no escribe el handoff, el cuestionario y las capturas en <carpeta>/grills/`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-11: chiche-run busca la spec y el handoff también en la carpeta declarada, commitea un artefacto de entrada de ahí en su misma ruta relativa y deja los del common-dir bajo .chiche/", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-run: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-run");
+		const dirty = delimitedBlock(markdown, "chiche-run-dirty-checkout") ?? "";
+		if (!dirty.split("\n").includes(DECLARED_RUN_BULLET)) problems.push(at("chiche-run-dirty-checkout no trae el bullet «Carpeta declarada»"));
+		if (!/Listar las specs de `\.chiche\/specs\/`, `\.sdd\/specs\/`, `<git-common-dir>\/chiche\/specs\/` y `<git-common-dir>\/sdd\/specs\/`, y de `<carpeta>\/specs\/` primero si `## Publicacion` del contrato declara una `carpeta`,/.test(markdown)) problems.push(at("la Fase 0 no lista la carpeta declarada"));
+		if (!/Solo una ruta que no es ninguna de esas dos formas se lee tal cual\. Con una `carpeta` declarada en `## Publicacion` del contrato, `<carpeta>\/specs\/<x>\.md` se busca antes que los cuatro lugares y el run la commitea en esa misma ruta relativa\./.test(markdown)) problems.push(at("la Fase 1 no resuelve la spec en la carpeta declarada"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-12: issue-triage inventaría la carpeta declarada, code-review la busca primero donde existe como skill, y el barrido de chiche-land resuelve una copia sin trackear ahí como ya aterrizado", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const triage = delimitedBlock(await skillFile(harness, "issue-triage"), "issue-triage-drafts") ?? "";
+		if (!triage.includes(DECLARED_TRIAGE_DRAFTS)) problems.push(`${harness}/issue-triage: issue-triage-drafts no inventaría la carpeta declarada`);
+		const land = delimitedBlock(await skillFile(harness, "chiche-land"), "chiche-land-common-dir") ?? "";
+		if (!land.includes(DECLARED_LAND)) problems.push(`${harness}/chiche-land: chiche-land-common-dir no nombra la copia sin trackear de la carpeta declarada`);
+	}
+	for (const harness of CODE_REVIEW_HARNESSES) {
+		const review = await skillFile(harness, "code-review");
+		if (!review.includes(CODE_REVIEW_PLACES)) problems.push(`${harness}/code-review: no busca la spec en la carpeta declarada primero`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-14: el bloque chiche-events de grill, chiche-spec, chiche-run y chiche-land dice en los cinco harnesses que la identidad events-v1 no cambia en la carpeta declarada", async () => {
+	const problems: string[] = [];
+	for (const skill of ["grill", "chiche-spec", "chiche-run", "chiche-land"] as const) {
+		for (const harness of HARNESSES) {
+			const events = delimitedBlock(await skillFile(harness, skill), "chiche-events") ?? "";
+			if (!events.includes(EVENTS_IDENTITY)) problems.push(`${harness}/${skill}: chiche-events no fija la identidad en la carpeta declarada`);
+		}
 	}
 	assert.deepEqual(problems, []);
 });

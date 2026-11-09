@@ -155,7 +155,8 @@ test("CA-8: el bloque trae el puntero al formato, el comando canónico, la regla
 		/nunca dentro del working tree/,
 		/sin caer al working tree \(`\.chiche\/` ni `\.sdd\/`\)/,
 		// Review de #105 (F4): la identidad no sigue la marca del lugar (`specEventReference`).
-		/La identidad events-v1 de una spec local es `\.sdd\/specs\/<slug>\.md` sea cual sea la marca del lugar donde vive: `\.chiche\/` o `\.sdd\/`, del árbol o del common-dir\./,
+		// Issue #134, CA-14: la carpeta declarada en ## Publicacion tampoco cambia la identidad.
+		/La identidad events-v1 de una spec local es `\.sdd\/specs\/<slug>\.md` sea cual sea la marca del lugar donde vive: `\.chiche\/` o `\.sdd\/`, del árbol o del common-dir, o la carpeta declarada en `## Publicacion` del contrato\./,
 		/`previous` es `none` salvo en `spec\.moved`/,
 		/\*\*Validación barata\.\*\*[^\n]*un valor inválido cae en el mismo aviso y no escribe nada/,
 	]), []);

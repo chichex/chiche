@@ -168,7 +168,7 @@ Si la superficie está `sin sistema`, aplica la doctrina mínima de `/design-sys
 ## Log de eventos
 
 <!-- chiche-events:start -->
-Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.jsonl`, el log local append-only del formato `events-v1` (normativo en `docs/sdd-events-v1.md` del repo de estos skills). Cada evento es una línea que agrega este comando, con los valores entre `<>` reemplazados: `issue` es `#NN`, `owner/repo#NN` o `none`; `spec`, `previous` y `grill` van sin codificar (`.sdd/specs/<slug>.md`, `#NN`, `<fecha>-<slug>` o `none`) y el comando los percent-encodea; `previous` es `none` salvo en `spec.moved`; `pr` son números separados por coma y sin espacios, o vacío; `reason` es `none` salvo en `run.failed`. La identidad events-v1 de una spec local es `.sdd/specs/<slug>.md` sea cual sea la marca del lugar donde vive: `.chiche/` o `.sdd/`, del árbol o del common-dir.
+Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.jsonl`, el log local append-only del formato `events-v1` (normativo en `docs/sdd-events-v1.md` del repo de estos skills). Cada evento es una línea que agrega este comando, con los valores entre `<>` reemplazados: `issue` es `#NN`, `owner/repo#NN` o `none`; `spec`, `previous` y `grill` van sin codificar (`.sdd/specs/<slug>.md`, `#NN`, `<fecha>-<slug>` o `none`) y el comando los percent-encodea; `previous` es `none` salvo en `spec.moved`; `pr` son números separados por coma y sin espacios, o vacío; `reason` es `none` salvo en `run.failed`. La identidad events-v1 de una spec local es `.sdd/specs/<slug>.md` sea cual sea la marca del lugar donde vive: `.chiche/` o `.sdd/`, del árbol o del common-dir, o la carpeta declarada en `## Publicacion` del contrato.
 
 ```bash
 (
@@ -257,7 +257,7 @@ Antes de lanzar, el lanzador corre los pasos 1 a 3 de la Fase 1 y el preflight d
 
 Dispara cuando no hay target. Si trajo spec o issue, saltear; flags sin target (`--mode`, `--inline`, `--model`…) pasan por el lanzador igual para elegir la spec, y después se aplican sobre la spec elegida.
 
-Listar las specs de `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/` con su estado y verificabilidad (leer el header y la sección Verificabilidad de cada una):
+Listar las specs de `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/`, y de `<carpeta>/specs/` primero si `## Publicacion` del contrato declara una `carpeta`, con su estado y verificabilidad (leer el header y la sección Verificabilidad de cada una):
 
 ```text
 /chiche-run implementa una spec hasta que cada criterio este verificado, y termina en un PR
@@ -274,8 +274,57 @@ Si hay una sola spec candidata (estado `draft` o `aprobada`), usarla directo inf
 ## Fase 1 — Precondiciones (bloqueante)
 
 1. **Contrato**: leer `.chiche/project.md`. Un repo inicializado antes del renombre lo tiene en `.sdd/project.md`: se lee y se escribe ahí, y `/chiche-init --update` ofrece migrarlo. Si no existe en ninguno de los dos: con `ask` → ofrecer `/chiche-init` ahí mismo; con `pr` o `pr-reviewed` → correr `/chiche-init --defaults` y seguir. Anotar ya la capacidad de PR que declara el contrato (remote + gh): si no la hay, avisar desde el arranque que la corrida termina en commit local. Anotar también las **políticas de generación** activas (`## Politicas de generacion`) y anunciarlas al arranque: son gates duros que la Fase 4 verifica con el gate que cada una declara.
-2. **Spec**: resolver el argumento. Un argumento `.chiche/specs/<x>.md` o `.sdd/specs/<x>.md` (este último, de un repo anterior al renombre) se resuelve por nombre, en este orden: `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Solo una ruta que no es ninguna de esas dos formas se lee tal cual. `#NN` → `gh issue view` y extraer la spec del body (la generó `/chiche-spec`); si el issue no tiene spec SDD, frenar y ofrecer `/chiche-spec #NN`. Pedido libre sin spec → frenar: ofrecer `/chiche-spec <pedido>` (`ask`) o encadenar `/chiche-spec <pedido>` sin flags (`pr` o `pr-reviewed`). La spec encadenada pregunta lo que pida su propia confianza: la posición del run no la cambia. NO improvisar una spec: ese trabajo tiene su skill. Leer su `## Plan de entrega`: con 2 o más capas, correr el preflight de stack de «Entrega por capas» antes de ramificar. Cuando esta sesión viene de `/chiche-spec --until pr` (la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente: la invocación es la misma que la del menú), el target ya es una spec `approved` y no se encadena `/chiche-spec` otra vez; la traza del run repite `until: pr` después de `leído de <fuente>`. Este skill no acepta `--until`: `chiche-spec` lo consume y lanza el run sin flags, así que el run arranca en la posición del contrato.
+2. **Spec**: resolver el argumento. Un argumento `.chiche/specs/<x>.md` o `.sdd/specs/<x>.md` (este último, de un repo anterior al renombre) se resuelve por nombre, en este orden: `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/` y `<git-common-dir>/sdd/specs/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Solo una ruta que no es ninguna de esas dos formas se lee tal cual. Con una `carpeta` declarada en `## Publicacion` del contrato, `<carpeta>/specs/<x>.md` se busca antes que los cuatro lugares y el run la commitea en esa misma ruta relativa. `#NN` → `gh issue view` y extraer la spec del body (la generó `/chiche-spec`); si el issue no tiene spec SDD, frenar y ofrecer `/chiche-spec #NN`. Pedido libre sin spec → frenar: ofrecer `/chiche-spec <pedido>` (`ask`) o encadenar `/chiche-spec <pedido>` sin flags (`pr` o `pr-reviewed`). La spec encadenada pregunta lo que pida su propia confianza: la posición del run no la cambia. NO improvisar una spec: ese trabajo tiene su skill. Leer su `## Plan de entrega`: con 2 o más capas, correr el preflight de stack de «Entrega por capas» antes de ramificar. Cuando esta sesión viene de `/chiche-spec --until pr` (la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente: la invocación es la misma que la del menú), el target ya es una spec `approved` y no se encadena `/chiche-spec` otra vez; la traza del run repite `until: pr` después de `leído de <fuente>`. Este skill no acepta `--until`: `chiche-spec` lo consume y lanza el run sin flags, así que el run arranca en la posición del contrato.
 3. **Spec en `draft`**: correrla es aceptar todas sus `[ASSUMED]`, sin preguntar (ver "Flujo sin fricción"). Seguir y dejar anotado en el PR que quedó aprobada al correr.
+<!-- publication-resolve:start -->
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (o `none` sin `origin` o con un remote que no es de GitHub) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+
+```bash
+(
+  export LC_ALL=C
+  aviso=''
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$(pwd -P)
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=''
+  if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
+  defrepo=none
+  url=$(git remote get-url origin 2>/dev/null) || url=''
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^.*github\.com[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\1#p')
+  [ -z "$cand" ] || defrepo=$cand
+  defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
+  contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
+  contract=$(printf '%s\n' "$contract" | tr -d '\r')
+  section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  specs='auto (default)'
+  case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
+  carpeta="$defcarpeta (default)"
+  case $vcarpeta in
+    '') ;;
+    '<git-common-dir>/chiche/'|'<git-common-dir>/chiche') carpeta=$defcarpeta ;;
+    /*|'<'*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+    *) case "/$vcarpeta/" in
+         */../*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+         *) rel=${vcarpeta#./}; rel=${rel%/}; if [ -z "$rel" ] || [ "$rel" = . ]; then carpeta=$root; else carpeta="$root/$rel"; fi ;;
+       esac ;;
+  esac
+  repo="$defrepo (default)"
+  case $vrepo in '') ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  crear="$defcrear (default)"
+  case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
+  [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
+  printf 'specs: %s\n' "$specs"
+  printf 'carpeta: %s\n' "$carpeta"
+  printf 'repo: %s\n' "$repo"
+  printf 'crear issue: %s\n' "$crear"
+)
+```
+<!-- publication-resolve:end -->
+
 <!-- chiche-run-dirty-checkout:start -->
 4. **Base actualizada + worktree aislado; el checkout sucio no bloquea por sí solo**: `/chiche-run` NUNCA implementa sobre el checkout original. Capturar primero un snapshot robusto con `git status --porcelain=v1 -z`; no hacer stash, reset, checkout forzado, commit ni limpieza sobre ese checkout.
 
@@ -283,6 +332,7 @@ Si hay una sola spec candidata (estado `draft` o `aprobada`), usarla directo inf
    - **Bloqueos reales**: abortar sólo si no se puede resolver o actualizar `<base-ref>`, ya existe la branch/path de destino, o el estado Git compartido impide crear un worktree aislado. Un checkout sucio, detached HEAD, una base local divergida o una operación a medias en el checkout original no bloquean por sí solos mientras el worktree nuevo pueda nacer de `<base-ref>` sin tocar ese estado.
    - **Artefactos de entrada del workflow**: formar un conjunto explícito de paths sucios ligados a esta cadena: la spec target local; `.chiche/project.md` si el contrato leído tiene cambios; el handoff canónico cuyo `grill=<ref>` aparece en la spec y specs predecesoras que apunten a la target con `superseded-by`; y `CONTEXT.md`, `CONTEXT-MAP.md` o archivos de `docs/adr/` sólo cuando la spec o ese handoff los identifiquen como salida de la misma cadena. Resolver la identidad por markers y referencias, no por "todo lo que esté bajo `.chiche/`" ni por cercanía temporal.
    - **Borradores del common-dir**: los artefactos de entrada se toman de `<git-common-dir>/chiche/` y de `<git-common-dir>/sdd/` (la salida de `git rev-parse --path-format=absolute --git-common-dir`, fuera del working tree): la spec target, el handoff canónico, su carpeta de capturas y las specs predecesoras, con la misma identidad por markers y referencias. Por compatibilidad, también los que sigan sin trackear en `.chiche/` o `.sdd/` del checkout original. Se copian al worktree con el mismo nombre, bajo `.chiche/grills/` y `.chiche/specs/` (también los de `<git-common-dir>/sdd/` y los de un `.sdd/` sin trackear), y entran en el PRIMER commit. El commit se verifica con `git show --name-status HEAD`, que lista cada copia, pero las copias de `<git-common-dir>/chiche/` y de `<git-common-dir>/sdd/` se borran recién después del push del branch (o con el PR abierto): solo esas, porque los de `.chiche/` y `.sdd/` del checkout original no se tocan. Con `--no-pr`, o si el run termina antes del push, se conservan y el reporte las nombra. Si el harness no puede escribir en `<git-common-dir>/chiche/` o `<git-common-dir>/sdd/`, su capa de interacción dice cómo pedir permiso o caer a `.chiche/` del cwd.
+   - **Carpeta declarada**: si `## Publicacion` del contrato declara una `carpeta` dentro del repo (ver «Publicación efectiva»), la spec target, el handoff canónico, su carpeta de capturas y las specs predecesoras se buscan también en `<carpeta>/specs/` y `<carpeta>/grills/`, antes que en los cuatro lugares, con la misma identidad por markers y referencias. Un artefacto de entrada sin trackear que vive ahí entra al PRIMER commit en su misma ruta relativa (ej. `docs/sdd/specs/x.md`); los del common-dir siguen yendo a `.chiche/specs/` y `.chiche/grills/`.
    - **Cambios locales restantes**: listarlos como **excluidos del run**; no abortan, no se copian y no entran al PR. Si al planificar contra `<base-ref>` aparece que uno de ellos era necesario, tratarlo como un prerrequisito faltante o una desviación de la spec según la Fase 3, nunca importarlo en silencio.
 
    Crear desde `<base-ref>` el worktree y branch `sdd/<slug>` con `git worktree add --lock --reason "chiche-run <slug>" ../<repo>-sdd-<slug> -b sdd/<slug> <base-ref>`: el lock (`locked chiche-run <slug>` en `git worktree list --porcelain`) dice que el worktree tiene dueño: las otras sesiones no lo remueven mientras siga bloqueado, y `/chiche-land` solo lo remueve, limpio, cuando su branch ya se mergeó. Reproducir allí el snapshot working-tree exacto de los artefactos de entrada — altas, modificaciones o bajas — y validar antes de commitear que ningún path excluido apareció. Si se importó al menos uno, agruparlos como PRIMER commit (`sdd: incorporar artefactos de entrada de <slug>`); si no, no crear un commit vacío. Con `#NN` no hay spec local que importar, pero el contrato, handoff o documentación de su linaje siguen pudiendo entrar. El checkout original queda intacto y puede seguir sucio; TODO el run continúa únicamente en el worktree, que sí debe quedar limpio después del commit de entrada.

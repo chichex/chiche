@@ -171,8 +171,57 @@ La selección múltiple es **todo-o-nada**. No propongas ni ejecutes grupos parc
 - La vigencia es exactamente `fresh|stale|unknown`. El adapter separa eventos materiales (`title`, `body`, `comments`) de administrativos (`labels`, `assignees`, `milestone`). Baseline local = revisión/mtime del archivo; baseline en issue = revisión del body que aloja la spec.
 - Un evento material demostrablemente posterior da `stale`; historia completa sin eventos posteriores da `fresh`; timestamps faltantes/incomparables o historia insuficiente dan `unknown`. El core no usa la hora actual y `unknown` nunca habilita run.
 
+<!-- publication-resolve:start -->
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (o `none` sin `origin` o con un remote que no es de GitHub) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+
+```bash
+(
+  export LC_ALL=C
+  aviso=''
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$(pwd -P)
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=''
+  if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
+  defrepo=none
+  url=$(git remote get-url origin 2>/dev/null) || url=''
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^.*github\.com[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\1#p')
+  [ -z "$cand" ] || defrepo=$cand
+  defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
+  contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
+  contract=$(printf '%s\n' "$contract" | tr -d '\r')
+  section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  specs='auto (default)'
+  case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
+  carpeta="$defcarpeta (default)"
+  case $vcarpeta in
+    '') ;;
+    '<git-common-dir>/chiche/'|'<git-common-dir>/chiche') carpeta=$defcarpeta ;;
+    /*|'<'*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+    *) case "/$vcarpeta/" in
+         */../*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+         *) rel=${vcarpeta#./}; rel=${rel%/}; if [ -z "$rel" ] || [ "$rel" = . ]; then carpeta=$root; else carpeta="$root/$rel"; fi ;;
+       esac ;;
+  esac
+  repo="$defrepo (default)"
+  case $vrepo in '') ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  crear="$defcrear (default)"
+  case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
+  [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
+  printf 'specs: %s\n' "$specs"
+  printf 'carpeta: %s\n' "$carpeta"
+  printf 'repo: %s\n' "$repo"
+  printf 'crear issue: %s\n' "$crear"
+)
+```
+<!-- publication-resolve:end -->
+
 <!-- issue-triage-drafts:start -->
-- Los artefactos locales viven en dos pares de lugares: los trackeados `.chiche/grills/`, `.chiche/specs/`, `.sdd/grills/` y `.sdd/specs/` del árbol, con lo que un PR ya commiteó, y los locales `<git-common-dir>/chiche/grills/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/grills/` y `<git-common-dir>/sdd/specs/`, los borradores fuera del working tree (`<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`). El inventario y el linaje se resuelven en los cuatro lugares de cada tipo (`grills` o `specs`), en este orden: `.chiche/<tipo>/`, `.sdd/<tipo>/`, `<git-common-dir>/chiche/<tipo>/` y `<git-common-dir>/sdd/<tipo>/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Un `superseded-by=.chiche/specs/<x>.md` o `superseded-by=.sdd/specs/<x>.md` se busca por nombre en ese mismo orden, y los cuatro cuentan como dentro del proyecto.
+- Los artefactos locales viven en dos pares de lugares: los trackeados `.chiche/grills/`, `.chiche/specs/`, `.sdd/grills/` y `.sdd/specs/` del árbol, con lo que un PR ya commiteó, y los locales `<git-common-dir>/chiche/grills/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/grills/` y `<git-common-dir>/sdd/specs/`, los borradores fuera del working tree (`<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`). El inventario y el linaje se resuelven en los cuatro lugares de cada tipo (`grills` o `specs`), en este orden: `.chiche/<tipo>/`, `.sdd/<tipo>/`, `<git-common-dir>/chiche/<tipo>/` y `<git-common-dir>/sdd/<tipo>/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Un `superseded-by=.chiche/specs/<x>.md` o `superseded-by=.sdd/specs/<x>.md` se busca por nombre en ese mismo orden, y los cuatro cuentan como dentro del proyecto. Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/grills/` y `<carpeta>/specs/` se inventarían primero, antes de los cuatro lugares; con la carpeta default la lista es la de arriba.
 <!-- issue-triage-drafts:end -->
 
 ### Grills

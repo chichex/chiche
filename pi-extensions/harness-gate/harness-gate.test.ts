@@ -380,8 +380,12 @@ export function validateTemplateLine(line: string, expectedType: TemplateType): 
 
 // Issue #102 CA-4: el bloque compartido `autonomy-resolve` (gateado por autonomy-gate) nombra el fallback
 // `.sdd/project.md` en su prosa y en su comando canónico; los conteos de «una sola frase de fallback» lo excluyen.
+// Issue #134, CA-3: `publication-resolve` lee `## Publicacion` del contrato con el mismo fallback a
+// `.sdd/project.md` (lo gatea publication-gate), así que también queda fuera del conteo de la frase única.
 function withoutAutonomyResolve(markdown: string): string {
-	return markdown.replace(/<!-- autonomy-resolve:start -->\n[\s\S]*?\n<!-- autonomy-resolve:end -->/, "");
+	return markdown
+		.replace(/<!-- autonomy-resolve:start -->\n[\s\S]*?\n<!-- autonomy-resolve:end -->/, "")
+		.replace(/<!-- publication-resolve:start -->\n[\s\S]*?\n<!-- publication-resolve:end -->/, "");
 }
 
 function delimitedDoctrine(markdown: string, name: string): string {
@@ -1820,7 +1824,8 @@ test("review #107-2 (2): code-review busca la spec del PR en los cuatro lugares 
 	for (const harness of ["codex", "opencode", "pi", "antigravity"] as const) {
 		const file = `${harness}/code-review/SKILL.md`;
 		const markdown = await readRepoFile(file);
-		const lookup = "4. `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia), `specs/`, `docs/`, `prd/` u otra ruta explícita del repo que coincida con el PR;";
+		// Issue #134, CA-12: la carpeta declarada en ## Publicacion se busca primero; los cuatro lugares siguen en su orden.
+		const lookup = "4. `<carpeta>/specs/` si `## Publicacion` del contrato declara una `carpeta`, y después `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia), `specs/`, `docs/`, `prd/` u otra ruta explícita del repo que coincida con el PR;";
 		if (!markdown.split("\n").includes(lookup)) problems.push(`${file}: la lista de la spec no nombra los cuatro lugares en orden de precedencia`);
 		if (!markdown.includes("Usar `.chiche/project.md` o su fallback como fuente principal si existe.")) problems.push(`${file}: la fuente principal no nombra el fallback`);
 		if ((markdown.match(/\.sdd\/project\.md/g) ?? []).length !== 1) problems.push(`${file}: debe nombrar .sdd/project.md una sola vez, en la frase de fallback`);
