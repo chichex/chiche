@@ -146,7 +146,7 @@ El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta
   if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
   defrepo=none
   url=$(git remote get-url origin 2>/dev/null) || url=''
-  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
+  cand=$(printf '%s\n' "$url" | sed -E 's,/+$,,; s,\.git$,,' | sed -n -E 's,^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$,\6,p')
   [ -z "$cand" ] || defrepo=$cand
   defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
   contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
@@ -427,7 +427,7 @@ Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.j
 (
   harness='<harness>' event='<evento>' issue='<issue>' spec='<spec>' previous='<previous>' grillref='<grill>' pr='<prs>' reason='<reason>'
   export LC_ALL=C
-  enc() { [ "$1" = none ] && { printf none; return; }; s=$1; while [ -n "$s" ]; do c=${s%"${s#?}"}; s=${s#?}; case $c in [A-Za-z0-9._~-]) printf %s "$c" ;; *) printf %% && printf %s "$c" | od -An -tx1 | tr -d ' \n' | tr a-f A-F ;; esac; done; }
+  enc() { [ "$v" = none ] && { printf none; return; }; s=$v; while [ -n "$s" ]; do c=${s%"${s#?}"}; s=${s#?}; case $c in [A-Za-z0-9._~-]) printf %s "$c" ;; *) printf %% && printf %s "$c" | od -An -tx1 | tr -d ' \n' | tr a-f A-F ;; esac; done; }
   ok() {
     case $harness in claude|codex|opencode|pi|antigravity) ;; *) return 1 ;; esac
     case "$issue$pr$reason" in *[![:graph:]]*) return 1 ;; esac
@@ -447,7 +447,7 @@ Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.j
     esac
   }
   ok && dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && mkdir -p "$dir/chiche" &&
-    line=$(printf '{"v":1,"ts":"%s","harness":"%s","event":"%s","issue":"%s","spec":"%s","previous":"%s","grill":"%s","pr":[%s],"reason":"%s"}' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$harness" "$event" "$issue" "$(enc "$spec")" "$(enc "$previous")" "$(enc "$grillref")" "$pr" "$reason") &&
+    line=$(printf '{"v":1,"ts":"%s","harness":"%s","event":"%s","issue":"%s","spec":"%s","previous":"%s","grill":"%s","pr":[%s],"reason":"%s"}' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$harness" "$event" "$issue" "$(v=$spec; enc)" "$(v=$previous; enc)" "$(v=$grillref; enc)" "$pr" "$reason") &&
     [ ${#line} -lt 1024 ] && printf '%s\n' "$line" >> "$dir/chiche/events.jsonl" ||
     echo "aviso: no se registró el evento SDD $event" >&2
 )

@@ -21,6 +21,7 @@ import { parseSddArtifact } from "../chiche-artifacts/index.ts";
 import type { Fence, Harness } from "./interaction.ts";
 import {
 	HARNESSES,
+	POSITIONAL_PARAMETER,
 	fencedBlocks,
 	firstDifference,
 	escapeRegExp,
@@ -2528,4 +2529,82 @@ test("#130 CA-19: fuera de los bloques autonomy-*, ningún chiche-run nombra un 
 	assert.deepEqual(problems, [], problems.join("\n"));
 	const synthetic = ["uno", "<!-- autonomy-resolve:start -->", "`unattended` o `A3` → `usá --mode pr-reviewed`", "<!-- autonomy-resolve:end -->", "con A2 o A3 frena", "ALTA 4 / MEDIA 1", "`--autonomy A3`"].join("\n");
 	assert.deepEqual(retiredRunWordProblems("x.md", synthetic), ["x.md:5: A2, A3", "x.md:7: --autonomy, A3"]);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #136 (CA-4): ningún fence bash ni sh de ningún SKILL.md usa parámetros posicionales ni $ARGUMENTS. El harness
+// los sustituye en el texto del skill al cargarlo con argumentos (en Claude Code `$1` pasa a ser uno de ellos), así que
+// un comando copiado del texto cargado deja de ser el que está en el archivo. `${#var}` (largo de una variable) no es
+// un parámetro y no cuenta.
+
+// Una línea por hallazgo, `<archivo>:<línea>: <lo que encontró>`, solo dentro de fences ```bash o ```sh. Los fences de
+// otro lenguaje y la prosa no cuentan; un fence dentro de otro de más backticks es texto del exterior.
+export function positionalParameterProblems(file: string, markdown: string): string[] {
+	const problems: string[] = [];
+	const everyHit = new RegExp(POSITIONAL_PARAMETER, "g");
+	for (const fence of fencedBlocks(markdown, { includeUnclosed: true })) {
+		if (fence.info !== "bash" && fence.info !== "sh") continue;
+		fence.content.split("\n").forEach((line, index) => {
+			const hits = [...new Set(line.match(everyHit) ?? [])];
+			if (hits.length > 0) problems.push(`${file}:${fence.line + index + 1}: ${hits.join(", ")}`);
+		});
+	}
+	return problems;
+}
+
+test("#136 CA-4: ningún fence bash ni sh de ningún SKILL.md trackeado de los cinco harnesses usa $0 a $9, $@, $*, $# ni $ARGUMENTS, ni sus formas con llave, con o sin operador (${1}, ${1:-x}, ${@:2}, ${#})", async () => {
+	const listing = spawnSync("git", ["ls-files", "--", ...HARNESSES], { cwd: fileURLToPath(repoFile("")), encoding: "utf8" });
+	assert.equal(listing.status, 0, listing.stderr);
+	const files = listing.stdout.split("\n").filter((path) => /(^|\/)SKILL\.md$/.test(path));
+	for (const harness of HARNESSES) assert.ok(files.some((path) => path.startsWith(`${harness}/`)), `git ls-files lista skills de ${harness}/`);
+	const problems: string[] = [];
+	for (const file of files) problems.push(...positionalParameterProblems(file, await readRepoFile(file)));
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("autotest (#136 CA-4): el chequeo de posicionales marca cada forma prohibida con archivo y línea, deja pasar ${#var}, la prosa y los fences de otro lenguaje, y no cierra un fence con uno interior más corto", () => {
+	const violating = [
+		"# Skill",
+		"Prosa con $1 y $ARGUMENTS no cuenta.",
+		"```bash",
+		'enc() { [ "$1" = none ] && s=$1; }',
+		"echo ${0} $9 \"$@\" $* $#",
+		"echo $ARGUMENTS",
+		"s=${1:-x}; set -- ${@:2} ${*} ${#} ${10} ${#1}",
+		"```",
+		"```text",
+		"echo $1",
+		"```",
+		"  ```sh",
+		"  echo $2",
+		"  ```",
+		"````markdown",
+		"```bash",
+		"echo $3",
+		"```",
+		"````",
+	].join("\n");
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", violating), [
+		"claude/x/SKILL.md:4: $1",
+		"claude/x/SKILL.md:5: ${0}, $9, $@, $*, $#",
+		"claude/x/SKILL.md:6: $ARGUMENTS",
+		"claude/x/SKILL.md:7: ${1:-x}, ${@:2}, ${*}, ${#}, ${10}, ${#1}",
+		"claude/x/SKILL.md:13: $2",
+	]);
+	const compliant = ["```bash", '[ ${#line} -lt 1024 ] && v=$spec; echo "${#v} ${v:-none} ${HOME} $(v=$spec; enc)"', "```"].join("\n");
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", compliant), []);
+});
+
+// Hay un solo parser de fences (`fencedBlocks`) y el chequeo de posicionales lo recorre filtrando por `info`. Un fence
+// sin cerrar llega hasta el final del documento (así lo lee CommonMark y así lo ve el harness al sustituir): el parser lo
+// descarta por defecto, que es lo que esperan los demás gates, y lo devuelve con `includeUnclosed`, que es lo que usa este
+// chequeo para no dejar pasar un comando `bash` mal cerrado.
+test("autotest (#136 hallazgo 2): fencedBlocks expone el info string y descarta un fence sin cerrar salvo con includeUnclosed; el chequeo de posicionales mira también el fence bash sin cerrar", () => {
+	const markdown = ["```bash", "echo uno", "```", "~~~sh title=x", "echo dos", "~~~", "```", "sin info", "```", "```bash", "echo $1", "echo ${@:2}"].join("\n");
+	assert.deepEqual(fencedBlocks(markdown).map((fence) => [fence.info, fence.line]), [["bash", 1], ["sh", 4], ["", 7]]);
+	const withUnclosed = fencedBlocks(markdown, { includeUnclosed: true });
+	assert.deepEqual(withUnclosed.map((fence) => [fence.info, fence.line]), [["bash", 1], ["sh", 4], ["", 7], ["bash", 10]]);
+	assert.equal(withUnclosed.at(-1)?.content, "echo $1\necho ${@:2}");
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", markdown), ["claude/x/SKILL.md:11: $1", "claude/x/SKILL.md:12: ${@:2}"]);
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", ["```text", "echo $1"].join("\n")), []);
 });

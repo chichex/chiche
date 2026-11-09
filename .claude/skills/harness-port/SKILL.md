@@ -113,5 +113,6 @@ Si el pedido no fija skill de origen o harnesses destino, preguntarlo con `AskUs
 - [ ] Archivos de referencia copiados y sus links relativos funcionando; para `coding-policies`, fuente canónica editada y `node scripts/sync-coding-policies-references.mjs --check` en verde.
 - [ ] Diff contra la fuente muestra SOLO capa de interacción; la doctrina quedó idéntica.
 - [ ] Strings de artefactos generados intactos (headers citados, flags, formatos, paths), sin "correcciones" de tildes dentro de backticks ni bloques de código.
+- [ ] Ningún fence `bash` ni `sh` de un `SKILL.md` usa parámetros posicionales (`$1`, `$@`, `${1:-x}`) ni `$ARGUMENTS`, porque el harness los sustituye al cargar el skill con argumentos y el comando deja de ser el del archivo; los valores entran por variables con nombre (`spec='<spec>'`). Lo verifica `harness-gate`.
 - [ ] `README.md` y `README.en.md` reflejan la disponibilidad actual del skill por harness.
 - [ ] Ortografía completa en todo el texto porteado.
