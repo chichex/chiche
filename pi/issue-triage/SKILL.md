@@ -154,7 +154,7 @@ La selección múltiple es **todo-o-nada**. No propongas ni ejecutes grupos parc
 
 ### Identidad, copias y metadata defectuosa
 
-- Normalizá `#11` y `owner/repo#11` contra el repo actual. Una identidad canónica válida es autoritativa. `Fuente`/`Source` y el nombre `issue-N-*` sólo recuperan identidad legacy o ausente y dejan provenance/diagnóstico.
+- Normalizá `#11` y `owner/repo#11` contra el `repo` de «Publicación efectiva» (el de `origin` sin la fila). Una identidad canónica válida es autoritativa. `Fuente`/`Source` y el nombre `issue-N-*` sólo recuperan identidad legacy o ausente y dejan provenance/diagnóstico.
 - Tipo incompatible, issue contradictorio, `ParseResult.kind=conflict`, markers divergentes o identidad canónica conflictiva producen `artifact-conflict`; nunca reasignes ni hagas fallback silencioso.
 - Un único artefacto con forma/ubicación de spec y estado legacy desconocido, metadata ausente o canonical inválida toma `audit-existing-spec` sólo si puede asociarse de forma segura. Conservá siempre format, provenance y diagnósticos.
 - Una copia local y otra en GitHub son una sola spec lógica únicamente si comparten identidad y contenido normativo después de: normalizar `CRLF`/`LF` y un único newline final; normalizar la forma relativa/fully-qualified del issue dentro del marker; y quitar de la copia GitHub sólo un bloque terminal `<details><summary>Body original</summary>…</details>`. Toda otra diferencia —estado, headings, criterios, resultados, prose o metadata— produce `artifact-conflict`. Si son equivalentes, la local es `primary`.
@@ -416,7 +416,7 @@ Esta fase ocurre únicamente tras una autorización preliminar específica para 
 
 ### 5.1 Marker idempotente
 
-Ordená las fuentes y construí:
+Ordená las fuentes y construí, con `repo` igual al `repo` de «Publicación efectiva» (el de `origin` sin la fila):
 
 ```html
 <!-- Issue-Triage: repo=owner/repo; sources=12,13 -->
@@ -454,7 +454,7 @@ Sintetizá un issue nuevo con:
 
 No concatentes bodies ni copies comentarios. El `Objetivo` debe conservar la síntesis entendible del diagnóstico, sin jerga de triage. Conservá labels comunes y agregá otras sólo cuando sean inequívocamente aplicables al alcance combinado.
 
-Creá el issue con `gh issue create` usando un archivo temporal para el body y eliminá ese temporal al terminar.
+Creá el issue corriendo la plantilla `crear issue` de «Publicación efectiva» con `{repo}`, `{title}` y `{body}` reemplazados (`{body}` es la ruta de un archivo temporal con el body, que eliminás al terminar; cada valor va entre comillas simples con escape), después de compararla contra la stop list de `## Autonomy`. El número sale de la URL `https://github.com/<owner>/<repo>/issues/<N>` impresa y su `<owner>/<repo>` tiene que ser `repo`: si la URL falta o es de otro repo, la creación falló, no toques las fuentes y el reporte nombra la URL huérfana si la hubo.
 
 ### 5.3 Reemplazar fuentes
 
@@ -462,7 +462,7 @@ Sólo después de obtener y verificar el número nuevo:
 
 1. En cada original, buscá el marker `<!-- Issue-Triage-Replaced-By: #NEW -->`.
 2. Si falta, comentá que fue reemplazado por `#NEW`, incluyendo el marker.
-3. Si sigue abierto, cerralo con `gh issue close <N> --reason "not planned"`.
+3. Si sigue abierto, cerralo con `gh issue close <N> --repo <repo> --reason "not planned"`.
 4. Nunca elimines los originales.
 5. Procesá best-effort y reportá éxitos/fallos por issue.
 

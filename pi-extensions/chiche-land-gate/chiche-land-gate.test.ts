@@ -599,3 +599,33 @@ test("#84 review: el contrato declara la dependencia de jq del gate y la limitac
 	assert.match(row, /requiere `jq`[^|]*se saltea y lo dice si falta/);
 	assert.match(section(contract, /^## Gaps$/), /`push` y en `pull_request`[^\n]*misma identidad[^\n]*el rollup de `gh` no expone el evento/);
 });
+
+// ---------------------------------------------------------------------------
+// Issue #134, CA-18: chiche-land reconoce `Closes owner/repo#NN` y `Refs owner/repo#NN` y registra land.merged con ese issue.
+
+const ISSUE_FILTER_PREFIX = "gh pr view <n> --json body --jq .body | ";
+
+function issueFilter(markdown: string): string {
+	const events = section(markdown, /^## Log de eventos$/);
+	const fences = [...events.matchAll(/\n```bash\n([\s\S]+?)\n```\n/g)].map((match) => match[1] ?? "");
+	// El bloque chiche-events trae el comando del append; el filtro del issue es el otro fence.
+	const filter = fences.find((fence) => fence.startsWith(ISSUE_FILTER_PREFIX));
+	assert.ok(filter, "la sección Log de eventos trae el filtro del issue del body, que abre con gh pr view <n> --json body --jq .body |");
+	return filter.slice(ISSUE_FILTER_PREFIX.length);
+}
+
+test("#134 CA-18: el filtro del issue del body imprime la primera referencia Closes/Refs, también owner/repo#NN, y nada sin referencia; es idéntico en los cuatro harnesses", async () => {
+	const filter = issueFilter(await readRepoFile("claude/chiche-land/SKILL.md"));
+	for (const harness of HARNESSES) assert.equal(issueFilter(await readRepoFile(`${harness}/chiche-land/SKILL.md`)), filter, `${harness} diverge del filtro de claude`);
+	for (const [fixture, expected] of [["pr-body-cross-repo.md", "pramaestudio/backlog#42\n"], ["pr-body-same-repo.md", "#7\n"], ["pr-body-none.md", ""]] as const) {
+		const path = fileURLToPath(new URL(`./fixtures/${fixture}`, import.meta.url));
+		// El body entra por stdin, como se lo entrega `gh pr view <n> --json body --jq .body` al pipe.
+		const run = spawnSync("bash", ["-c", filter], { encoding: "utf8", input: await readFile(path, "utf8") });
+		assert.equal(run.status, 0, `${fixture}: el filtro falló: ${run.stderr}`);
+		assert.equal(run.stdout, expected, fixture);
+	}
+	for (const harness of HARNESSES) {
+		const events = section(await readRepoFile(`${harness}/chiche-land/SKILL.md`), /^## Log de eventos$/);
+		assert.match(events, /\(`Closes #NN`, `Refs #NN`, y también `Closes owner\/repo#NN` o `Refs owner\/repo#NN`: `issue` lleva la referencia tal como está en el body\)/, `${harness}/chiche-land: land.merged no acepta owner/repo#NN`);
+	}
+});

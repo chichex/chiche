@@ -613,7 +613,7 @@ const DECLARED_RUN_BULLET = "   - **Carpeta declarada**: si la `carpeta` que imp
 const DECLARED_LAND = "Una copia sin trackear en la `carpeta` que `## Publicacion` del contrato declare dentro del repo (`<carpeta>/<kind>/<nombre>`) no vive en los common-dirs: la cubre la clasificación de paths sucios de abajo, que la resuelve como `ya aterrizado` cuando su `git hash-object` es igual a `git rev-parse origin/<default>:<carpeta>/<kind>/<nombre>`.";
 const CODE_REVIEW_PLACES = "4. `<carpeta>/specs/` si `## Publicacion` del contrato declara una `carpeta`, y después `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia)";
 const EVENTS_IDENTITY = "La identidad events-v1 de una spec local es `.sdd/specs/<slug>.md` sea cual sea la marca del lugar donde vive: `.chiche/` o `.sdd/`, del árbol o del common-dir, o la carpeta declarada en `## Publicacion` del contrato.";
-const SPEC_REPORT_LINE = "- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>] [· staging huérfano: #NN]";
+const SPEC_REPORT_LINE = "- publicacion: specs <valor> · destino <issue #NN | ruta absoluta> [· no se pudo crear el issue: quedó en <ruta absoluta>] [· staging huérfano: #NN] [· URL huérfana: <url>]";
 const CODE_REVIEW_HARNESSES = ["codex", "opencode", "pi", "antigravity"] as const;
 
 test("#134 CA-8 y CA-9: el Destino de chiche-spec corre el comando canónico y aplica specs (auto, issue sin consultar, local con issue=#NN sin editar el issue), --out manda, y una creación fallida cae a <carpeta>/specs/ con el aviso literal del reporte", async () => {
@@ -625,7 +625,7 @@ test("#134 CA-8 y CA-9: el Destino de chiche-spec corre el comando canónico y a
 		problems.push(...missing(flow, [
 			/^\*\*Destino\.\*\* `--out` fuerza el destino y manda sobre la fila `specs`\. Sin `--out`, correr el comando canónico de «Publicación efectiva» y aplicar `specs` sin preguntar\. Con `auto`, la regla de siempre:$/m,
 			/^3\. Si no, o si `gh` no está disponible o falla → `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md` si hay issue de origen\), con su ruta absoluta en el reporte; con la carpeta default es `<git-common-dir>\/chiche\/specs\/<slug>\.md`\.$/m,
-			/^Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD, sin consultar si el repo ya usa issues como specs\. Con `local`, escribir siempre `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md`\), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue\. Si crear o editar el issue falla \(con `issue`, o con `auto` cuando eligió issue\), la spec se escribe en `<carpeta>\/specs\/` con el marker que ya tenía \(`issue=none`, o la referencia del issue de origen\) y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>` y nombra el issue de staging huérfano si lo hubo, para que el reintento lo reuse en vez de crear otro; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación\.$/m,
+			/^Con `issue`, actualizar el issue de origen si lo hay o, si no, crear uno nuevo con el mismo staging no-SDD y «Crear un issue», sin consultar si el repo ya usa issues como specs\. Con `local`, escribir siempre `<carpeta>\/specs\/<slug>\.md` \(o `<carpeta>\/specs\/issue-NN-<slug>\.md`\), con `issue=#NN` en el marker cuando el pedido vino de un issue y sin editar ese issue\. Si crear o editar el issue falla \(con `issue`, o con `auto` cuando eligió issue\), la spec se escribe en `<carpeta>\/specs\/` con el marker que ya tenía \(`issue=none`, o la referencia del issue de origen\) y el reporte dice `no se pudo crear el issue: quedó en <ruta absoluta>` y nombra el issue de staging huérfano si lo hubo, para que el reintento lo reuse en vez de crear otro; con al menos un éxito parcial, el reporte lo nombra como exige el gate de publicación\.$/m,
 		]).map((problem) => at(`Destino: ${problem}`)));
 		if (!/`local` = `<git-common-dir>\/chiche\/specs\/` \(o `<carpeta>\/specs\/` si `## Publicacion` del contrato declara una carpeta\)/.test(markdown)) problems.push(at("--out local no nombra la carpeta declarada"));
 		if (!/También `## Publicacion`, que fija el destino de la spec y la carpeta de los borradores \(ver «Publicación efectiva»\)\./.test(markdown)) problems.push(at("la Fase 1 no lee ## Publicacion"));
@@ -758,6 +758,66 @@ test("#139-8: en chiche-run el bloque publication-resolve va entre la Fase 0 y l
 		if (!(phase0 !== -1 && phase0 < block && block !== -1 && block < phase1)) problems.push(at("el bloque publication-resolve no está entre la Fase 0 y la Fase 1"));
 		if (!/^1\. \*\*Contrato\*\*: leer `\.chiche\/project\.md`[^\n]*Correr ahí el comando canónico de «Publicación efectiva» y anotar su `carpeta`: es la que usan los pasos siguientes\.[^\n]*$/m.test(markdown)) problems.push(at("el paso 1 de la Fase 1 no corre el comando canónico"));
 		if (!/\*\*Carpeta declarada\*\*: si la `carpeta` que imprimió el comando canónico de «Publicación efectiva» en el paso 1 está dentro del repo/.test(markdown)) problems.push(at("el bullet «Carpeta declarada» no remite al comando ya corrido"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Capa 3 (CA-15 a CA-19): repo y comando
+
+const CREATE_PARAGRAPH = "**Crear un issue.** Todo issue que este skill crea (la spec nueva y `Llevar a issue`) se crea corriendo la plantilla `crear issue` de «Publicación efectiva» con `{repo}`, `{title}` y `{body}` reemplazados: `{repo}` es el `repo` efectivo, `{title}` el título y `{body}` la ruta de un archivo temporal con el body; cada valor va entre comillas simples con escape (`'` → `'\\''`). Antes de correrla se compara contra la stop list de `## Autonomy` y, si una fila matchea, no se corre y la creación cuenta como fallida. El número sale de la URL `https://github.com/<owner>/<repo>/issues/<N>` impresa, y su `<owner>/<repo>` tiene que ser `repo`: si la URL falta o es de otro repo, la creación cuenta como fallida y el reporte nombra la URL huérfana si la hubo. Con `repo` distinto del de `origin`, el marker lleva `issue=owner/repo#NN`; si es el mismo, `issue=#NN`. Toda otra lectura o escritura de un issue (`gh issue view`, `gh issue edit`, `gh issue list`, `gh api repos/<repo>/…`, también en `Llevar a issue` y `Solicitar cambios`) lleva `--repo <repo>` o `repos/<repo>/…`; un `#NN` suelto en los argumentos apunta a `repo`, y `owner/repo#NN` o una URL apuntan a su propio repo.";
+const TRIAGE_CREATE = "Creá el issue corriendo la plantilla `crear issue` de «Publicación efectiva» con `{repo}`, `{title}` y `{body}` reemplazados (`{body}` es la ruta de un archivo temporal con el body, que eliminás al terminar; cada valor va entre comillas simples con escape), después de compararla contra la stop list de `## Autonomy`. El número sale de la URL `https://github.com/<owner>/<repo>/issues/<N>` impresa y su `<owner>/<repo>` tiene que ser `repo`: si la URL falta o es de otro repo, la creación falló, no toques las fuentes y el reporte nombra la URL huérfana si la hubo.";
+const TRIAGE_NORMALIZE = "- Normalizá `#11` y `owner/repo#11` contra el `repo` de «Publicación efectiva» (el de `origin` sin la fila). Una identidad canónica válida es autoritativa.";
+const TRIAGE_MARKER_REPO = "Ordená las fuentes y construí, con `repo` igual al `repo` de «Publicación efectiva» (el de `origin` sin la fila):";
+const RUN_ISSUE_VIEW = "`#NN` → `gh issue view NN --repo <repo>`, con el `repo` de «Publicación efectiva» (`owner/repo#NN` o una URL apuntan a su propio repo), y extraer la spec del body";
+const RUN_CLOSES = "`Closes #NN` si la spec vino de un issue del repo de `origin`, o `Closes owner/repo#NN` si vino de otro repo (la referencia del marker, tal cual)";
+const RUN_STACK_CLOSES = "Con la spec en otro repo, `Refs` y `Closes` llevan `owner/repo#NN`, la referencia del marker tal cual.";
+
+test("#134 CA-15 y CA-16: chiche-spec crea los issues con la plantilla, compara contra la stop list, toma el número de la URL del repo esperado, escribe owner/repo#NN entre repos y apunta #NN, la lista y la lectura de issues al repo declarado", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-spec: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-spec");
+		const flow = delimitedBlock(markdown, "chiche-spec-flow") ?? "";
+		if (!flow.split("\n").includes(CREATE_PARAGRAPH)) problems.push(at("chiche-spec-flow no trae el párrafo «Crear un issue»"));
+		if (!/crear issue con «Crear un issue» \(abajo\): primero un staging no-SDD; con el número devuelto, reemplazar `issue=none` y recién entonces publicar la spec canónica\./.test(flow)) problems.push(at("la regla automática no crea el issue con «Crear un issue»"));
+		if (!/devuelve al menos uno \(los dos con `--repo <repo>`\)/.test(flow)) problems.push(at("la búsqueda de specs en issues no lleva --repo <repo>"));
+		if (!/crear uno nuevo con el mismo staging no-SDD y «Crear un issue»/.test(flow)) problems.push(at("`issue` no crea con «Crear un issue»"));
+		// En Pi «De un issue abierto» usa `select_github_issue`, la UI de `/issues`, que sigue en el repo de `origin` (fuera de alcance).
+		const issueList = harness === "pi"
+			? "invocar `select_github_issue`; sus detalles completos son la fuente. Lista el repo de `origin`: con un `repo` declarado distinto en «Publicación efectiva», pedí el número y seguí con `gh issue view NN --repo <repo>`."
+			: "correr `gh issue list --state open --limit 20 --repo <repo>` (el `repo` de «Publicación efectiva»), mostrar la lista";
+		if (!markdown.includes(issueList)) problems.push(at("«De un issue abierto» no apunta al repo declarado"));
+		if (!markdown.includes("`gh issue view NN --repo <repo> --json title,body,comments,labels` (un `#NN` suelto apunta al `repo` de «Publicación efectiva»; `owner/repo#NN` o una URL apuntan a su propio repo)")) problems.push(at("la Fase 2 no lee el issue del repo declarado"));
+		if (!markdown.includes("`issue` lleva la referencia de origen (`#NN` si el issue vive en el repo de `origin`, `owner/repo#NN` si vive en otro `repo`, o `none`)")) problems.push(at("el marker no distingue #NN de owner/repo#NN por repo"));
+		const report = section(markdown, /^Reporte$/);
+		if (!report.split("\n").includes(SPEC_REPORT_LINE)) problems.push(at("el reporte no nombra la URL huérfana"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-17: chiche-run lee la spec de owner/repo#NN con --repo y el body del PR lleva Closes owner/repo#NN cuando el repo de la spec no es el de origin, también en el stack", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/chiche-run: ${problem}`;
+		const markdown = await skillFile(harness, "chiche-run");
+		if (!markdown.includes(RUN_ISSUE_VIEW)) problems.push(at("la Fase 1 no lee el issue con --repo <repo>"));
+		if (!markdown.includes(RUN_CLOSES)) problems.push(at("la Fase 5 no distingue Closes #NN de Closes owner/repo#NN"));
+		const stack = delimitedBlock(markdown, "chiche-run-stack") ?? "";
+		if (!stack.includes(RUN_STACK_CLOSES)) problems.push(at("el stack no lleva Refs/Closes owner/repo#NN entre repos"));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#134 CA-15 y CA-19: issue-triage crea el combinado con la plantilla y la regla de la URL, escribe repo=<repo> en el marker y normaliza #NN y owner/repo#NN contra ese repo", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const at = (problem: string) => `${harness}/issue-triage: ${problem}`;
+		const markdown = await skillFile(harness, "issue-triage");
+		if (!markdown.split("\n").includes(TRIAGE_CREATE)) problems.push(at("la Fase 5 no crea el combinado con la plantilla y la regla de la URL"));
+		if (!markdown.includes(TRIAGE_NORMALIZE)) problems.push(at("la normalización no apunta al repo declarado"));
+		if (!markdown.split("\n").includes(TRIAGE_MARKER_REPO)) problems.push(at("el marker Issue-Triage no toma repo de «Publicación efectiva»"));
+		if (!markdown.includes("cerralo con `gh issue close <N> --repo <repo> --reason \"not planned\"`")) problems.push(at("el cierre de las fuentes no lleva --repo <repo>"));
 	}
 	assert.deepEqual(problems, []);
 });

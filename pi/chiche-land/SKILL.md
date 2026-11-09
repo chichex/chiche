@@ -297,7 +297,19 @@ Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.j
 - **Solo en el common-dir.** El log se escribe en `<git-common-dir>/chiche/`, nunca dentro del working tree: fuera de un repo git, o si el harness no puede escribir ahí, el evento se saltea con el aviso, sin caer al working tree (`.chiche/` ni `.sdd/`).
 <!-- chiche-events:end -->
 
-En este skill, cada `land.merged` lleva en `pr` el número de un PR mergeado y verificado, en `issue` el issue que el body de ese PR cierra o referencia (`Closes #NN`, `Refs #NN`) o `none` —en un stack, el issue del `Refs`/`Closes` del stack para todos sus PRs: la línea `spec en #<PR>` nombra un PR, no un issue—, y `spec`, `previous` y `grill` en `none`. `--dry-run` y `--clean-only` no registran nada. Un PR que queda `en cola` al vencer `--wait` y que la cola mergea después no registra `land.merged`: reanudar no lo recupera, porque un PR ya `MERGED` no es target, y el formato no hace backfill.
+En este skill, cada `land.merged` lleva en `pr` el número de un PR mergeado y verificado, en `issue` el issue que el body de ese PR cierra o referencia (`Closes #NN`, `Refs #NN`, y también `Closes owner/repo#NN` o `Refs owner/repo#NN`: `issue` lleva la referencia tal como está en el body) o `none` —en un stack, el issue del `Refs`/`Closes` del stack para todos sus PRs: la línea `spec en #<PR>` nombra un PR, no un issue—, y `spec`, `previous` y `grill` en `none`. `--dry-run` y `--clean-only` no registran nada. Un PR que queda `en cola` al vencer `--wait` y que la cola mergea después no registra `land.merged`: reanudar no lo recupera, porque un PR ya `MERGED` no es target, y el formato no hace backfill.
+
+El issue se extrae del body con este filtro, que imprime la primera referencia (`#NN` u `owner/repo#NN`, tal como está en el body) o nada si no hay:
+
+```bash
+gh pr view <n> --json body --jq .body | grep -oiE '(Closes|Refs) +([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[1-9][0-9]*' | head -n 1 | sed -E 's/^[A-Za-z]+ +//'
+```
+
+El issue se extrae del body con este filtro, que imprime la primera referencia (`#NN` u `owner/repo#NN`, tal como está en el body) o nada si no hay:
+
+```bash
+gh pr view <n> --json body --jq .body | grep -oiE '(Closes|Refs) +([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)?#[1-9][0-9]*' | head -n 1 | sed -E 's/^[A-Za-z]+ +//'
+```
 
 ## MUST DO
 
