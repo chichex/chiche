@@ -140,10 +140,17 @@ pi_migrate_manifest() {
   rm -f "$(pi_legacy_manifest_path "$dest")"
 }
 
+# `mkdir -p` que nombra el destino si falla: los uutils coreutils de Ubuntu
+# 26.04 imprimen `mkdir: Not a directory` sin la ruta. Devuelve 1, así que con
+# `set -e` aborta igual que el `mkdir` solo.
+ensure_dir() {
+  mkdir -p "$1" || { echo "✗ no se pudo crear $1" >&2; return 1; }
+}
+
 pi_record_managed() {
   local dest="$1" name="$2" manifest
   manifest="$(pi_manifest_path "$dest")"
-  mkdir -p "$dest"
+  ensure_dir "$dest"
   if [ ! -f "$manifest" ] || ! grep -Fxq -e "$name" "$manifest" 2>/dev/null; then
     printf '%s\n' "$name" >> "$manifest"
   fi
@@ -214,7 +221,7 @@ install_set() {
     echo "⚠  $name: no existe $src en el repo — salteando"
     return
   fi
-  mkdir -p "$dest"
+  ensure_dir "$dest"
   echo "→ $name → $dest"
   pi_migrate_manifest "$dest"
   prune_retired "$src" "$dest" dirs
@@ -236,7 +243,7 @@ install_extensions() {
     echo "⚠  Pi extensions: no existe $src en el repo — salteando"
     return
   fi
-  mkdir -p "$dest"
+  ensure_dir "$dest"
   echo "→ Pi extensions → $dest"
   pi_migrate_manifest "$dest"
   # Una extensión renombrada o retirada (p. ej. sdd-artifacts → chiche-artifacts)
@@ -258,7 +265,7 @@ install_themes() {
     echo "⚠  Pi themes: no existe $src en el repo — salteando"
     return
   fi
-  mkdir -p "$dest"
+  ensure_dir "$dest"
   echo "→ Pi themes → $dest"
   pi_migrate_manifest "$dest"
   prune_retired "$src" "$dest" json
@@ -284,7 +291,7 @@ install_agents() {
     echo "⚠  Claude agents: no existe $src en el repo — salteando"
     return
   fi
-  mkdir -p "$dest"
+  ensure_dir "$dest"
   echo "→ Claude agents → $dest"
   while IFS= read -r base; do
     [ -n "$base" ] || continue
@@ -486,7 +493,7 @@ configure_codex_skill_precedence() {
   local emitted="" stale_skills name escaped_path
   stale_skills="$(codex_stale_pi_skills)"
   config_dir="$(dirname "$CODEX_CONFIG")"
-  mkdir -p "$config_dir"
+  ensure_dir "$config_dir"
   config_tmp="$(mktemp "$config_dir/.config.toml.XXXXXX")"
   block_tmp="$(mktemp "$config_dir/.skills-precedence.XXXXXX")"
 
