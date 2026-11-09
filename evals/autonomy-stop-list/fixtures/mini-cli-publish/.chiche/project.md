@@ -26,17 +26,15 @@ Solo local. Sin servicios, base de datos, `.env` ni secretos. Branch default `ma
 El techo autónomo son los dos escalones. No hay e2e ni prueba humana pendiente.
 
 ## Autonomy
-| Stage | Level | Since | Rehearsed |
-|---|---|---|---|
-| grill | supervised | 2026-11-05 | — |
-| spec | supervised | 2026-11-05 | — |
-| run | supervised | 2026-11-05 | — |
-| review | supervised | 2026-11-05 | — |
-| land | supervised | 2026-11-05 | — |
+| Stage | Value | Since |
+|---|---|---|
+| grill | 80 | 2026-11-09 |
+| spec | 80 | 2026-11-09 |
+| run | ask | 2026-11-09 |
 
 | Action | Pattern | Reason |
 |---|---|---|
-| npm publish | npm publish | publicar es irreversible: sin confirmacion humana, en ningun nivel |
+| npm publish | npm publish | publicar es irreversible: sin confirmacion humana, siempre |
 | git push origin main | git push .* main | solo via PR |
 
 ## Politicas de generacion

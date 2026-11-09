@@ -20,7 +20,7 @@ import {
 } from "./direct-launch.ts";
 import type { DirectGrillRequestV1, DirectRunRequestV1 } from "./direct-protocol.ts";
 import { resolveWorkflowDispatchForCwd } from "./dispatch.ts";
-import { type AutonomyCode, parseAutonomyLevel, withAutonomy } from "./autonomy.ts";
+import { parseRunMode, retiredAutonomyMessage, RUN_MODES, type RunMode } from "./autonomy.ts";
 import {
 	startFreshStage as startFreshStageDefault,
 	type StartFreshStageRequest,
@@ -42,9 +42,6 @@ export type BeginIssueTriageResult =
 
 export interface IssueTriageRequest {
 	issueNumbers: number[];
-	// Issue #102, CA-9: nivel de `/issues --autonomy <level>`; viaja a los args de
-	// issue-triage y, al despachar, a los del skill del stage elegido.
-	autonomy?: string;
 }
 
 export interface WorkflowControllerDependencies {
@@ -176,7 +173,6 @@ interface ActiveTriageAttempt {
 	sessionId: string;
 	status: "open" | "validating" | "claimed";
 	idleExpiresAt: number;
-	autonomy?: AutonomyCode;
 }
 
 type DispatchReceipt =
@@ -319,11 +315,11 @@ export function createWorkflowController(
 	pi.registerTool({
 		name: LAUNCH_SDD_RUN_TOOL,
 		label: "Launch SDD run",
-		description: "Validate an SDD spec target, ask for explicit execution authorization, and launch it in a fresh session. Optional autonomy (A1-A3 or its name) travels as --autonomy.",
+		description: "Validate an SDD spec target, ask for explicit execution authorization, and launch it in a fresh session. Optional mode (ask, pr or pr-reviewed) travels as --mode.",
 		parameters: {
 			type: "object",
 			required: ["target"],
-			properties: { target: { type: "string" }, autonomy: { type: "string" } },
+			properties: { target: { type: "string" }, mode: { type: "string", enum: [...RUN_MODES] } },
 			additionalProperties: false,
 		},
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
@@ -332,21 +328,23 @@ export function createWorkflowController(
 				throw new Error("launch_sdd_run requires target=<ruta|#NN|owner/repo#NN|GitHub issue URL>");
 			}
 			const target = (params as { target: string }).target.trim();
-			// Issue #102 (review #114-7): el nivel se valida con la escala antes de resolver el target.
-			let autonomy: AutonomyCode | undefined;
-			const rawAutonomy = (params as { autonomy?: unknown }).autonomy;
-			if (rawAutonomy !== undefined) {
-				if (typeof rawAutonomy !== "string") throw new Error("launch_sdd_run autonomy must be a string (A1-A3 or its name)");
-				const parsed = parseAutonomyLevel(rawAutonomy);
+			// Issue #130, CA-25: la posición del run se valida antes de resolver el target; el parámetro del dial por
+			// niveles se retiró en 6.0.0 y se rechaza en vez de ignorarlo o traducirlo.
+			if (Object.hasOwn(params, "autonomy")) throw new Error(retiredAutonomyMessage("usá mode (ask, pr o pr-reviewed)"));
+			let mode: RunMode | undefined;
+			const rawMode = (params as { mode?: unknown }).mode;
+			if (rawMode !== undefined) {
+				if (typeof rawMode !== "string") throw new Error("launch_sdd_run mode must be a string (ask, pr or pr-reviewed)");
+				const parsed = parseRunMode(rawMode);
 				if (!parsed.ok) throw new Error(parsed.message);
-				autonomy = parsed.code;
+				mode = parsed.mode;
 			}
-			const resolved = await resolveDirectRunRequest(target, context.cwd, dependencies.directRunDependencies, { autonomy });
+			const resolved = await resolveDirectRunRequest(target, context.cwd, dependencies.directRunDependencies, { mode });
 			if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
 			const authorized = await context.ui.confirm(
 				"Ejecutar ahora",
-				// Review #116-5: el confirm es la única autorización; muestra el nivel que se va a autorizar.
-				`${resolved.request.summary}${autonomy === undefined ? "" : `\nNivel: ${autonomy}`}\n\nSe abrirá una sesión hija ligada a la actual.`,
+				// Review #116-5: el confirm es la única autorización; muestra la posición del run que se va a autorizar.
+				`${resolved.request.summary}${mode === undefined ? "" : `\nPosición: ${mode}`}\n\nSe abrirá una sesión hija ligada a la actual.`,
 			);
 			if (!authorized) {
 				return {
@@ -434,7 +432,7 @@ export function createWorkflowController(
 					const resolution = terminalResult.details;
 					if (activeAttempt !== attempt) throw new Error("submit_workflow_resolution attempt expired during validation");
 					if (resolution.outcome === "start" && resolution.selectedRoute !== null) {
-						const dispatch = await resolveWorkflowDispatchForCwd(resolution, { autonomy: attempt.autonomy });
+						const dispatch = await resolveWorkflowDispatchForCwd(resolution);
 						if (!dispatch.ok) throw new Error(`${dispatch.code}: ${dispatch.message}`);
 						queueReceipt({
 							kind: "workflow",
@@ -560,12 +558,6 @@ export function createWorkflowController(
 			if (!validIssueNumbers(input.issueNumbers)) {
 				return { ok: false, code: "invalid-issues", message: "Issue selection must contain 1-12 unique positive integers" };
 			}
-			let autonomy: AutonomyCode | undefined;
-			if (input.autonomy !== undefined) {
-				const parsed = parseAutonomyLevel(input.autonomy);
-				if (!parsed.ok) return { ok: false, code: "invalid-autonomy", message: parsed.message };
-				autonomy = parsed.code;
-			}
 			const sessionId = contextSessionId(context);
 			if (!sessionId) {
 				return { ok: false, code: "origin-session-unbound", message: "Issue triage requires a persisted origin session" };
@@ -578,12 +570,11 @@ export function createWorkflowController(
 				sessionId,
 				status: "open",
 				idleExpiresAt: now() + triageAttemptTtlMs,
-				autonomy,
 			};
 			activeAttempt = attempt;
 			const materialized = await materializeSkill(
 				"issue-triage",
-				withAutonomy(input.issueNumbers.map((number) => `#${number}`).join(" "), autonomy),
+				input.issueNumbers.map((number) => `#${number}`).join(" "),
 				{
 					commands: pi.getCommands() as readonly SkillCommandInfo[],
 					readFile: dependencies.readSkillFile,

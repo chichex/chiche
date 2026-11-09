@@ -13,7 +13,7 @@ function repoFile(path: string): URL {
 
 const EXPECTED_CASES = [
 	"adherence-chiche-spec",
-	"autonomy-stop-list-a3",
+	"autonomy-stop-list",
 	"silent-ambiguous",
 	"trigger-chiche-init",
 	"trigger-chiche-run",

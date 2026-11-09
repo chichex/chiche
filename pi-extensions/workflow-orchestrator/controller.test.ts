@@ -769,7 +769,7 @@ test("launch_sdd_run asks explicit authorization and bridges its direct request 
 		toolContext,
 	) as { terminate?: boolean; details?: { authorized?: boolean } };
 	assert.equal(confirmations, 1);
-	// Review #116-5: el confirm es la única autorización; sin flag no muestra nivel.
+	// Review #116-5: el confirm es la única autorización; sin mode no muestra posición.
 	assert.deepEqual(messages, ["Run issue #14.\n\nSe abrirá una sesión hija ligada a la actual."]);
 	assert.equal(result.terminate, true);
 	assert.equal(result.details?.authorized, true);
@@ -787,10 +787,10 @@ test("launch_sdd_run asks explicit authorization and bridges its direct request 
 	};
 	await commands.get("__sdd-dispatch")!.handler("direct-receipt", commandContext);
 	assert.deepEqual(starts, [directRunRequest()]);
-	// Review #116-5: con --autonomy el confirm muestra el nivel que se va a autorizar.
-	const leveled = await tools.get("launch_sdd_run")!.execute("launch-2", { target: "#14", autonomy: "plan-approved" }, undefined, undefined, toolContext) as { details?: { authorized?: boolean } };
-	assert.equal(leveled.details?.authorized, true);
-	assert.equal(messages[1], "Run issue #14.\nNivel: A2\n\nSe abrirá una sesión hija ligada a la actual.");
+	// Review #116-5 e issue #130, CA-25: con mode el confirm muestra la posición del run que se va a autorizar.
+	const positioned = await tools.get("launch_sdd_run")!.execute("launch-2", { target: "#14", mode: "pr-reviewed" }, undefined, undefined, toolContext) as { details?: { authorized?: boolean } };
+	assert.equal(positioned.details?.authorized, true);
+	assert.equal(messages[1], "Run issue #14.\nPosición: pr-reviewed\n\nSe abrirá una sesión hija ligada a la actual.");
 });
 
 test("launch_grill authorizes a qualified issue target and dispatches it through a one-shot receipt", async () => {
@@ -853,8 +853,10 @@ test("launch_grill authorizes a qualified issue target and dispatches it through
 	assert.deepEqual(starts, [directGrillRequest()]);
 });
 
-// Review #114-9 (issue #102, CA-9): el cableado de --autonomy entre /issues, la materialización y el despacho.
-test("review #114-9: beginIssueTriage materializa issue-triage con --autonomy, rechaza un nivel fuera de la escala y lleva attempt.autonomy hasta el despacho", async () => {
+// Issue #130, CA-25 (antes review #114-9): /issues ya no lleva flags. issue-triage se materializa sin flags de
+// autonomía, un `autonomy` heredado en el pedido no viaja a ningún lado y el despacho solo agrega `--until pr`
+// cuando el veredicto vino aceptado.
+test("#130 CA-25: beginIssueTriage materializa issue-triage sin flags de autonomía, no propaga un autonomy heredado y el despacho solo agrega --until pr con el veredicto aceptado", async () => {
 	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
 	const commands = new Map<string, { handler: (args: string, context: unknown) => Promise<void> }>();
 	let activeTools = ["read"];
@@ -881,28 +883,28 @@ test("review #114-9: beginIssueTriage materializa issue-triage con --autonomy, r
 	} as never);
 	const context = { cwd: "/workspace/skills", sessionManager: { getSessionId: () => "origin" } };
 
-	const invalid = await controller.beginIssueTriage({ issueNumbers: [12], autonomy: "A4" }, context as never);
-	assert.deepEqual(invalid, { ok: false, code: "invalid-autonomy", message: "--autonomy A4: no soportado todavía (v1 honra A1–A3)" });
-	assert.equal(sent.length, 0, "un nivel inválido no materializa nada");
-
-	const queued = await controller.beginIssueTriage({ issueNumbers: [12, 13], autonomy: "plan-approved" }, context as never);
+	// Un caller viejo que todavía manda `autonomy` no consigue que viaje: el campo ya no existe en el pedido.
+	const queued = await controller.beginIssueTriage({ issueNumbers: [12, 13], autonomy: "A3" } as never, context as never);
 	assert.deepEqual(queued, { ok: true, code: "queued" });
-	assert.match(sent[0]!, /#12 #13 --autonomy A2$/, "issue-triage se materializa con el flag");
+	assert.match(sent[0]!, /#12 #13$/, "issue-triage se materializa solo con los issues");
+	assert.doesNotMatch(sent[0]!, /--autonomy|--confidence|--mode|--until/, "issue-triage no recibe flags de autonomía");
 
-	const handoff = workflowResolution({ sources: [{ repository: "chichex/chiche", number: 12 }, { repository: "chichex/chiche", number: 13 }], canonicalIssue: { repository: "chichex/chiche", number: 12 } });
+	const accepted = { until: "pr", accepted: true, thresholds: { grill: 80, spec: 80 }, questions: [], assumed: [], forSpec: [], warnings: [] };
+	const handoff = workflowResolution({ sources: [{ repository: "chichex/chiche", number: 12 }, { repository: "chichex/chiche", number: 13 }], canonicalIssue: { repository: "chichex/chiche", number: 12 }, verdict: accepted });
 	const result = await tools.get("submit_workflow_resolution")!.execute("terminal", handoff, undefined, undefined, context) as { terminate?: boolean };
 	assert.equal(result.terminate, true);
 	assert.deepEqual(sent.slice(1), ["/__sdd-dispatch autonomy-receipt"]);
 	await commands.get("__sdd-dispatch")!.handler("autonomy-receipt", { ...context, async waitForIdle() {}, ui: { notify() {} } });
-	assert.deepEqual(started, [{ name: "chiche-spec", args: "#12 --autonomy A2" }], "attempt.autonomy llega al despacho del stage elegido");
+	assert.deepEqual(started, [{ name: "chiche-spec", args: "#12 --until pr" }], "el despacho agrega solo --until pr, por el veredicto aceptado");
 });
 
-test("review #114-7: launch_sdd_run acepta autonomy opcional, lo valida con la escala y lo pasa al resolver del run directo", async () => {
-	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+// Issue #130, CA-25 (antes review #114-7): la tool lleva la posición del run en `mode`; `autonomy` se retiró.
+test("#130 CA-25: launch_sdd_run lleva mode opcional (ask, pr, pr-reviewed), lo valida y lo pasa al resolver del run directo, y rechaza autonomy con el diagnóstico de retiro", async () => {
+	const tools = new Map<string, { description: string; parameters: unknown; execute: (...args: unknown[]) => Promise<unknown> }>();
 	const resolverCalls: unknown[] = [];
 	const pi = {
 		events: createEventBus(),
-		registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) { tools.set(tool.name, tool); },
+		registerTool(tool: { name: string; description: string; parameters: unknown; execute: (...args: unknown[]) => Promise<unknown> }) { tools.set(tool.name, tool); },
 		registerCommand() {},
 		on() {},
 		getCommands: () => [],
@@ -920,13 +922,40 @@ test("review #114-7: launch_sdd_run acepta autonomy opcional, lo valida con la e
 		startDirectRun: async () => ({ ok: true, code: "started" } as never),
 	} as never);
 	const toolContext = { hasUI: true, cwd: "/workspace/skills", sessionManager: { getSessionId: () => "origin-session" }, ui: { async confirm() { return true; } } };
-	await tools.get("launch_sdd_run")!.execute("launch-a3", { target: "#14", autonomy: "unattended" }, undefined, undefined, toolContext);
-	assert.deepEqual(resolverCalls, [{ autonomy: "A3" }]);
-	await tools.get("launch_sdd_run")!.execute("launch-plain", { target: "#14" }, undefined, undefined, toolContext);
-	assert.deepEqual(resolverCalls[1], { autonomy: undefined });
+	const tool = tools.get("launch_sdd_run")!;
+	assert.deepEqual(tool.parameters, {
+		type: "object",
+		required: ["target"],
+		properties: { target: { type: "string" }, mode: { type: "string", enum: ["ask", "pr", "pr-reviewed"] } },
+		additionalProperties: false,
+	});
+	assert.match(tool.description, /Optional mode \(ask, pr or pr-reviewed\) travels as --mode\./);
+	assert.doesNotMatch(tool.description, /autonomy/i);
+	for (const mode of ["ask", "pr", "pr-reviewed"]) {
+		await tool.execute(`launch-${mode}`, { target: "#14", mode }, undefined, undefined, toolContext);
+	}
+	assert.deepEqual(resolverCalls, [{ mode: "ask" }, { mode: "pr" }, { mode: "pr-reviewed" }]);
+	await tool.execute("launch-plain", { target: "#14" }, undefined, undefined, toolContext);
+	assert.deepEqual(resolverCalls[3], { mode: undefined });
 	await assert.rejects(
-		tools.get("launch_sdd_run")!.execute("launch-a4", { target: "#14", autonomy: "A4" }, undefined, undefined, toolContext),
-		/--autonomy A4: no soportado todavía \(v1 honra A1–A3\)/,
+		tool.execute("launch-review", { target: "#14", mode: "review" }, undefined, undefined, toolContext),
+		/^Error: --mode review: valor inválido; válidos: ask, pr, pr-reviewed$/,
 	);
-	assert.equal(resolverCalls.length, 2, "un nivel inválido no llega al resolver");
+	await assert.rejects(
+		tool.execute("launch-number", { target: "#14", mode: 3 }, undefined, undefined, toolContext),
+		/^Error: launch_sdd_run mode must be a string \(ask, pr or pr-reviewed\)$/,
+	);
+	// El parámetro del dial por niveles se retiró: no se traduce a una posición ni se ignora.
+	for (const autonomy of ["A3", "unattended", "plan-approved", "A4", 2]) {
+		await assert.rejects(
+			tool.execute("launch-autonomy", { target: "#14", autonomy }, undefined, undefined, toolContext),
+			/^Error: --autonomy se retiró en 6\.0\.0: usá mode \(ask, pr o pr-reviewed\)$/,
+			String(autonomy),
+		);
+	}
+	await assert.rejects(
+		tool.execute("launch-both", { target: "#14", mode: "pr", autonomy: "A2" }, undefined, undefined, toolContext),
+		/--autonomy se retiró en 6\.0\.0/,
+	);
+	assert.equal(resolverCalls.length, 4, "un mode inválido o un autonomy retirado no llegan al resolver");
 });

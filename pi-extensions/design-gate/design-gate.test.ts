@@ -225,6 +225,41 @@ test("CA-7, CA-7b: el bloque design-system-doctrine es idéntico entre harnesses
 	assert.deepEqual(await identityProblems("design-system", "design-system-doctrine"), []);
 });
 
+// Issue #130 CA-14: palabras del modelo de niveles que no pueden quedar fuera de los bloques compartidos
+// `autonomy-controls` y `autonomy-resolve` (el segundo conserva el mapa de equivalentes de `--autonomy`).
+const RETIRED_AUTONOMY_WORDS = /--autonomy|\bsupervised\b|\bplan-approved\b|\bunattended\b|\bA[0-5]\b|Rehearsed|unrehearsed|umbral grill|umbral spec|nivel efectivo|Niveles de autonomía|Nivel efectivo|Nivel sugerido/;
+
+function outsideAutonomyBlocks(markdown: string): string {
+	return markdown.replace(/<!-- autonomy-(?:controls|resolve):start -->\n[\s\S]*?\n<!-- autonomy-(?:controls|resolve):end -->/g, "");
+}
+
+function retiredAutonomyWords(text: string): string[] {
+	return text.split("\n").filter((line) => RETIRED_AUTONOMY_WORDS.test(line));
+}
+
+test("issue #130 CA-24: design-system no lleva --autonomy en la firma, pregunta la dirección visual siempre y chiche-init nunca lo invoca con --defaults", async () => {
+	// La guarda distingue el texto de 5.x del de 6.0.0.
+	assert.equal(retiredAutonomyWords("- `--autonomy <level>` — se acepta por uniformidad\n`/chiche-init` lo invoca sin flags, y nunca con `--autonomy` ≥ A2\nVer «Niveles de autonomía» y «Nivel efectivo».").length, 3, "la guarda reconoce el texto viejo");
+	assert.deepEqual(retiredAutonomyWords("`/chiche-init` lo invoca sin flags al terminar el contrato, y nunca con `--defaults`\n<niveles con valores>"), [], "la guarda no marca el texto nuevo ni los niveles de sombra del template");
+	const { blocks, problems } = await normalizedBlocks("design-system", "design-system-doctrine");
+	for (const harness of HARNESSES) {
+		const path = `${harness}/design-system/SKILL.md`;
+		const markdown = await readRepoFile(path);
+		for (const name of ["autonomy-controls", "autonomy-resolve"]) {
+			if (delimitedBlock(markdown, name) === null) problems.push(`${path}: falta el bloque <!-- ${name}:start/end -->`);
+		}
+		for (const line of retiredAutonomyWords(outsideAutonomyBlocks(markdown))) problems.push(`${path}: queda el modelo de niveles fuera de los bloques compartidos: ${line}`);
+		const args = outsideAutonomyBlocks(section(blocks.get(harness) ?? "", /^## Argumentos$/));
+		const flags = args.split("\n").filter((line) => /^- `--/.test(line)).map((line) => /^- `(--[a-z-]+)/.exec(line)?.[1]);
+		if (!/^\/design-system \[<raíz de la superficie>\] \[--no-link\]$/m.test(args)) problems.push(`${path}: la firma no es \`/design-system [<raíz de la superficie>] [--no-link]\``);
+		if (flags.join(",") !== "--no-link") problems.push(`${path}: los flags documentados son ${flags.join(", ")} y no solo --no-link`);
+		if (!/^`\/chiche-init` lo invoca sin flags al terminar el contrato, y nunca con `--defaults`: este skill no tiene modo desatendido\. La ronda de dirección visual se pregunta siempre: ningún control de autonomía la saltea \(ver «Controles de autonomía» y «Controles efectivos»\)\.$/m.test(args)) {
+			problems.push(`${path}: Argumentos no dice que chiche-init nunca lo invoca con --defaults ni que la ronda se pregunta siempre`);
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
 test("CA-7: cada design-system nombra su propia tool de preguntas y ninguna ajena", async () => {
 	const { questionTools } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
 	const problems: string[] = [];
@@ -374,8 +409,7 @@ const SDD_INIT_POLICIES: RegExp[] = [
 	/también en `--update` aunque se elija `Mantener`/,
 	/baseline/,
 	/`Generar design system`[^\n]*solo si hay al menos una superficie `sin sistema`/,
-	/invoca `\/design-system` sin flags/,
-	/nunca con `--autonomy` ≥ A2/,
+	/invoca `\/design-system` sin flags, nunca con `--defaults`: la dirección visual es una elección humana\./,
 ];
 
 test("CA-2: la Fase 1 de chiche-init releva DISEÑO por superficie con el censo común", async () => {
@@ -415,7 +449,7 @@ test("CA-3: la Fase 3.5 ofrece ratchets de diseño y Generar design system; el r
 		const path = `${harness}/chiche-init/SKILL.md`;
 		const markdown = await readRepoFile(path);
 		if (!section(markdown, /^## Fase 3\.5 — Políticas de generación$/).includes("<!-- chiche-init-design-policies:start -->")) problems.push(`${path}: los gates de diseño no están en la Fase 3.5`);
-		if (!section(markdown, /^## Reporte$/).includes("- design-system: <referenciado|generado|no existe (ofrecido)|con sistema (no ofrecido)|--autonomy ≥ A2: no ofrecido|sin superficies UI>")) problems.push(`${path}: el reporte no tiene la línea design-system`);
+		if (!section(markdown, /^## Reporte$/).includes("- design-system: <referenciado|generado|no existe (ofrecido)|con sistema (no ofrecido)|--defaults: no ofrecido|sin superficies UI>")) problems.push(`${path}: el reporte no tiene la línea design-system`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -687,11 +721,11 @@ test("CA-17: el contrato fecha los conteos nuevos y cita la corrida con Pi 0.85.
 	const commands = section(contract, /^## Comandos$/);
 	// Pi Package se re-verificó el 2026-11-02 con la capa 3 del renombre a chiche
 	// (migración a .chiche/); el lint de frontmatter y el drift, el 2026-11-05
-	// con el dial de autonomía (issue #102); la suite, el 2026-11-07 con el fix
-	// zsh del resolver (issue #120).
+	// con el dial de autonomía (issue #102); la suite, el 2026-11-09 con el retiro
+	// del ensayo de niveles (issue #130, capa 1).
 	const verifiedOn: Record<string, string> = {
 		"gate focalizado de Pi Package": "2026-11-02",
-		"tests de extensiones": "2026-11-07",
+		"tests de extensiones": "2026-11-09",
 		"lint de frontmatter": "2026-11-05",
 		"reporte de drift": "2026-11-05",
 	};

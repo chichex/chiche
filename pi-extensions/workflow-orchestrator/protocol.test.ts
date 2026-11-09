@@ -200,6 +200,7 @@ test("terminal tool throws a typed error for invalid input and performs no callb
 
 // Issue #119, CA-17: el veredicto del triage viaja en `verdict` (null en stop/error y en toda ruta
 // artifact-aware; objeto en grill/spec/join-*), con `version: 1` intacto y el campo obligatorio.
+// Issue #130, CA-25: `until` acepta solo "pr" ("spec" es invalid-value) y ya no se deriva de `forSpec`.
 function verdict(overrides: Record<string, unknown> = {}) {
 	return {
 		until: "pr",
@@ -213,7 +214,7 @@ function verdict(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, se clona en el round-trip, y se rechaza fuera de rango, con until desconocido, ausente, con campos extra o fuera de una ruta nueva", () => {
+test("#119 CA-17 y #130 CA-25: verdict se acepta como null o como objeto en una ruta nueva, se clona en el round-trip, y se rechaza fuera de rango, con until distinto de pr, ausente, con campos extra o fuera de una ruta nueva", () => {
 	const withVerdict = { ...startResolution(), code: "grill", recommendedClassification: "grill", fallbackClassification: "spec", recommendedRoute: "grill", selectedRoute: "grill", stage: "grill", verdict: verdict() };
 	const ok = validateWorkflowResolution(withVerdict);
 	assert.equal(ok.ok, true, JSON.stringify(ok));
@@ -221,12 +222,16 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 		assert.deepEqual(ok.value, withVerdict);
 		assert.notEqual(ok.value.verdict, withVerdict.verdict, "el veredicto se clona");
 		assert.deepEqual(JSON.parse(JSON.stringify(ok.value)), ok.value);
+		assert.equal(ok.value.version, 1, "version: 1 queda intacto");
 	}
 	for (const route of ["spec", "join-grill", "join-spec"]) {
 		const stage = route.endsWith("grill") ? "grill" : "spec";
-		// Review #125-4: `until: "spec"` exige alguna técnica ≤ thresholds.spec.
-		const result = validateWorkflowResolution({ ...withVerdict, code: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict({ until: "spec", accepted: false, forSpec: [{ text: "usa el store existente", confidence: 40 }] }) });
-		assert.equal(result.ok, true, `${route}: ${JSON.stringify(result)}`);
+		// #130 CA-25: `until` ya no sale de `forSpec` contra `thresholds.spec`: con técnicas en el umbral o debajo sigue siendo "pr".
+		for (const accepted of [false, true]) {
+			const result = validateWorkflowResolution({ ...withVerdict, code: route, recommendedRoute: route, selectedRoute: route, stage, verdict: verdict({ until: "pr", accepted, forSpec: [{ text: "usa el store existente", confidence: 40 }, { text: "en el umbral", confidence: 80 }] }) });
+			assert.equal(result.ok, true, `${route} accepted=${accepted}: ${JSON.stringify(result)}`);
+			if (result.ok) assert.equal(result.value.verdict?.until, "pr");
+		}
 	}
 	const nullable = validateWorkflowResolution(startResolution());
 	assert.equal(nullable.ok, true);
@@ -237,9 +242,13 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 		{ name: "confidence 7.5", value: { ...withVerdict, verdict: verdict({ forSpec: [{ text: "x", confidence: 7.5 }] }) }, path: "$.verdict.forSpec[0].confidence", code: "invalid-value" },
 		{ name: "threshold 101", value: { ...withVerdict, verdict: verdict({ thresholds: { grill: 101, spec: 80 } }) }, path: "$.verdict.thresholds.grill", code: "invalid-value" },
 		{ name: "until x", value: { ...withVerdict, verdict: verdict({ until: "x" }) }, path: "$.verdict.until", code: "invalid-value" },
-		// Review #125-4: coherencia entre until, forSpec, questions, assumed y los umbrales.
+		// #130 CA-25: "spec" dejó de ser un destino, con o sin técnicas debajo del umbral.
 		{ name: "until spec sin técnicas debajo", value: { ...withVerdict, verdict: verdict({ until: "spec" }) }, path: "$.verdict.until", code: "invalid-value" },
-		{ name: "until pr con técnica debajo", value: { ...withVerdict, verdict: verdict({ until: "pr", forSpec: [{ text: "store", confidence: 40 }] }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "until spec con técnica debajo", value: { ...withVerdict, verdict: verdict({ until: "spec", accepted: false, forSpec: [{ text: "store", confidence: 40 }] }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "until null", value: { ...withVerdict, verdict: verdict({ until: null }) }, path: "$.verdict.until", code: "invalid-value" },
+		{ name: "threshold spec 7.5", value: { ...withVerdict, verdict: verdict({ thresholds: { grill: 80, spec: 7.5 } }) }, path: "$.verdict.thresholds.spec", code: "invalid-value" },
+		{ name: "thresholds con otro nombre", value: { ...withVerdict, verdict: verdict({ thresholds: { grill: 80, spec: 80, run: 80 } }) }, path: "$.verdict.thresholds.run", code: "extra-field" },
+		// Review #125-4: coherencia entre questions, assumed y thresholds.grill.
 		{ name: "pregunta por encima del umbral grill", value: { ...withVerdict, verdict: verdict({ questions: [{ text: "x", confidence: 90 }] }) }, path: "$.verdict.questions[0].confidence", code: "invalid-value" },
 		{ name: "asumida debajo del umbral grill", value: { ...withVerdict, verdict: verdict({ assumed: [{ text: "x", confidence: 50 }] }) }, path: "$.verdict.assumed[0].confidence", code: "invalid-value" },
 		{ name: "accepted string", value: { ...withVerdict, verdict: verdict({ accepted: "yes" }) }, path: "$.verdict.accepted", code: "invalid-type" },
@@ -267,6 +276,6 @@ test("#119 CA-17: verdict se acepta como null o como objeto en una ruta nueva, s
 	assert.ok(verdictSchema, "el schema de la tool declara verdict");
 	assert.deepEqual(verdictSchema.required, ["until", "accepted", "thresholds", "questions", "assumed", "forSpec", "warnings"]);
 	assert.equal(verdictSchema.additionalProperties, false);
-	assert.deepEqual(verdictSchema.properties?.until?.enum, ["pr", "spec"]);
+	assert.deepEqual(verdictSchema.properties?.until?.enum, ["pr"]);
 	assert.deepEqual(schema.properties.verdict?.anyOf?.[1], { type: "null" });
 });

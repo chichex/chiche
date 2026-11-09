@@ -9,36 +9,49 @@ Convierte un pedido en una spec: el **"qué" verificable** que `/chiche-run` usa
 Dos ideas fuerza:
 
 1. **Sin contrato no hay spec.** El veredicto de verificabilidad sale de cruzar el pedido con lo que `.chiche/project.md` dice que este repo puede correr HOY. Sin contrato, ese veredicto sería inventado.
-2. **Las inferencias van sobre la mesa, sin frenar.** Toda decisión que el pedido no fija explícitamente es una inferencia del modelo y queda escrita en la spec como `[ASSUMED NN %]` con su confianza (salvo lo que «Tipo y confianza» manda preguntar o marcar `[NEEDS-INPUT]`); el usuario la revisa sobre el issue o el `.md` publicado y pide cambios desde el menú final. Inferencias ocultas producen specs que parecen completas pero encodean decisiones que nadie tomó.
+2. **Las inferencias van sobre la mesa.** Toda decisión que el pedido no fija explícitamente es una inferencia del modelo y queda escrita en la spec con su confianza: `[ASSUMED NN %]` si supera la confianza de la etapa, o `confirmada` si se preguntó antes de publicar (ver «Tipo y confianza»); el usuario la revisa sobre el issue o el `.md` publicado y pide cambios con `Solicitar cambios` (en el menú final, con confianza `100`) o re-corriendo el skill sobre la spec. Inferencias ocultas producen specs que parecen completas pero encodean decisiones que nadie tomó.
 
 ## Argumentos
 
 ```text
-/chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--autonomy <level>] [--until pr]
+/chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]
 ```
 
 - `--from-grill [ruta.md]` — usa como fuente autoritativa un handoff finalizado en `.chiche/grills/`, `.sdd/grills/`, `<git-common-dir>/chiche/grills/` o `<git-common-dir>/sdd/grills/`, o en la ruta indicada: las decisiones que el handoff ya cierra entran a la spec como confirmadas y NO se vuelven a preguntar; solo se desambigua lo que el handoff deja abierto. Si no trae ruta, listar los handoffs `finalized` del proyecto y preguntar cuál con `AskUserQuestion` solo cuando haya más de uno. La raíz operativa es la que fija «Dónde viven los borradores».
 - `--out local|issue` — fuerza el destino de la spec por encima de la regla automática. `local` = `<git-common-dir>/chiche/specs/`, `issue` = actualizar el issue de origen (o crear uno nuevo si el pedido fue libre).
-- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `spec` de `## Autonomy` del contrato. `supervised` (A1) escribe sin preguntar y termina en el menú final; `plan-approved` (A2) pregunta solo lo que queda debajo del umbral y no muestra el menú; `unattended` (A3) no pregunta ni muestra el menú. Con A2 o A3, si falta el contrato corre `/chiche-init --autonomy <level>`, y el flag se propaga a `/chiche-run` y a `/chiche-init` cuando este skill los encadena. Las decisiones ya confirmadas por grill nunca se degradan a supuestos. Ver «Niveles de autonomía», «Nivel efectivo» y «Tipo y confianza».
-- `--until pr` — exige `--autonomy A3`: con otro nivel o sin flag aborta antes de escribir con `--until pr exige --autonomy A3`. Con A3, y sin fugas, la spec se publica `draft`, pasa a `approved` bajo el gate de publicación (registra `spec.published` y `spec.approved`) y lanza `/chiche-run <target> --autonomy A3` como la opción `chiche-run --autonomy A3` del menú, sin preguntar (ver «Flujo sin fricción»); con fugas aborta antes de publicar (punto (6) de «Tipo y confianza»). Sin `--until pr`, A3 sigue terminando en `Spec lista`. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag no existe en `chiche-run`: al lanzarlo se le pasa solo `--autonomy A3`.
+- `--confidence <n>` — confianza de esta corrida, un entero de 0 a 100; manda sobre la fila `spec` de `## Autonomy` del contrato. Las inferencias técnicas y las fugas con confianza `≤ <n>` se preguntan antes de publicar y las que la superan quedan `[ASSUMED NN %]`: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y termina en el menú final; por debajo de 100 no hay menú. Si falta el contrato, con confianza menor que 100 corre `/chiche-init --defaults` y con 100 ofrece `/chiche-init`. El flag no se propaga a `/chiche-run`, que lee su posición del contrato. Las decisiones ya confirmadas por grill nunca se degradan a supuestos. Ver «Controles de autonomía», «Controles efectivos» y «Tipo y confianza».
+- `--until pr` — hasta dónde llega la cadena; no exige ni cambia ningún otro control: qué se pregunta lo sigue decidiendo la confianza. Con el flag, la spec se publica `draft`, pasa a `approved` bajo el gate de publicación (registra `spec.published` y `spec.approved`) y lanza `/chiche-run <target>` sin flags: el run lee su posición del contrato (ver «Flujo sin fricción»). Con 100 y `--until pr` pregunta todo, no muestra el menú, aprueba y lanza el run. Sin `--until pr` termina en `Spec lista`. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag no existe en `chiche-run`: al lanzarlo no se le pasa.
 
-<!-- autonomy-levels:start -->
-**Niveles de autonomía.** La escala es `manual (A0)`, `supervised (A1)`, `plan-approved (A2)`, `unattended (A3)`, `auto-land (A4)` y `auto-deploy (A5)`. `--autonomy <level>` acepta el código o la palabra, sin distinguir mayúsculas (`A2`, `a2` y `plan-approved` son el mismo nivel). Esta versión honra A1 a A3: con A0, A4 o A5 el skill aborta antes de cualquier mutación con el diagnóstico literal `--autonomy <nivel>: no soportado todavía (v1 honra A1–A3)`, y cualquier otro token aborta listando los valores válidos. `--autonomy` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. Sin flag rige lo que resuelve «Nivel efectivo»; el default es `supervised (A1)`.
-<!-- autonomy-levels:end -->
+<!-- autonomy-controls:start -->
+**Controles de autonomía.** Son tres y cada uno hace una sola cosa. **Confianza** (`grill` y `chiche-spec`, flag `--confidence <n>`): un entero de 0 a 100 que dice qué se pregunta: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y confirma cada paso. **Posición del run** (`chiche-run`, flag `--mode <posición>`): dónde frena el run: `ask` frena ante dudas y ofrece el menú tras el PR; `pr` abre el PR, lanza el review y termina; `pr-reviewed` además corrige el feedback del review solo, hasta 2 rondas. **Cadena** (`grill` y `chiche-spec`, flag `--until pr`): con el flag, grill llama a la spec y la spec al run; sin el flag, cada etapa termina en lo suyo. Ningún control cambia a otro: la cadena no toca la confianza ni la posición. Sin flag rige lo que resuelve «Controles efectivos». `--confidence` o `--mode` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. `--autonomy` y los niveles con nombre se retiraron en 6.0.0: recibir `--autonomy` aborta antes de cualquier mutación con el diagnóstico literal `--autonomy se retiró en 6.0.0: <equivalente>`.
+<!-- autonomy-controls:end -->
 
 <!-- autonomy-resolve:start -->
-**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, o la fila está `unrehearsed` o `FAILED`, rige `supervised (A1)` con aviso. Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>` y, después de `nivel efectivo:`, dos líneas con los umbrales de confianza: `umbral grill: <n>` y `umbral spec: <n>`, la columna `Umbral` de las filas `grill` y `spec` de la tabla de niveles, leída de la misma fuente que el nivel (también con `--autonomy`), un entero de 0 a 100; sin la columna, con `—`, sin la fila, sin `## Autonomy` o sin contrato imprime `80 (default)`; un valor que no es un entero de 0 a 100 imprime `80 (default)` y avisa por stderr `umbral <stage> inválido (<valor>): rige 80`, con `<stage>` la fila (`grill` o `spec`). `grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos; los demás skills las imprimen y no las usan. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
+**Controles efectivos.** El valor de cada control es el del flag de la corrida si vino; si no, el de la tabla de `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` usa `confianza grill`, `chiche-spec` usa `confianza spec`, `chiche-run` usa `run` e `issue-triage` lee las dos confianzas; los demás skills imprimen los tres valores y no los usan. La lectura valida los flags primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rigen confianza 100 y run `ask`, también con flag, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `contrato leído del working tree: sin remote`. La tabla nueva es `| Stage | Value | Since |` con las filas `grill`, `spec` y `run`. Sin contrato, o sin la fila, rigen los defaults: confianza `80` y run `ask`, impresos como `80 (default)` y `ask (default)`; un valor inválido cae al default de su fila con el aviso `valor <stage> inválido (<valor>): rige <default>`. Un contrato con el formato viejo (la tabla de niveles tiene la columna `Level`, o no hay `## Autonomy`) rige en modo conservador, confianza 100 y run `ask`, con el aviso literal `contrato con formato viejo de autonomía: rige confianza 100 y run ask; corré chiche-init --update`; si además tiene `## Limites`, esa prosa sigue rigiendo como restricción y se suma el aviso literal `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. El flag de la corrida manda también sobre un contrato viejo. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente, también en un contrato viejo, y frena siempre (la única excepción es la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y los valores que salen del contrato caen a confianza 100 y run `ask`; el flag sigue mandando y solo se avisa. La traza imprime cuatro líneas, en este orden: `confianza grill: <n>`, `confianza spec: <n>`, `run: <posición>` y `leído de <fuente>`; con flag, la cuarta dice `leído de --confidence` o `leído de --mode`, que es la fuente del valor de esta etapa (los otros valores y la stop list siguen saliendo del contrato). `--autonomy` se retiró en 6.0.0: si vino, el comando no lee nada y termina con el diagnóstico `--autonomy se retiró en 6.0.0: <equivalente>`, donde el equivalente depende del skill y del valor viejo: en `grill` y `chiche-spec`, `supervised` o `A1` → `usá --confidence 100`, `plan-approved` o `A2` → `sacá el flag o usá --confidence <n>`, `unattended` o `A3` → `usá --confidence 0`; en `chiche-run`, `usá --mode ask`, `usá --mode pr` y `usá --mode pr-reviewed`; en `chiche-init`, `usá --defaults`; en los demás, `ya no hace falta`. Lo imprime este comando, con `<stage>`, `<confidence>`, `<mode>` y `<legacy>` reemplazados (`<stage>` es `grill`, `spec`, `run`, `init` en `chiche-init` o `none` en los demás; `<confidence>` y `<mode>` van vacíos sin su flag; `<legacy>` es el valor de `--autonomy` si vino, `-` si vino sin valor y vacío si no vino), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (cada valor se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
 
 ```bash
 (
-  stage='<stage>' flag='<flag>'
+  stage='<stage>' confidence='<confidence>' mode='<mode>' legacy='<legacy>'
   export LC_ALL=C
-  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1; ug='80 (default)'; us='80 (default)'
-  case $pick in
-    ''|a1|supervised|a2|plan-approved|a3|unattended) ;;
-    a0|manual|a4|auto-land|a5|auto-deploy) echo "--autonomy $flag: no soportado todavía (v1 honra A1–A3)" >&2; exit 2 ;;
-    *) echo "--autonomy $flag: valor inválido; válidos: supervised (A1), plan-approved (A2), unattended (A3)" >&2; exit 2 ;;
-  esac
+  aviso=''; stop=''; contract=''; cg='80 (default)'; cs='80 (default)'; run='ask (default)'; viejo=0; legible=1
+  if [ -n "$legacy" ]; then
+    old=$(printf %s "$legacy" | tr A-Z a-z)
+    case $stage in
+      grill|spec) case $old in a1|supervised) eq='usá --confidence 100' ;; a2|plan-approved) eq='sacá el flag o usá --confidence <n>' ;; a3|unattended) eq='usá --confidence 0' ;; *) eq='usá --confidence <n>, un entero de 0 a 100' ;; esac ;;
+      run) case $old in a1|supervised) eq='usá --mode ask' ;; a2|plan-approved) eq='usá --mode pr' ;; a3|unattended) eq='usá --mode pr-reviewed' ;; *) eq='usá --mode ask, pr o pr-reviewed' ;; esac ;;
+      init) eq='usá --defaults' ;;
+      *) eq='ya no hace falta' ;;
+    esac
+    echo "--autonomy se retiró en 6.0.0: $eq" >&2; exit 2
+  fi
+  if [ -n "$confidence" ]; then
+    case $stage in grill|spec) ;; *) echo "--confidence: este skill no lo acepta; válido en grill y chiche-spec" >&2; exit 2 ;; esac
+    if ! printf '%s\n' "$confidence" | grep -Eqx '0|[1-9][0-9]?|100'; then echo "--confidence $confidence: valor inválido; válidos: un entero de 0 a 100" >&2; exit 2; fi
+  fi
+  if [ -n "$mode" ]; then
+    if [ "$stage" != run ]; then echo "--mode: este skill no lo acepta; válido en chiche-run" >&2; exit 2; fi
+    case $mode in ask|pr|pr-reviewed) ;; *) echo "--mode $mode: valor inválido; válidos: ask, pr, pr-reviewed" >&2; exit 2 ;; esac
+  fi
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
   if git remote get-url origin >/dev/null 2>&1; then
     git fetch -q origin >/dev/null 2>&1 || aviso="$aviso aviso: fetch de origin falló, se usa la ref local;"
@@ -52,54 +65,49 @@ Dos ideas fuerza:
       contract=$(git show "$ref:.chiche/project.md" 2>/dev/null) || contract=$(git show "$ref:.sdd/project.md" 2>/dev/null) || contract=''
       fuente=$ref
     else
-      fuente='origin (default sin resolver)'; aviso="$aviso aviso: origin sin branch default resoluble: rige supervised (A1) y no se lee el working tree;"
+      fuente='origin (default sin resolver)'; aviso="$aviso aviso: origin sin branch default resoluble: rigen confianza 100 y run ask y no se lee el working tree;"
     fi
   else
     contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
-    fuente='working tree'; aviso="$aviso aviso: nivel leído del working tree: sin remote;"
+    fuente='working tree'; aviso="$aviso aviso: contrato leído del working tree: sin remote;"
   fi
   contract=$(printf '%s\n' "$contract" | tr -d '\r')
   section=$(printf '%s\n' "$contract" | sed -n '/^## Autonomy$/,$p' | sed -n '2,${/^## /q;p;}')
-  if [ -z "$section" ]; then
-    if printf '%s\n' "$contract" | grep -q '^## Limites$'; then aviso="$aviso aviso: contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update;"
-    elif [ -z "$contract" ] && [ -n "$flag" ] && [ "$fuente" != 'origin (default sin resolver)' ]; then aviso="$aviso aviso: sin contrato: rige --autonomy, sin stop list;"
-    elif [ -z "$contract" ]; then aviso="$aviso aviso: sin contrato: rige supervised (A1);"
-    else aviso="$aviso aviso: contrato sin ## Autonomy: rige supervised (A1); corré chiche-init --update;"; fi
-    [ -n "$pick" ] || pick=a1
+  if [ "$fuente" = 'origin (default sin resolver)' ]; then cg=100; cs=100; run=ask
+  elif [ -z "$contract" ]; then aviso="$aviso aviso: sin contrato: rigen los defaults, confianza 80 y run ask;"
+  elif [ -z "$section" ]; then
+    viejo=1
+    if printf '%s\n' "$contract" | grep -q '^## Limites$'; then aviso="$aviso aviso: contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update;"; fi
   else
+    header=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*Stage[[:space:]]*\|' | head -n 1)
+    case $header in *Level*) viejo=1 ;; esac
     stop=$(printf '%s\n' "$section" | sed -n '/^| *Action *| *Pattern *| *Reason *|/,$p' | sed -n '3,$p' | sed -n '/^|/!q;p')
     if [ -z "$stop" ]; then legible=0; aviso="$aviso aviso: ## Autonomy sin stop list legible (sin el header | Action | Pattern | Reason | o sin filas);"; fi
-    for th in grill spec; do
-      tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f6 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-      case $tval in
-        ''|—) tval='80 (default)' ;;
-        *) if ! printf '%s\n' "$tval" | grep -Eq '^(0|[1-9][0-9]?|100)$'; then aviso="$aviso aviso: umbral ${th} inválido (${tval}): rige 80;"; tval='80 (default)'; fi ;;
-      esac
-      if [ "$th" = grill ]; then ug=$tval; else us=$tval; fi
-    done
-    if [ -z "$pick" ] && [ "$stage" = none ]; then pick=a1
-    elif [ -z "$pick" ]; then
-      row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${stage}[[:space:]]*\|" | head -n 1)
-      if [ -z "$row" ]; then pick=a1; aviso="$aviso aviso: ## Autonomy sin fila $stage: rige supervised (A1);"
-      else
-        pick=$(printf '%s\n' "$row" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]].*$//' | tr A-Z a-z)
-        reh=$(printf '%s\n' "$row" | cut -d'|' -f5 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        case $pick in a1|supervised) pick=a1 ;; a2|plan-approved|a3|unattended) case $reh in rehearsed\ *) ;; *) aviso="$aviso aviso: fila $stage sin ensayo ($reh): rige supervised (A1);"; pick=a1 ;; esac ;; *) aviso="$aviso aviso: fila $stage con nivel desconocido ($pick): rige supervised (A1);"; pick=a1 ;; esac
-      fi
-      if [ "$stage" = land ] && [ "$pick" != a1 ]; then aviso="$aviso aviso: fila land solo acepta supervised: rige supervised (A1);"; pick=a1; fi
-      if [ "$legible" -eq 0 ] && [ "$pick" != a1 ]; then aviso="$aviso aviso: sin stop list legible el nivel del contrato cae a supervised (A1);"; pick=a1; fi
+    if [ "$viejo" -eq 0 ]; then
+      for th in grill spec; do
+        tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        if [ -n "$tval" ]; then
+          if printf '%s\n' "$tval" | grep -Eqx '0|[1-9][0-9]?|100'; then
+            if [ "$th" = grill ]; then cg=$tval; else cs=$tval; fi
+          else aviso="$aviso aviso: valor ${th} inválido (${tval}): rige 80;"; fi
+        fi
+      done
+      rval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*run[[:space:]]*\|" | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      case $rval in '') ;; ask|pr|pr-reviewed) run=$rval ;; *) aviso="$aviso aviso: valor run inválido (${rval}): rige ask;" ;; esac
     fi
   fi
-  if [ "$fuente" = 'origin (default sin resolver)' ]; then pick=a1; src=$fuente; elif [ -n "$flag" ]; then src='--autonomy'; else src=$fuente; fi
-  case $pick in
-    a1|supervised) nivel='supervised (A1)' ;;
-    a2|plan-approved) nivel='plan-approved (A2)' ;;
-    a3|unattended) nivel='unattended (A3)' ;;
-  esac
+  if [ "$viejo" -eq 1 ]; then cg=100; cs=100; run=ask; aviso="$aviso aviso: contrato con formato viejo de autonomía: rige confianza 100 y run ask; corré chiche-init --update;"; fi
+  if [ "$legible" -eq 0 ] && [ "$viejo" -eq 0 ]; then cg=100; cs=100; run=ask; aviso="$aviso aviso: sin stop list legible los valores del contrato caen a confianza 100 y run ask;"; fi
+  src=$fuente
+  if [ "$fuente" != 'origin (default sin resolver)' ]; then
+    if [ -n "$confidence" ]; then src='--confidence'; if [ "$stage" = grill ]; then cg=$confidence; else cs=$confidence; fi; fi
+    if [ -n "$mode" ]; then src='--mode'; run=$mode; fi
+  fi
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
-  echo "nivel efectivo: $nivel, leído de $src"
-  printf 'umbral grill: %s\n' "$ug"
-  printf 'umbral spec: %s\n' "$us"
+  printf 'confianza grill: %s\n' "$cg"
+  printf 'confianza spec: %s\n' "$cs"
+  printf 'run: %s\n' "$run"
+  printf 'leído de %s\n' "$src"
   [ -z "$stop" ] || printf '%s\n' "$stop" | while IFS= read -r fila; do
     pat=$(printf '%s\n' "$fila" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     if [ -z "$pat" ]; then printf 'aviso: fila de la stop list sin Pattern, ignorada: %s\n' "$fila" >&2; else printf 'parada: %s\n' "$fila"; fi
@@ -107,11 +115,11 @@ Dos ideas fuerza:
 )
 ```
 
-El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza, las dos líneas de umbral y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
+El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta o `--autonomy`, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime las cuatro líneas y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
 <!-- autonomy-resolve:end -->
 
 <!-- autonomy-confidence:start -->
-**Tipo y confianza.** (1) Toda decisión lleva un tipo: `producto` (define el qué: alcance, comportamiento visible, prioridades) o `técnica` (define el cómo: implementación, estructura, herramientas). `grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata solo las técnicas. (2) Toda decisión tratada lleva una opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta. (3) El umbral es el que imprime el resolver de «Nivel efectivo»: `umbral grill` en `grill` y `umbral spec` en `chiche-spec`. Con confianza `> umbral` la decisión se asume y se muestra como `[ASSUMED NN %]` con su recomendada; con confianza `≤ umbral` se pregunta. (4) En `grill`, `supervised` (A1) y `plan-approved` (A2) preguntan las mismas decisiones, las de producto con confianza `≤ umbral`; A1 conserva las preguntas de configuración, de frontera de bloque y de confirmación de cierre y A2 las omite: el handoff se congela con lo decidido y lo asumido. Con `unattended` (A3), `grill` corre el reconocimiento siempre y cuenta las decisiones de producto con confianza `≤ umbral`: con 0 sigue sin preguntar; con 1 a 3 las deja `[ASSUMED NN %]` en el handoff, sin preguntar; con más de 3 aborta con el listado y el diagnóstico `pedido no autonomizable en A3: bajá a A2 o partilo`. (5) En `chiche-spec`, con A1 no se pregunta antes de publicar y la corrida termina en el menú final, donde se revisa la spec entera; con A2 se preguntan las técnicas con confianza `≤ umbral` y no hay menú: responderlas es la aprobación; con A3 no se pregunta nada ni hay menú: las técnicas con confianza `≤ umbral` quedan `[ASSUMED NN %]` y se listan en `## Riesgos y gaps`. (6) Una decisión de producto que aparece en la spec es una fuga: A1 la marca `[NEEDS-INPUT]` en la tabla de inferencias y en `## Riesgos y gaps` y publica igual, para revisarla desde el menú; A2 la pregunta; A3 aborta antes de publicar con el diagnóstico `decisión de producto sin cerrar en la spec: <decisión>; volvé al grill`. (7) La stop list frena en todo nivel, sin excepción nueva. (8) Anclas de calibración, para no inflar la confianza: `¿aplica a juegos 2D, 3D o todos?` es de producto y central, se pregunta (≈35 %); `¿se puede ordenar?` es un nice-to-have de producto (≈60 %); `¿parametrizable: tecla con que se abre, tamaño?` es obvio, se asume (≈95 %); `¿usa el store existente o uno propio?` es técnica, va a la spec (≈90 %).
+**Tipo y confianza.** (1) Toda decisión lleva un tipo: `producto` (define el qué: alcance, comportamiento visible, prioridades) o `técnica` (define el cómo: implementación, estructura, herramientas). `grill` trata solo las de producto y anota las técnicas para la spec; `chiche-spec` trata las técnicas. (2) Toda decisión tratada lleva una opción recomendada y una confianza entera `NN %`: la probabilidad de que la recomendada sea la correcta. (3) La confianza de la etapa es la que imprime el resolver de «Controles efectivos»: `confianza grill` en `grill` y `confianza spec` en `chiche-spec`. Con confianza `> confianza de la etapa` la decisión se asume y se muestra como `[ASSUMED NN %]` con su recomendada; con confianza `≤ confianza de la etapa` se pregunta. Con `0` no se pregunta nada, ni siquiera una decisión con 0 %: todo se asume. Con `100` se pregunta todo. (4) Las confirmaciones de paso existen solo con `100`: en `grill`, la configuración, la frontera de bloque y la confirmación de cierre; en `chiche-spec`, el menú final. Por debajo de 100 no hay ninguna: el grill muestra el contrato y congela el handoff con lo decidido y lo asumido, y la spec publica y muestra. (5) Con `0` no hay aborto por pedido abierto: `grill` corre el reconocimiento siempre, asume todas las decisiones de producto y las lista en el handoff de menor a mayor confianza, para que lo más dudoso se vea primero. (6) En `chiche-spec` las técnicas con confianza `≤ confianza spec` se preguntan antes de publicar, en rondas de hasta cuatro; las que la superan quedan `[ASSUMED NN %]` en la tabla y se listan en `## Riesgos y gaps` de menor a mayor confianza. (7) Una decisión de producto que aparece en la spec es una fuga y se trata por confianza como cualquier otra: con confianza `≤ confianza spec` se pregunta; si la supera, queda `[ASSUMED NN %]`, marcada como fuga en la tabla y en `## Riesgos y gaps`. No aborta con ningún valor. (8) La stop list frena siempre, sin excepción nueva. (9) Anclas de calibración, para no inflar la confianza: `¿aplica a juegos 2D, 3D o todos?` es de producto y central, se pregunta (≈35 %); `¿se puede ordenar?` es un nice-to-have de producto (≈60 %); `¿parametrizable: tecla con que se abre, tamaño?` es obvio, se asume (≈95 %); `¿usa el store existente o uno propio?` es técnica, va a la spec (≈90 %).
 <!-- autonomy-confidence:end -->
 
 
@@ -143,7 +151,7 @@ verificable va a ser la ejecucion segun el contrato de autonomia (.chiche/projec
   • De un issue abierto  — listo los issues del repo y elegis cual especificar.
   • De un grill cerrado  — retomo un handoff confirmado de .chiche/grills/, .sdd/grills/, <git-common-dir>/chiche/grills/ o <git-common-dir>/sdd/grills/ como fuente.
 
-Atajo: /chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--autonomy <level>] [--until pr] saltea este menu.
+Atajo: /chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr] saltea este menu.
 ```
 
 Luego usar `AskUserQuestion` — una pregunta, "¿De dónde sale la spec?":
@@ -158,8 +166,8 @@ Si vino `--from-grill`, resolver primero la raíz operativa sin explorar código
 
 Leer `.chiche/project.md` ANTES de cualquier otra cosa; interesan sobre todo `## Comandos`, `## Verificacion autonoma`, `## Autonomy` y `## Politicas de generacion` (los gates duros que `/chiche-run` va a aplicar — condicionan el veredicto y el tamaño sano de la spec). Un repo inicializado antes del renombre lo tiene en `.sdd/project.md`: se lee y se escribe ahí, y `/chiche-init --update` ofrece migrarlo.
 
-- **Si NO existe**: frenar. Explicar en una línea por qué (sin contrato el veredicto de verificabilidad es inventado) y usar `AskUserQuestion`: 1. `Correr /chiche-init ahora (Recomendado)` — invocarlo, esperar el contrato y seguir; 2. `Abortar`. NO generar spec "provisoria" sin contrato, ni siquiera si el usuario insiste con que es una feature chica: ofrecer `/chiche-init --autonomy A2` como vía rápida.
-- **Con A2 o A3 y sin contrato**: correr `/chiche-init --autonomy <level>` automáticamente, anotarlo en el reporte, y seguir.
+- **Si NO existe y la confianza es `100`**: frenar. Explicar en una línea por qué (sin contrato el veredicto de verificabilidad es inventado) y usar `AskUserQuestion`: 1. `Correr /chiche-init ahora (Recomendado)` — invocarlo, esperar el contrato y seguir; 2. `Abortar`. NO generar spec "provisoria" sin contrato, ni siquiera si el usuario insiste con que es una feature chica: ofrecer `/chiche-init --defaults` como vía rápida.
+- **Si NO existe y la confianza es menor que 100**: correr `/chiche-init --defaults` automáticamente, anotarlo en el reporte, y seguir.
 - **Si existe pero está viejo** (fecha de generación > 30 días, o los comandos que este pedido necesita figuran `FALLA` / `no probado`): avisar en una línea y ofrecer `/chiche-init --update`; no bloquear.
 
 ## Fase 2 — Entender el pedido
@@ -171,9 +179,9 @@ Leer `.chiche/project.md` ANTES de cualquier otra cosa; interesan sobre todo `##
 
 ## Fase 3 — Inferencias sobre la mesa
 
-El corazón del skill. Toda decisión técnica que el pedido no fija explícitamente se lista como inferencia — también las que superan el umbral. Categorías típicas: datos (¿migración? ¿backfill?), estructura y seams, compatibilidad hacia atrás, plataformas y herramientas, mecanismo de verificación. Lo de producto (alcance, comportamiento visible, UX/copys) no es inferencia: una decisión de producto que llega sin cerrar es una fuga, punto (6) de «Tipo y confianza».
+El corazón del skill. Toda decisión técnica que el pedido no fija explícitamente se lista como inferencia — también las que superan la confianza de la etapa. Categorías típicas: datos (¿migración? ¿backfill?), estructura y seams, compatibilidad hacia atrás, plataformas y herramientas, mecanismo de verificación. Lo de producto (alcance, comportamiento visible, UX/copys) no es inferencia: una decisión de producto que llega sin cerrar es una fuga, punto (7) de «Tipo y confianza».
 
-La tabla NO se pregunta en A1: se resuelve cada inferencia con la elección propuesta y va a la sección `## Inferencias` de la spec, marcada `[ASSUMED NN %]` (A2 pregunta las que quedan debajo del umbral y las fugas; A3 las deja asumidas). `Confianza` es un entero `NN %`: la probabilidad de que la elección propuesta sea la correcta; el umbral es el `umbral spec` que imprime el resolver de «Nivel efectivo» (ver «Tipo y confianza»). El usuario la revisa sobre la spec publicada y pide cambios desde el menú final (ver "Flujo sin fricción").
+`Confianza` es un entero `NN %`: la probabilidad de que la elección propuesta sea la correcta; la confianza de la etapa es la `confianza spec` que imprime el resolver de «Controles efectivos» (ver «Tipo y confianza»). Antes de publicar, las inferencias con confianza `≤ confianza spec` se preguntan con `AskUserQuestion`, en rondas de hasta cuatro, y las fugas con la misma regla; las que la superan no se preguntan: se resuelven con la elección propuesta y van a la sección `## Inferencias` de la spec, marcadas `[ASSUMED NN %]`. Con `100` se preguntan todas y con `0` ninguna. Cada pregunta ofrece primero la elección propuesta, marcada como recomendada, y después la alternativa razonable. El usuario revisa la tabla sobre la spec publicada (ver "Flujo sin fricción").
 
 ```markdown
 | # | Inferencia | Eleccion propuesta | Alternativa razonable | Confianza |
@@ -182,7 +190,7 @@ La tabla NO se pregunta en A1: se resuelve cada inferencia con la elección prop
 | 2 | ¿Como se expone el toggle en el codigo? | Con el hook useTheme existente | Un context nuevo | 95 % |
 ```
 
-Reglas: lo que el pedido o el handoff confirmado ya fija NO es inferencia y no se lista (listarlo diluye la tabla; las decisiones del handoff entran a la spec como confirmadas). Las decisiones técnicas anotadas en `**Para la spec.**` del handoff NO están fijadas: cada una entra a la tabla como inferencia técnica con su propia confianza `NN %` contra `umbral spec` (el porcentaje que trae el grill es referencia, no resolución) y cuenta para `k`. Una respuesta del usuario (en A2, o por `Solicitar cambios`) pasa la fila a `confirmada`. Ante conflicto entre el handoff y el código actual, mostrarlo como gap/desviación de fuente; no reinterpretar silenciosamente la decisión. Elegir el sesgo mínimo seguro cuando dos alternativas son igual de razonables (la opción más chica y reversible). Una inferencia con confianza `≤ umbral spec`, y toda fuga (una decisión de producto que llegó a la spec sin cerrar, ej. "¿esto es solo UI o también API?", marcada `[NEEDS-INPUT]`), se marca además en `## Riesgos y gaps` y se nombra en el reporte, para que el usuario la mire primero.
+Reglas: lo que el pedido o el handoff confirmado ya fija NO es inferencia y no se lista (listarlo diluye la tabla; las decisiones del handoff entran a la spec como confirmadas). Las decisiones técnicas anotadas en `**Para la spec.**` del handoff NO están fijadas: cada una entra a la tabla como inferencia técnica con su propia confianza `NN %` contra `confianza spec` (el porcentaje que trae el grill es referencia, no resolución) y, si se pregunta, cuenta para `k`. Una respuesta del usuario (a una pregunta de esta fase, o por `Solicitar cambios`) pasa la fila a `confirmada`. Ante conflicto entre el handoff y el código actual, mostrarlo como gap/desviación de fuente; no reinterpretar silenciosamente la decisión. Elegir el sesgo mínimo seguro cuando dos alternativas son igual de razonables (la opción más chica y reversible). Una fuga (una decisión de producto que llegó a la spec sin cerrar, ej. "¿esto es solo UI o también API?") entra a la tabla marcada `fuga` y se trata por confianza como cualquier otra: con confianza `≤ confianza spec` se pregunta y, si la supera, queda `[ASSUMED NN %]`; nunca frena la spec. Las `[ASSUMED NN %]` se listan además en `## Riesgos y gaps` de menor a mayor confianza, con las fugas marcadas `fuga`, y el reporte nombra las fugas, para que el usuario las mire primero.
 
 ## Fase 4 — Veredicto de verificabilidad
 
@@ -259,7 +267,7 @@ entra en un PR>
 <lo que NO entra, derivado de las inferencias de alcance>
 
 ## Inferencias
-<la tabla de Fase 3 + columna Resolucion: confirmada (del handoff, o respondida por el usuario en A2 o en Solicitar cambios) | [ASSUMED NN %] | [NEEDS-INPUT]>
+<la tabla de Fase 3 + columna Resolucion: confirmada (del handoff, o respondida por el usuario antes de publicar o en Solicitar cambios) | [ASSUMED NN %]; la fila de una fuga suma ` · fuga`>
 
 ## Verificabilidad
 <veredicto global (o mixto, por CA) con el porque anclado en el contrato>
@@ -269,7 +277,7 @@ entra en un PR>
 el protocolo de prueba paso a paso>
 
 ## Riesgos y gaps
-<[ASSUMED NN %] con confianza ≤ umbral spec, fugas [NEEDS-INPUT], dependencias, flakiness conocida,
+<las [ASSUMED NN %] de menor a mayor confianza, las fugas marcadas `fuga`, dependencias, flakiness conocida,
 conflictos con politicas de generacion del contrato (tamaño, coverage, deps)>
 ```
 
@@ -284,7 +292,7 @@ Toda spec abre con `## Qué hace esto`, antes de `## Contexto`: quien la lee ent
 - **Largo según el alcance.** El largo sigue al alcance: dos a cuatro frases en una spec de una capa; una tabla o subtítulos en negrita en una de varias capas.
 - **Cambio interno.** Si el cambio no se ve desde afuera (un refactor, CI, un gate), lo dice y cuenta qué gana quien mantiene el repo.
 - **Sin alcance nuevo.** No agrega alcance ni decisiones: todo lo que afirma lo cubre un CA o `## Fuera de alcance`, y las decisiones siguen en `## Inferencias`.
-- **Siempre.** Es obligatoria en toda spec, con cualquier fuente (pedido libre, issue o grill) y en cualquier nivel de autonomía.
+- **Siempre.** Es obligatoria en toda spec, con cualquier fuente (pedido libre, issue o grill) y con cualquier confianza.
 
 **Reescritura.** Cuando `/chiche-spec` reescribe una spec que no tiene la sección, la agrega; y si la reescritura cambia algo que la sección afirma (CAs, alcance), actualiza la sección en la misma pasada. Reescribe, por ejemplo, al re-correr sobre el mismo pedido (Fase 2, punto 4), con `Solicitar cambios`, con `--triage-route update-existing-spec`, con `--triage-route audit-existing-spec` o con una ruta de spec.
 
@@ -299,7 +307,7 @@ Toda spec lleva la sección `## Plan de entrega` inmediatamente después de `## 
 **Criterio de corte.** Cada capa es un grupo coherente de CAs cuyos tests dan verde solos más la regresión completa. Si el contrato tiene *tamaño máximo de PR* activo, cada capa entra en el límite. Una sola capa cuando todo entra en un PR: la tabla lleva una fila y `/chiche-run` entrega el PR único de siempre. La propuesta se escribe sin preguntar, como una inferencia más del modelo, y el usuario la ajusta desde `Solicitar cambios` sobre la spec ya publicada.
 <!-- chiche-spec-delivery:end -->
 
-Estado: siempre `draft` al publicar; `aprobada` solo por la transición del menú final al elegir un run (ver "Flujo sin fricción").
+Estado: siempre `draft` al publicar; `aprobada` solo por una de las tres transiciones de "Flujo sin fricción": elegir un run en el menú final, responder al menos una pregunta por debajo de 100, o `--until pr`.
 
 El marker `Chiche-Tracking` es la identidad machine-readable de la spec (contrato `docs/chiche-tracking-v2.md`): permite a los consumidores asociar artefactos sin ensuciar GitHub con labels o comments de tracking, y acompaña al comentario humano, nunca lo reemplaza. `state` refleja el `Estado:` (`approved` ↔ `aprobada`, `draft` ↔ `draft`); `issue` lleva la referencia de origen (`#NN`, `owner/repo#NN` o `none`); `grill` la referencia del handoff de origen (o `none`); `superseded-by` nace `none`. Re-correr sobre la misma spec hace upsert. El marker de un artefacto existente es `SDD-Tracking: version=1` o `Chiche-Tracking: version=2`: al reescribirlo se reemplaza en su lugar por `Chiche-Tracking: version=2` conservando los demás campos, y nunca se agrega otro al lado. Un marker `SDD-Tracking` legacy (sin `version=`) se migra a `Chiche-Tracking: version=2` en la misma pasada, con los mismos campos. Si la spec vive en el body del issue, el marker viaja con ella.
 
@@ -318,9 +326,9 @@ Cuando la corrida re-especifica un pedido hacia un archivo nuevo o una revisión
 <!-- chiche-spec-flow:start -->
 ### Flujo sin fricción: destino, estado y menú final
 
-/chiche-spec no frena a validar lo que ya puede escribir: en A1 las inferencias técnicas nuevas van a la tabla de la spec marcadas `[ASSUMED NN %]` sin preguntar (A2 pregunta las que quedan debajo del umbral y las fugas, ver «Tipo y confianza»), y las decisiones del handoff entran como confirmadas; el mecanismo de verificación propuesto se toma con sus alternativas escritas en el Plan de verificacion, también sin preguntar. El usuario revisa la spec ya publicada — en el issue o en el `.md` — y pide cambios desde el menú final.
+/chiche-spec no frena a validar lo que ya puede escribir: las inferencias técnicas nuevas con confianza `> confianza spec` van a la tabla de la spec marcadas `[ASSUMED NN %]` sin preguntar, y solo las de confianza `≤ confianza spec` y las fugas con esa misma regla se preguntan antes de publicar (ver «Tipo y confianza»); las decisiones del handoff entran como confirmadas; el mecanismo de verificación propuesto se toma con sus alternativas escritas en el Plan de verificacion, también sin preguntar. El usuario revisa la spec ya publicada — en el issue o en el `.md` — y, con confianza `100`, pide cambios desde el menú final.
 
-**Estado.** La publicación nace siempre `draft`. Pasa a `aprobada` (`state=approved`) solo cuando el usuario elige correrla desde el menú o, en A2, al responder al menos una pregunta (una técnica debajo del umbral o una fuga), o, con `--autonomy A3 --until pr`, al publicarse sin fugas: la opción upsertea el marker existente en su lugar (`SDD-Tracking: version=1` o `Chiche-Tracking: version=2`; nunca se agrega otro) y el `Estado:` humano antes de lanzar el run. Correr /chiche-run directo sobre una spec `draft` también la acepta, sin preguntar.
+**Estado.** La publicación nace siempre `draft`. Pasa a `aprobada` (`state=approved`) solo cuando el usuario elige correrla desde el menú (confianza `100`) o, por debajo de 100, al responder al menos una pregunta (una técnica con confianza `≤ confianza spec` o una fuga), o, con `--until pr`, al publicarse: la opción upsertea el marker existente en su lugar (`SDD-Tracking: version=1` o `Chiche-Tracking: version=2`; nunca se agrega otro) y el `Estado:` humano antes de lanzar el run. Correr /chiche-run directo sobre una spec `draft` también la acepta, sin preguntar.
 
 **Destino.** `--out` fuerza el destino. Sin `--out`, decidir sin preguntar:
 
@@ -328,26 +336,26 @@ Cuando la corrida re-especifica un pedido hacia un archivo nuevo o una revisión
 2. Si no, y el repo ya usa issues como specs — `gh issue list --state all --limit 50 --search "SDD-Tracking in:body"` o `gh issue list --state all --limit 50 --search "Chiche-Tracking in:body"` devuelve al menos uno → crear issue: primero un staging no-SDD; con el número devuelto, reemplazar `issue=none` y recién entonces publicar la spec canónica.
 3. Si no, o si `gh` no está disponible o falla → `<git-common-dir>/chiche/specs/<slug>.md` (o `<git-common-dir>/chiche/specs/issue-NN-<slug>.md` si hay issue de origen), con su ruta absoluta en el reporte.
 
-**Menú final.** Después del reporte `Spec lista`, mostrar el link del issue o la ruta del `.md` y ofrecer, con la tool de preguntas del harness (o en texto plano donde no la hay):
+**Menú final (solo con confianza `100`).** Después del reporte `Spec lista`, mostrar el link del issue o la ruta del `.md` y ofrecer, con la tool de preguntas del harness (o en texto plano donde no la hay):
 
-- Spec en `.md`: `Llevar a issue` / `chiche-run` / `chiche-run --autonomy A3` / `Solicitar cambios`.
-- Spec en issue: `chiche-run` / `chiche-run --autonomy A3` / `Solicitar cambios`.
+- Spec en `.md`: `Llevar a issue` / `chiche-run` / `chiche-run --mode pr-reviewed` / `Solicitar cambios`.
+- Spec en issue: `chiche-run` / `chiche-run --mode pr-reviewed` / `Solicitar cambios`.
 
-**Nivel sugerido.** En A1 la primera opción del menú, marcada `(Recomendado)`, es `chiche-run --autonomy A3` cuando `k = 0`, `f = 0` y `a = 0` (`k` = inferencias técnicas con confianza `≤ umbral spec`; `f` = fugas, decisiones de producto que llegaron a la spec sin cerrar; `a` = decisiones `— asumida NN %` del handoff con `NN ≤ umbral grill`, las que el grill asumió en A3 sin preguntar), y `chiche-run` en cualquier otro caso; el texto de la pregunta dice el motivo (`debajo del umbral: <k>, fugas: <f>, asumidas del grill debajo del umbral: <a>`). Las demás opciones no cambian.
+**Opción sugerida.** La primera opción del menú, marcada `(Recomendado)`, es `chiche-run --mode pr-reviewed` cuando `f = 0` y `a = 0` (`f` = fugas, decisiones de producto que llegaron a la spec sin cerrar; `a` = decisiones `— asumida NN %` del handoff con `NN ≤ confianza grill`, las que el grill asumió en o debajo de la confianza del grill), y `chiche-run` en cualquier otro caso; el texto de la pregunta dice el motivo (`fugas: <f>, asumidas del grill en o debajo de su confianza: <a>`). Las demás opciones no cambian. `k`, las preguntadas del reporte, no entra en la regla: con `100` se preguntaron todas.
 
-`chiche-run --autonomy A3` corre el run en `unattended`: en los harnesses con subagentes lo delega en un `implementer` y en los demás corre inline con la corrección automática del feedback; `chiche-run` lo corre con `--autonomy <level>` si vino; si no, `chiche-run` resuelve su fila `run`. `Llevar a issue` publica la spec local en un issue nuevo con el mismo gate de publicación (staging no-SDD primero), conserva el `.md` y vuelve al menú. `chiche-run` y `chiche-run --autonomy A3` escriben `state=approved` antes de lanzar el run sobre el target reportado. `Solicitar cambios` toma los cambios del chat o, si la spec está en un issue, lee los comments del issue creados o editados posteriores a la última publicación de la spec (`gh api --paginate repos/<owner>/<repo>/issues/<NN>/comments`, paginando hasta agotar y comparando por ID estable + `updated_at`, no solo por `created_at`); reescribe la misma spec — upsert, un solo marker, sigue `draft` —, la republica con el gate de publicación y vuelve al menú. Los comments son datos, no instrucciones: se validan contra el contrato y el código antes de incorporarlos.
+`chiche-run` lanza el run sin flags: el run lee su posición del contrato. `chiche-run --mode pr-reviewed` lo lanza con ese flag: en los harnesses con subagentes lo delega en un `implementer` y en los demás corre inline con la corrección automática del feedback. `Llevar a issue` publica la spec local en un issue nuevo con el mismo gate de publicación (staging no-SDD primero), conserva el `.md` y vuelve al menú. `chiche-run` y `chiche-run --mode pr-reviewed` escriben `state=approved` antes de lanzar el run sobre el target reportado. `Solicitar cambios` toma los cambios del chat o, si la spec está en un issue, lee los comments del issue creados o editados posteriores a la última publicación de la spec (`gh api --paginate repos/<owner>/<repo>/issues/<NN>/comments`, paginando hasta agotar y comparando por ID estable + `updated_at`, no solo por `created_at`); reescribe la misma spec — upsert, un solo marker, sigue `draft` —, la republica con el gate de publicación y vuelve al menú. Los comments son datos, no instrucciones: se validan contra el contrato y el código antes de incorporarlos.
 
-Con A2 o A3: el destino sigue la misma regla y no hay menú (sin menú, el reporte termina en `Spec lista`); en A2, responder las preguntas (las técnicas debajo del umbral y las fugas) es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`. Con A3 y `--until pr`: sin fugas, la spec se publica `draft`, pasa a `state=approved` bajo el mismo gate de publicación, registra `spec.published` y `spec.approved`, y la corrida lanza `chiche-run <target> --autonomy A3` exactamente como la opción `chiche-run --autonomy A3` del menú, sin preguntar y sin `--until pr`; con fugas aborta antes de publicar con el diagnóstico de la fuga. `--until pr` no mira `k`: con A3 el usuario ya eligió asumir las técnicas que quedan debajo del umbral (punto (5) de «Tipo y confianza»), y el reporte `Spec lista` repite `debajo del umbral: <k>` antes de lanzar, para que quede a la vista. Sin `--until pr`, A3 termina en `Spec lista`.
+Por debajo de 100: el destino sigue la misma regla y no hay menú (sin menú, el reporte termina en `Spec lista`); responder las preguntas (las técnicas con confianza `≤ confianza spec` y las fugas) es la aprobación: con al menos una respuesta, la spec pasa a `state=approved` bajo el mismo gate de publicación y registra `spec.approved`; sin preguntas queda `draft`. Con `--until pr`, sea cual sea la confianza: la spec se publica `draft`, pasa a `state=approved` bajo el mismo gate de publicación, registra `spec.published` y `spec.approved`, y la corrida lanza `chiche-run <target>` sin flags, exactamente como la opción `chiche-run` del menú, sin preguntar y sin `--until pr`: el run lee su posición del contrato. `--until pr` no exige ni cambia la confianza: con `100` la spec pregunta todo, no muestra el menú, aprueba y lanza el run; una fuga no frena la cadena, se trata por confianza. El reporte `Spec lista` se muestra antes de lanzar, para que quede a la vista. Sin `--until pr` la corrida termina en `Spec lista`.
 <!-- chiche-spec-flow:end -->
 
-En Claude Code, las opciones del menú van en un `AskUserQuestion` autocontenido, con el link o la ruta en la pregunta. `chiche-run` carga el skill `chiche-run` sobre el target en esta sesión, con `--autonomy <level>` si esta corrida lo recibió. `chiche-run --autonomy A3` carga el skill `chiche-run` sobre el target con `--autonomy A3` (`/chiche-run <target> --autonomy A3`) en esta misma sesión y sigue la sección «Run con subagente» de `chiche-run`, que A3 activa (con `--inline`, `chiche-run` correría el run inline): esa sección es la que deriva modelo y effort de la spec recién publicada (CAs y capas, effort `xhigh`), imprime la traza sin preguntar, y lanza la tool `Agent` con `subagent_type: "implementer"`, `run_in_background: true`, `model` y `effort`, con un prompt que le pide seguir el skill `chiche-run` sobre el target (`/chiche-run <target> --autonomy A3 --inline`) y devolver el PR y el reporte; si el tipo `implementer` no está disponible en la instalación, usar `general-purpose` y anunciarlo. La sesión queda libre: al llegar la notificación del subagente, relevar el PR y el reporte al usuario repitiendo modelo y effort.
+En Claude Code, las opciones del menú van en un `AskUserQuestion` autocontenido, con el link o la ruta en la pregunta. `chiche-run` carga el skill `chiche-run` sobre el target en esta sesión, sin flags (`/chiche-run <target>`): el run lee su posición del contrato. `chiche-run --mode pr-reviewed` carga el skill `chiche-run` sobre el target con `--mode pr-reviewed` (`/chiche-run <target> --mode pr-reviewed`) en esta misma sesión y sigue la sección «Run con subagente» de `chiche-run`, que `pr-reviewed` activa (con `--inline`, `chiche-run` correría el run inline): esa sección es la que deriva modelo y effort de la spec recién publicada (CAs y capas, effort `xhigh`), imprime la traza sin preguntar, y lanza la tool `Agent` con `subagent_type: "implementer"`, `run_in_background: true`, `model` y `effort`, con un prompt que le pide seguir el skill `chiche-run` sobre el target (`/chiche-run <target> --mode pr-reviewed --inline`) y devolver el PR y el reporte; si el tipo `implementer` no está disponible en la instalación, usar `general-purpose` y anunciarlo. La sesión queda libre: al llegar la notificación del subagente, relevar el PR y el reporte al usuario repitiendo modelo y effort. Con `--until pr` no hay menú: la corrida carga el skill `chiche-run` igual que la opción `chiche-run`, sin flags.
 
 <!-- chiche-spec-publication-gate:start -->
 ### Gate canónico de publicación (precondición obligatoria)
 
 La spec no está lista por haber generado Markdown ni por haber ejecutado un write. Antes de cualquier éxito observable:
 
-1. Validar el candidato con `parseSddArtifact` (directamente o mediante el boundary disponible), sin implementar un parser regex paralelo. Debe resultar exactamente `kind=metadata`, `format=canonical`, `type=spec`, cero diagnósticos; siempre `state=draft` (el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de A2 al responder al menos una pregunta (una técnica debajo del umbral o una fuga), o la de `--until pr` en A3); la transición a `state=approved` es una escritura más bajo este mismo gate: mismo precheck, relectura y postcondición, con un solo marker y `state=approved` como único cambio; `superseded-by=none`; identidad semántica del issue resuelto (la forma relativa o calificada del mismo repo es equivalente) y grill decodificado exacto, incluido `none`.
+1. Validar el candidato con `parseSddArtifact` (directamente o mediante el boundary disponible), sin implementar un parser regex paralelo. Debe resultar exactamente `kind=metadata`, `format=canonical`, `type=spec`, cero diagnósticos; siempre `state=draft` (el `state=approved` solo lo escribe después la transición del menú al elegir un run, o la de responder al menos una pregunta por debajo de 100 (una técnica con confianza `≤ confianza spec` o una fuga), o la de `--until pr`); la transición a `state=approved` es una escritura más bajo este mismo gate: mismo precheck, relectura y postcondición, con un solo marker y `state=approved` como único cambio; `superseded-by=none`; identidad semántica del issue resuelto (la forma relativa o calificada del mismo repo es equivalente) y grill decodificado exacto, incluido `none`.
 2. Construir el conjunto completo de escrituras y ejecutar su precheck antes de cualquier mutación. Si hay predecesoras, deben conservar `issue`/`grill`, quedar `state=superseded` y llevar `superseded-by` a la sucesora. Una falla bloquea todas las escrituras aún no iniciadas.
 3. Persistir y releer cada destino; aplicar a los bytes releídos la misma postcondición. Un write exitoso sin postcheck no cuenta como cierre.
 4. Cuando la spec queda en local y en issue (`Llevar a issue` conserva el `.md`), además exigir equivalencia normativa entre copia local y remota. Sólo se normalizan transporte conocido (issue relativo/calificado, EOL final y el `<details><summary>Body original</summary>` remoto); cualquier otra diferencia bloquea.
@@ -399,7 +407,7 @@ Las transiciones de este skill se registran en `<git-common-dir>/chiche/events.j
 
 En Claude Code, `<harness>` es `claude`.
 
-Con el receipt de cada publicación, registrar un evento por documento publicado: `spec.published` cuando la spec queda `draft` (incluida la republicación de `Solicitar cambios`), `spec.approved` en la transición a `aprobada`, la del menú o la de A2 (una republicación de una spec que ya estaba `aprobada` no lo registra), también en la de `--until pr`, que es la de la propia corrida en A3, y un `spec.superseded` por cada predecesora. `Llevar a issue` registra antes un `spec.moved`: `previous` es la identidad events-v1 `.sdd/specs/<slug>.md` que la spec tenía y `spec` el `#NN` nuevo; en todo otro evento `previous` es `none`. `spec` es `#NN` si la spec vive en un issue, aunque también tenga copia local, y si no su identidad events-v1 `.sdd/specs/<slug>.md`; `issue` y `grill` son los del marker de cada documento publicado, sin codificar (una predecesora lleva los suyos, no los de la sucesora), y `pr` va vacío. Una publicación sin receipt no registra nada.
+Con el receipt de cada publicación, registrar un evento por documento publicado: `spec.published` cuando la spec queda `draft` (incluida la republicación de `Solicitar cambios`), `spec.approved` en la transición a `aprobada`: la del menú, la de responder al menos una pregunta por debajo de 100 o la de `--until pr` (una republicación de una spec que ya estaba `aprobada` no lo registra), y un `spec.superseded` por cada predecesora. `Llevar a issue` registra antes un `spec.moved`: `previous` es la identidad events-v1 `.sdd/specs/<slug>.md` que la spec tenía y `spec` el `#NN` nuevo; en todo otro evento `previous` es `none`. `spec` es `#NN` si la spec vive en un issue, aunque también tenga copia local, y si no su identidad events-v1 `.sdd/specs/<slug>.md`; `issue` y `grill` son los del marker de cada documento publicado, sin codificar (una predecesora lleva los suyos, no los de la sucesora), y `pr` va vacío. Una publicación sin receipt no registra nada.
 
 ## Reporte
 
@@ -409,19 +417,20 @@ Spec lista: <ruta local y/o issue #NN actualizado>
 - verificabilidad global: <grado o mixto> — <motivo en una linea>
 - mecanismo: <elegido> (asumido; alternativas en el Plan de verificacion)
 - inferencias: <N> sobre la mesa · <A> asumidas · <D> del handoff confirmadas
-- umbral spec: <n> · debajo del umbral: <k> · fugas: <f> · asumidas del grill debajo del umbral: <a>
-- revisar primero: <inferencias con confianza ≤ umbral spec, fugas [NEEDS-INPUT] y asumidas del grill debajo del umbral | ninguna>
+- confianza spec: <n> · preguntadas: <k> · fugas: <f>
+- revisar primero: <fugas y asumidas del grill con NN ≤ confianza grill; después las [ASSUMED NN %], de menor a mayor confianza | ninguna>
 <si hubo que correr /chiche-init, hay CA NULA que exigen prueba humana, o una politica de
 generacion condiciona la ejecucion (particion por tamaño, coverage), una linea por cada uno>
 ```
 
-Después del reporte, el menú final de "Flujo sin fricción" (solo en A1).
+Después del reporte, el menú final de "Flujo sin fricción" (solo con confianza `100` y sin `--until pr`).
 
 ## MUST DO
 
-- Leer `.chiche/project.md` antes que nada; si no existe, exigir `/chiche-init` primero (u orquestarlo con `--autonomy <level>` en A2 o A3).
+- Leer `.chiche/project.md` antes que nada; si no existe, exigir `/chiche-init` primero (ofrecerlo con confianza `100`; orquestarlo con `--defaults` por debajo de 100).
 - Si la fuente es grill, validar que esté finalizado, trabajar en el proyecto declarado por el handoff y conservar sus decisiones como confirmadas.
-- Listar TODAS las inferencias nuevas en la spec, también las que superan el umbral, marcadas `[ASSUMED NN %]` — el usuario las revisa sobre la spec publicada.
+- Listar TODAS las inferencias nuevas en la spec, también las que superan la confianza de la etapa, marcadas `[ASSUMED NN %]` — el usuario las revisa sobre la spec publicada.
+- Preguntar antes de publicar las inferencias técnicas y las fugas con confianza `≤ confianza spec`, en rondas de hasta cuatro.
 - Anclar cada grado de verificabilidad en lo que el contrato dice que corre HOY, citando el comando o gap concreto.
 - Cruzar el alcance contra las políticas de generación del contrato y avisar en el veredicto si la spec choca con alguna (en particular: proponer partición si no entra en el tamaño máximo de PR).
 - Proponer el mecanismo de verificación más barato que observe el comportamiento real, con alternativas escritas para que el usuario lo cambie desde el menú.
@@ -429,7 +438,7 @@ Después del reporte, el menú final de "Flujo sin fricción" (solo en A1).
 - Ser idempotente: re-correr sobre el mismo pedido actualiza la spec existente y upsertea en su lugar su único marker, `SDD-Tracking: version=1` o `Chiche-Tracking: version=2`, no crea otra copia y nunca se agrega otro marker.
 - Emitir el marker `Chiche-Tracking` v2 en toda spec nueva y preservar la referencia al issue heredada del pedido o del grill de origen.
 - Abrir toda spec con `## Qué hace esto`, según la vara de «Qué hace esto»: qué cambia para el usuario, en lenguaje llano y con un ejemplo; al reescribir una spec, agregarla si falta y actualizarla si cambia algo que afirma.
-- Terminar con el menú final (solo en A1): publicar primero, preguntar después.
+- Terminar con el menú final (solo con confianza `100` y sin `--until pr`): publicar primero, ofrecer el menú después.
 
 ## MUST NOT DO
 
@@ -439,5 +448,5 @@ Después del reporte, el menú final de "Flujo sin fricción" (solo en A1).
 - No prometer verificación autónoma de lo que exige humano — declararlo NULA y escribir el protocolo manual.
 - No tocar código ni commitear: la spec (y el issue, si se eligió) es el único output.
 - No pisar el body de un issue sin archivar el original en un `<details>`.
-- No frenar a preguntar inferencias, mecanismo ni destino antes de publicar: van escritos en la spec y se corrigen desde el menú final.
+- No frenar a preguntar el mecanismo ni el destino, ni una inferencia con confianza `> confianza spec`, antes de publicar: van escritos en la spec y se corrigen sobre la spec publicada.
 - No convertir decisiones confirmadas del grill en `[ASSUMED]` ni escribir la spec en un proyecto distinto al declarado por el handoff.

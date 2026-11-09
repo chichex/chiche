@@ -12,7 +12,7 @@ import type {
 	WorkflowResolutionV1,
 } from "../workflow-resolution/index.ts";
 import type { StartFreshStageRequest } from "./lifecycle.ts";
-import { type AutonomyCode, parseAutonomyLevel, withAutonomy } from "./autonomy.ts";
+import { withFlag } from "./autonomy.ts";
 import { validateWorkflowResolution } from "./protocol.ts";
 import { isConfirmedCoherentStart } from "./route-contract.ts";
 
@@ -20,12 +20,6 @@ import { isConfirmedCoherentStart } from "./route-contract.ts";
 export interface WorkflowDispatchDirs {
 	grills: ArtifactDirs;
 	specs: ArtifactDirs;
-}
-
-// Issue #102, CA-9: el nivel que `/issues --autonomy <level>` recibió; el
-// despacho lo agrega como `--autonomy <código>` a los args de toda ruta.
-export interface WorkflowDispatchOptions {
-	autonomy?: string;
 }
 
 export type WorkflowDispatchResult =
@@ -152,41 +146,23 @@ function request(
 	resolution: WorkflowResolutionV1,
 	name: string,
 	args: string,
-	autonomy?: AutonomyCode,
 ): WorkflowDispatchResult {
-	return { ok: true, request: { resolution, skill: { name, args: withAutonomy(args, autonomy) } } };
+	return { ok: true, request: { resolution, skill: { name, args } } };
 }
 
-// Issue #119, CA-16 y CA-18: con el veredicto aceptado (`Confirmar <ruta> → hasta <el PR | la spec>`) y la
-// ruta recomendada confirmada, los argumentos salen de la tabla stage-chain: grill → `--autonomy A2`
-// (+ `--until pr` con `hasta el PR`); spec → `--autonomy A3 --until pr` con `hasta el PR`, `--autonomy A2`
-// con `hasta la spec`. Un `--autonomy` recibido por `/issues` gana sobre el nivel del veredicto, y
-// `--until pr` sigue al veredicto. `supervisado` (accepted: false) y el fallback usan los args de hoy. Review #125-1: con un
-// `--autonomy` recibido el gate no ofrece `→ hasta` (el flag gana y el veredicto solo se muestra), así que el despacho
-// tampoco aplica el veredicto: evita `grill --autonomy A1 --until pr` (la spec subiría a A3) y `chiche-spec --autonomy A1
-// --until pr` (abortaría). Un `accepted: true` que llegue igual con el flag se trata como supervisado.
+// Issue #130, CA-25: con el veredicto aceptado (`Confirmar <ruta> → hasta el PR`) y la ruta recomendada confirmada,
+// las rutas de grill y de spec reciben `--until pr`, y nada más: la cadena no toca la confianza ni la posición del
+// run. Sin aceptar (`accepted: false`), con el fallback o sin veredicto, los argumentos son los de siempre.
 function verdictRequest(
 	resolution: WorkflowResolutionV1,
 	name: "grill" | "chiche-spec",
 	args: string,
-	autonomy?: AutonomyCode,
 ): WorkflowDispatchResult {
-	const verdict = resolution.verdict;
-	if (!verdict || !verdict.accepted || autonomy !== undefined || resolution.selectedRoute !== resolution.recommendedRoute) {
-		return request(resolution, name, args, autonomy);
-	}
-	const level: AutonomyCode = name === "chiche-spec" && verdict.until === "pr" ? "A3" : "A2";
-	const until = verdict.until === "pr" ? " --until pr" : "";
-	return { ok: true, request: { resolution, skill: { name, args: `${withAutonomy(args, level)}${until}` } } };
+	const chained = resolution.verdict?.accepted === true && resolution.selectedRoute === resolution.recommendedRoute;
+	return request(resolution, name, withFlag(args, "--until", chained ? resolution.verdict!.until : undefined));
 }
 
-export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispatchDirs, options: WorkflowDispatchOptions = {}): WorkflowDispatchResult {
-	let autonomy: AutonomyCode | undefined;
-	if (options.autonomy !== undefined) {
-		const parsed = parseAutonomyLevel(options.autonomy);
-		if (!parsed.ok) return failure("invalid-autonomy", parsed.message);
-		autonomy = parsed.code;
-	}
+export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispatchDirs): WorkflowDispatchResult {
 	const validation = validateWorkflowResolution(input);
 	if (!validation.ok) {
 		return failure(
@@ -215,25 +191,20 @@ export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispat
 	switch (route) {
 		case "grill":
 		case "join-grill":
-			return verdictRequest(resolution, "grill", `#${issue.number}`, autonomy);
+			return verdictRequest(resolution, "grill", `#${issue.number}`);
 		case "spec":
 		case "join-spec":
-			return verdictRequest(resolution, "chiche-spec", `#${issue.number}`, autonomy);
+			return verdictRequest(resolution, "chiche-spec", `#${issue.number}`);
 		case "resume-grill": {
 			const grill = validatedGrill(resolution, issue, true);
 			return grill
-				? request(resolution, "grill", `--resume ${JSON.stringify(grill.grill)}`, autonomy)
+				? request(resolution, "grill", `--resume ${JSON.stringify(grill.grill)}`)
 				: failure("invalid-grill-reference", "resume-grill requires one canonical in-project grill leaf");
 		}
 		case "spec-from-grill": {
 			const source = validatedFinalizedGrillSource(resolution, issue, dirs);
 			return source
-				? request(
-					resolution,
-					"chiche-spec",
-					`--from-grill ${JSON.stringify(source.value)}`,
-					autonomy,
-				)
+				? request(resolution, "chiche-spec", `--from-grill ${JSON.stringify(source.value)}`)
 				: failure("invalid-grill-reference", "spec-from-grill requires one canonical finalized grill source");
 		}
 		case "update-existing-spec":
@@ -241,12 +212,7 @@ export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispat
 		case "run-existing-spec": {
 			const spec = validatedSpec(resolution, issue, dirs);
 			if (!spec) return failure("invalid-spec-reference", `${route} requires one canonical in-project primary spec`);
-			return request(
-				resolution,
-				route === "run-existing-spec" ? "chiche-run" : "chiche-spec",
-				specArgument(spec),
-				autonomy,
-			);
+			return request(resolution, route === "run-existing-spec" ? "chiche-run" : "chiche-spec", specArgument(spec));
 		}
 	}
 	const exhaustive: never = route;
@@ -259,14 +225,14 @@ export function resolveWorkflowDispatch(input: unknown, sddDirs?: WorkflowDispat
  * spec o un handoff en <git-common-dir>/chiche/ o <git-common-dir>/sdd/ se
  * aceptan desde el checkout principal y desde un worktree linkeado.
  */
-export async function resolveWorkflowDispatchForCwd(input: unknown, options: WorkflowDispatchOptions = {}): Promise<WorkflowDispatchResult> {
+export async function resolveWorkflowDispatchForCwd(input: unknown): Promise<WorkflowDispatchResult> {
 	const cwd = typeof input === "object" && input !== null && typeof (input as { cwd?: unknown }).cwd === "string"
 		? (input as { cwd: string }).cwd
 		: null;
-	if (cwd === null || !isAbsolute(cwd)) return resolveWorkflowDispatch(input, undefined, options);
+	if (cwd === null || !isAbsolute(cwd)) return resolveWorkflowDispatch(input);
 	const [grills, specs] = await Promise.all([
 		resolveArtifactDirs(cwd, "grills"),
 		resolveArtifactDirs(cwd, "specs"),
 	]);
-	return resolveWorkflowDispatch(input, { grills, specs }, options);
+	return resolveWorkflowDispatch(input, { grills, specs });
 }

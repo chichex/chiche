@@ -76,9 +76,9 @@ const SDD_RUN_DIRTY_CHECKOUT_DOCTRINE = [
 const FEEDBACK_REMEDIATION_DOCTRINE = [
 	/## Fase 6 — Seguimiento y resolución automática del feedback del PR/,
 	/Run completo[\s\S]*PR creado/,
-	// Issue #102 CA-11: con A2 o A3 no se pregunta; «Por nivel» fija la conducta.
-	/Con A2 o A3 no se pregunta: ver «Por nivel»/,
-	/\*\*Por nivel\.\*\*[^\n]*`plan-approved` \(A2\)[^\n]*termina sin esperar[^\n]*`unattended` \(A3\)[^\n]*tope de 2 ciclos de corrección[^\n]*30 minutos sin feedback nuevo[^\n]*`SEGUIMIENTO DE FEEDBACK DETENIDO`/,
+	// Issue #102 CA-11, issue #130 CA-20: con `pr` o `pr-reviewed` no se pregunta; «Por posición» fija la conducta.
+	/Con `pr` o `pr-reviewed` no se pregunta: ver «Por posición»/,
+	/\*\*Por posición\.\*\*[^\n]*Con `pr` no se pregunta[^\n]*termina sin esperar[^\n]*Con `pr-reviewed` no se pregunta[^\n]*hasta 2 rondas[^\n]*30 minutos sin feedback nuevo[^\n]*`Feedback resuelto`[^\n]*`SEGUIMIENTO DE FEEDBACK DETENIDO`/,
 	/ID estable \+ `updatedAt`/,
 	/threads por `thread\.id` \+ `isResolved`/,
 	/conversaci[oó]n[\s\S]*reviews[\s\S]*comentarios inline/,
@@ -112,8 +112,8 @@ const SDD_SPEC_PUBLICATION_DOCTRINE = [
 // Issue #45: chiche-spec avanza sin preguntar y cierra con un menú; doctrina
 // idéntica entre harnesses dentro del bloque `chiche-spec-flow`.
 const SDD_SPEC_FLOW_DOCTRINE = [
-	// Review #123-9: la frase se acota a A1 y lleva el porcentaje.
-	/inferencias técnicas nuevas[\s\S]*`\[ASSUMED NN %\]` sin preguntar \(A2 pregunta las que quedan debajo del umbral y las fugas/,
+	// Review #123-9 → issue #130, CA-17: solo lo que supera la confianza de la etapa se escribe sin preguntar.
+	/inferencias técnicas nuevas con confianza `> confianza spec` van a la tabla de la spec marcadas `\[ASSUMED NN %\]` sin preguntar, y solo las de confianza `≤ confianza spec` y las fugas con esa misma regla se preguntan antes de publicar/,
 	/decisiones del handoff[\s\S]*confirmadas/i,
 	/mecanismo[\s\S]*propuesto[\s\S]*alternativas[\s\S]*sin preguntar/i,
 	/`--out`[\s\S]*fuerza/i,
@@ -124,13 +124,19 @@ const SDD_SPEC_FLOW_DOCTRINE = [
 	/staging no-SDD/,
 	/`Llevar a issue`/,
 	/`Solicitar cambios`/,
-	/`chiche-run --autonomy A3`[\s\S]*harnesses con subagentes lo delega en un `implementer`/,
+	/`chiche-run --mode pr-reviewed`[\s\S]*harnesses con subagentes lo delega en un `implementer`/,
 	/`state=approved`[\s\S]*antes de lanzar/i,
 	/comments[\s\S]*posteriores[\s\S]*última publicación/i,
 	/--paginate/,
 	/`updated_at`/,
 	/vuelve al menú/i,
-	/Con A2 o A3[\s\S]*no hay menú/,
+	// Issue #130, CA-17: por debajo de 100 no hay menú; la regla de `approved` conserva sus tres transiciones;
+	// `--until pr` no exige nada y lanza el run sin flags.
+	/Por debajo de 100: el destino sigue la misma regla y no hay menú/,
+	/Pasa a `aprobada` \(`state=approved`\) solo cuando el usuario elige correrla desde el menú \(confianza `100`\) o, por debajo de 100, al responder al menos una pregunta \(una técnica con confianza `≤ confianza spec` o una fuga\), o, con `--until pr`, al publicarse/,
+	/Con `--until pr`, sea cual sea la confianza: la spec se publica `draft`, pasa a `state=approved` bajo el mismo gate de publicación, registra `spec\.published` y `spec\.approved`, y la corrida lanza `chiche-run <target>` sin flags, exactamente como la opción `chiche-run` del menú, sin preguntar y sin `--until pr`/,
+	/`--until pr` no exige ni cambia la confianza: con `100` la spec pregunta todo, no muestra el menú, aprueba y lanza el run; una fuga no frena la cadena/,
+	/Sin `--until pr` la corrida termina en `Spec lista`/,
 ];
 
 // Issue #45: chiche-run imprime el plan y sigue, desvía sin preguntar cuando no
@@ -223,8 +229,8 @@ const SDD_SPEC_DELIVERY_DOCTRINE = [
 const SDD_RUN_STACK_DOCTRINE = [
 	// CA-3: preflight
 	/`## Plan de entrega` de 2 o más capas[\s\S]*`gh` ≥ 2\.90\.0[\s\S]*`git` ≥ 2\.36[\s\S]*`github\/gh-stack`[\s\S]*`gh extension list`/,
-	/interactivo[\s\S]*`gh extension install github\/gh-stack` ahí mismo/,
-	/con A2 o A3 frena antes de ramificar[\s\S]*comando exacto/,
+	/con `ask`, ofrecer `gh extension install github\/gh-stack` ahí mismo/,
+	/con `pr` o `pr-reviewed` frena antes de ramificar[\s\S]*comando exacto/,
 	/una sola capa[\s\S]*nada cambia/i,
 	// CA-4: ramificado
 	/`gh stack init -b <base> sdd\/<slug>\/1-<etapa>`[\s\S]*`\.\.\/<repo>-sdd-<slug>`/,
@@ -629,17 +635,21 @@ test("chiche-spec lanza el run con subagente implementer en background en Claude
 	assert.match(claude, /subagent_type: "implementer"/);
 	assert.match(claude, /run_in_background/);
 	assert.match(claude, /`general-purpose`[\s\S]*(anunci|avis)/i);
-	assert.match(claude, /`\/chiche-run <target> --autonomy A3 --inline`/);
+	assert.match(claude, /`\/chiche-run <target> --mode pr-reviewed --inline`/);
 	for (const harness of HARNESSES.filter((candidate) => candidate !== "claude")) {
 		const markdown = await readRepoFile(`${harness}/chiche-spec/SKILL.md`);
 		assert.doesNotMatch(markdown, /subagent_type/, `${harness}/chiche-spec/SKILL.md no debe depender de subagentes de Claude`);
 	}
 	// Issue #44 CA-9/CA-12: Pi lanza la tool `subagent` con el agente bundleado
-	// `implementer` en background y el task `/skill:chiche-run <target> --autonomy A3 --inline` (issue #102 CA-8).
+	// `implementer` en background y el task `/skill:chiche-run <target> --mode pr-reviewed --inline` (issue #102 CA-8, issue #130 CA-18).
 	const pi = await readRepoFile("pi/chiche-spec/SKILL.md");
 	assert.match(pi, /agent: "implementer"/, "pi/chiche-spec lanza el implementer bundleado");
 	assert.match(pi, /background: true/, "pi/chiche-spec lanza el subagente en background");
-	assert.match(pi, /`chiche-run --autonomy A3`[\s\S]*`\/skill:chiche-run <target> --autonomy A3 --inline`/, "pi/chiche-spec corre chiche-run desatendido en el hijo");
+	assert.match(pi, /`chiche-run --mode pr-reviewed`[\s\S]*`\/skill:chiche-run <target> --mode pr-reviewed --inline`/, "pi/chiche-spec corre chiche-run en pr-reviewed en el hijo");
+	// Issue #130, CA-17 y CA-25: `chiche-run` y `--until pr` lanzan sin flags; `launch_sdd_run` lleva `mode`, nunca el nivel.
+	assert.match(pi, /`launch_sdd_run` con el target exacto[^\n]*sin `mode`: la sesión hija lee la posición del run del contrato/, "pi/chiche-spec lanza chiche-run sin flags");
+	assert.match(pi, /`launch_sdd_run`, el target exacto y `mode: "pr-reviewed"`/, "pi/chiche-spec cae a launch_sdd_run con mode");
+	assert.doesNotMatch(pi, /autonomy: /, "pi/chiche-spec ya no pasa autonomy a launch_sdd_run");
 	assert.doesNotMatch(pi, /Pi no tiene subagentes/, "pi/chiche-spec ya tiene subagentes");
 	assert.match(pi, PI_SCOUT_EXPLORATION, "pi/chiche-spec explora con scouts");
 	assert.match(pi, PI_SCOUT_BUDGET_SPEC, "pi/chiche-spec acota los scouts: cantidad, exhaustividad, task cerrado y timeout");
@@ -683,8 +693,8 @@ test("chiche-run imprime el plan y sigue, desvía sin preguntar y ofrece code re
 		if (harness !== "claude") {
 			assert.doesNotMatch(markdown, /subagent_type/, `${harness}/chiche-run/SKILL.md no debe depender de subagentes de Claude`);
 		}
-		// Hallazgo 2: con A2 o A3 la política de dependencias `preguntar` no puede frenar.
-		assert.match(markdown, /`preguntar` → [^\n]*con A2 o A3, no agregar la dep/, `${harness}/chiche-run/SKILL.md no frena con A2 o A3 ante deps 'preguntar'`);
+		// Hallazgo 2: con `pr` o `pr-reviewed` la política de dependencias `preguntar` no puede frenar.
+		assert.match(markdown, /`preguntar` → [^\n]*con `pr` o `pr-reviewed`, no agregar la dep/, `${harness}/chiche-run/SKILL.md no frena con pr o pr-reviewed ante deps 'preguntar'`);
 	}
 	const claude = await readRepoFile("claude/chiche-run/SKILL.md");
 	assert.match(claude, /subagent_type: "reviewer"/, "Claude lanza el review con el subagente reviewer");
@@ -779,7 +789,7 @@ const SDD_SPEC_READABILITY_DOCTRINE = [
 	// CA-2 (f): sin alcance ni decisiones nuevas.
 	/no agrega alcance ni decisiones[\s\S]*lo cubre un CA o `## Fuera de alcance`[\s\S]*decisiones siguen en `## Inferencias`/,
 	// CA-2 (g): obligatoria.
-	/obligatoria en toda spec[\s\S]*pedido libre, issue o grill[\s\S]*cualquier nivel de autonomía/,
+	/obligatoria en toda spec[\s\S]*pedido libre, issue o grill[\s\S]*con cualquier confianza/,
 	// CA-3: reescritura. Los disparadores son ejemplos (la lista no es exhaustiva) y la sección se actualiza
 	// si cambia algo que afirma, no solo los CAs (review de #118).
 	/reescribe una spec que no tiene la sección, la agrega/,
@@ -1373,7 +1383,7 @@ function sddMentionProblems(path: string, lines: string[]): string[] {
 	return problems;
 }
 
-test("issue #103 CA-18 (issue #102 CA-20): los README se titulan # chiche, abren con el tagline, nombran los niveles y --autonomy, y el flujo chiche", async () => {
+test("issue #103 CA-18 (issue #130 CA-27): los README se titulan # chiche, abren con el tagline, nombran los tres controles del dial, y el flujo chiche", async () => {
 	const problems: string[] = [];
 	for (const readme of README_PITCH) {
 		const markdown = await readRepoFile(readme.path);
@@ -1384,8 +1394,8 @@ test("issue #103 CA-18 (issue #102 CA-20): los README se titulan # chiche, abren
 		if (!opening.toLowerCase().includes(readme.tagline)) problems.push(`${readme.path}: las primeras 8 líneas no dicen «${readme.tagline}»`);
 		// El tagline «anda un chiche» se retiró en 5.6.3 y no vuelve.
 		if (markdown.toLowerCase().includes("anda un chiche")) problems.push(`${readme.path}: dice «anda un chiche», el tagline retirado`);
-		// Issue #102 CA-20: las primeras 8 líneas nombran los tres niveles y el flag del dial.
-		for (const token of ["`supervised`", "`plan-approved`", "`unattended`", "`--autonomy`"]) {
+		// Issue #130 CA-27: las primeras 8 líneas nombran los tres controles del dial (confianza, posición del run y cadena).
+		for (const token of ["`grill`", "`chiche-spec`", "`ask`", "`pr`", "`pr-reviewed`", "`--until pr`"]) {
 			if (!opening.includes(token)) problems.push(`${readme.path}: las primeras 8 líneas no nombran ${token}`);
 		}
 
@@ -2087,18 +2097,82 @@ test("#84 CA-20: chiche-init, coding-policies y design-system cierran con Commit
 	assert.deepEqual(problems, []);
 });
 
-// --- Issue #119, capa 2: confianza numérica en la spec, menú que sugiere el nivel y README ---------
+// --- Issue #119, capa 2 → issue #130, capa 2: la spec por confianza (CA-17 y CA-18) y los README ---------
 
 // Review #123-1: el ejemplo de la Fase 3 es técnico (lo de producto que llega a la spec es una fuga).
 const SPEC_CONFIDENCE_TABLE = /^\| 1 \| ¿Donde se guarda la preferencia del toggle\? \| En localStorage, junto a las otras preferencias \| En el perfil del user, via API \| 70 % \|\n\| 2 \| ¿Como se expone el toggle en el codigo\? \| Con el hook useTheme existente \| Un context nuevo \| 95 % \|$/m;
-// Review #123-7: una respuesta del usuario (A2 o Solicitar cambios) es `confirmada`.
-const SPEC_RESOLUTION_VALUES = /^<la tabla de Fase 3 \+ columna Resolucion: confirmada \(del handoff, o respondida por el usuario en A2 o en Solicitar cambios\) \| \[ASSUMED NN %\] \| \[NEEDS-INPUT\]>$/m;
-// Review #123-5: `a` cuenta las decisiones que el grill asumió debajo de su umbral.
-const SPEC_REPORT_THRESHOLD = /^- umbral spec: <n> · debajo del umbral: <k> · fugas: <f> · asumidas del grill debajo del umbral: <a>$/m;
-const SPEC_REPORT_REVIEW_FIRST = /^- revisar primero: <inferencias con confianza ≤ umbral spec, fugas \[NEEDS-INPUT\] y asumidas del grill debajo del umbral \| ninguna>$/m;
-const SPEC_MENU_SUGGESTION = /\*\*Nivel sugerido\.\*\* En A1 la primera opción del menú, marcada `\(Recomendado\)`, es `chiche-run --autonomy A3` cuando `k = 0`, `f = 0` y `a = 0`[^\n]*`a` = decisiones `— asumida NN %` del handoff con `NN ≤ umbral grill`[^\n]*y `chiche-run` en cualquier otro caso; el texto de la pregunta dice el motivo \(`debajo del umbral: <k>, fugas: <f>, asumidas del grill debajo del umbral: <a>`\)\. Las demás opciones no cambian\./;
+// Issue #130, CA-17: Resolucion vale `confirmada` o `[ASSUMED NN %]`; una fuga se marca en la tabla.
+const SPEC_RESOLUTION_VALUES = /^<la tabla de Fase 3 \+ columna Resolucion: confirmada \(del handoff, o respondida por el usuario antes de publicar o en Solicitar cambios\) \| \[ASSUMED NN %\]; la fila de una fuga suma ` · fuga`>$/m;
+const SPEC_RISKS_TEMPLATE = /^<las \[ASSUMED NN %\] de menor a mayor confianza, las fugas marcadas `fuga`, dependencias, flakiness conocida,$/m;
+// Issue #130, CA-18: la línea del reporte reemplaza a la del umbral.
+const SPEC_REPORT_CONFIDENCE = /^- confianza spec: <n> · preguntadas: <k> · fugas: <f>$/m;
+const SPEC_REPORT_REVIEW_FIRST = /^- revisar primero: <fugas y asumidas del grill con NN ≤ confianza grill; después las \[ASSUMED NN %\], de menor a mayor confianza \| ninguna>$/m;
+const SPEC_MENU_SUGGESTION = /\*\*Opción sugerida\.\*\* La primera opción del menú, marcada `\(Recomendado\)`, es `chiche-run --mode pr-reviewed` cuando `f = 0` y `a = 0` \(`f` = fugas, decisiones de producto que llegaron a la spec sin cerrar; `a` = decisiones `— asumida NN %` del handoff con `NN ≤ confianza grill`, las que el grill asumió en o debajo de la confianza del grill\), y `chiche-run` en cualquier otro caso; el texto de la pregunta dice el motivo \(`fugas: <f>, asumidas del grill en o debajo de su confianza: <a>`\)\. Las demás opciones no cambian\./;
 
-test("#119 CA-8: en los cinco chiche-spec la tabla de inferencias lleva la confianza como `NN %`, Resolucion vale confirmada | [ASSUMED NN %] | [NEEDS-INPUT], el reporte suma la línea de umbral y lista lo que queda debajo, y MUST DO dice «también las que superan el umbral»", async () => {
+const SPEC_SIGNATURE: Record<Harness, string> = {
+	claude: "/chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]",
+	codex: "$chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]",
+	opencode: "/chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]",
+	pi: "/skill:chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ID|ruta.md]] [--out local|issue] [--confidence <n>] [--until pr]",
+	antigravity: "/chiche-spec [pedido libre | #NN | URL de issue | ruta de spec] [--from-grill [ruta.md]] [--triage-route update-existing-spec|audit-existing-spec] [--out local|issue] [--confidence <n>] [--until pr]",
+};
+
+// Los cuatro bloques compartidos del dial los fija autonomy-gate; acá se mira la prosa de afuera.
+function withoutDialBlocks(markdown: string): string {
+	let text = markdown;
+	for (const name of ["autonomy-controls", "autonomy-resolve", "autonomy-confidence", "autonomy-contract"]) {
+		text = text.replace(new RegExp(`<!-- ${name}:start -->\\n[\\s\\S]*?\\n<!-- ${name}:end -->`, "g"), "");
+	}
+	return text;
+}
+
+// Vocabulario del modelo de niveles, retirado en 6.0.0. Los nombres se arman a pedazos para que este archivo
+// no los lleve escritos de corrido (el brief de la capa 2 los prohíbe fuera de los bloques compartidos).
+const RETIRED_DIAL_WORDS: RegExp[] = [
+	new RegExp(["super", "vised"].join("")),
+	new RegExp(["plan", "approved"].join("-")),
+	new RegExp(["un", "attended"].join("")),
+	/\bA[0-5]\b/,
+	new RegExp(["--auto", "nomy"].join("")),
+	/[Rr]ehearsed/,
+	/\bumbral(?:es)?\b/i,
+	/nivel efectivo/i,
+	/Niveles de autonomía/i,
+	/Nivel sugerido/i,
+	/nivel de autonomía/i,
+	/NEEDS-INPUT/,
+];
+
+export function retiredDialProblems(file: string, markdown: string): string[] {
+	const problems: string[] = [];
+	withoutDialBlocks(markdown).split("\n").forEach((line, index) => {
+		for (const pattern of RETIRED_DIAL_WORDS) if (pattern.test(line)) problems.push(`${file} (línea ${index + 1} sin los bloques): sobra ${pattern}`);
+	});
+	return problems;
+}
+
+test("#130 CA-17: la firma de chiche-spec lleva [--confidence <n>] [--until pr] en los cinco harnesses (también en el atajo de la Fase 0), con el bullet del flag y --until pr sin exigir nada", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-spec/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const signature = markdown.split("\n").filter((line) => /^(?:\/|\$|\/skill:)chiche-spec \[/.test(line));
+		if (signature.length !== 1 || signature[0] !== SPEC_SIGNATURE[harness]) problems.push(`${file}: la firma no es \`${SPEC_SIGNATURE[harness]}\` (hay: ${signature.join(" | ")})`);
+		for (const [label, pattern] of [
+			["atajo de la Fase 0", /^Atajo: [^\n]*\[--out local\|issue\] \[--confidence <n>\] \[--until pr\] saltea este menu\.$/m],
+			["bullet --confidence", /^- `--confidence <n>` — confianza de esta corrida, un entero de 0 a 100; manda sobre la fila `spec` de `## Autonomy` del contrato\. Las inferencias técnicas y las fugas con confianza `≤ <n>` se preguntan antes de publicar y las que la superan quedan `\[ASSUMED NN %\]`: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y termina en el menú final; por debajo de 100 no hay menú\./m],
+			["bullet --confidence: contrato faltante", /Si falta el contrato, con confianza menor que 100 corre `[^`\s]*chiche-init --defaults` y con 100 ofrece `[^`\s]*chiche-init`\./],
+			["referencias cruzadas", /Las decisiones ya confirmadas por grill nunca se degradan a supuestos\. Ver «Controles de autonomía», «Controles efectivos» y «Tipo y confianza»\./],
+			["bullet --until pr", /^- `--until pr` — hasta dónde llega la cadena; no exige ni cambia ningún otro control: qué se pregunta lo sigue decidiendo la confianza\. Con el flag, la spec se publica `draft`, pasa a `approved` bajo el gate de publicación \(registra `spec\.published` y `spec\.approved`\) y lanza `[^`\s]*chiche-run <target>` sin flags: el run lee su posición del contrato \(ver «Flujo sin fricción»\)\. Con 100 y `--until pr` pregunta todo, no muestra el menú, aprueba y lanza el run\. Sin `--until pr` termina en `Spec lista`\. `--until` con cualquier otro valor aborta listando el único válido \(`pr`\)\. El flag no existe en `chiche-run`: al lanzarlo no se le pasa\./m],
+		] as const) {
+			if (!pattern.test(markdown)) problems.push(`${file}: falta ${label}`);
+		}
+		if (/--until pr exige/.test(markdown)) problems.push(`${file}: el diagnóstico «--until pr exige …» no existe más`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#130 CA-17: chiche-spec pregunta antes de publicar las técnicas con confianza ≤ confianza spec en rondas de hasta cuatro y las fugas con la misma regla, sin contrato encadena chiche-init --defaults por debajo de 100, y la tabla lleva confirmada | [ASSUMED NN %] con la fuga marcada", async () => {
 	const problems: string[] = [];
 	for (const harness of HARNESSES) {
 		const file = `${harness}/chiche-spec/SKILL.md`;
@@ -2106,38 +2180,86 @@ test("#119 CA-8: en los cinco chiche-spec la tabla de inferencias lleva la confi
 		for (const [label, pattern] of [
 			["tabla de la Fase 3 con NN %", SPEC_CONFIDENCE_TABLE],
 			["valores de Resolucion", SPEC_RESOLUTION_VALUES],
-			["línea de umbral del reporte", SPEC_REPORT_THRESHOLD],
-			["revisar primero", SPEC_REPORT_REVIEW_FIRST],
-			["MUST DO", /^- Listar TODAS las inferencias nuevas en la spec, también las que superan el umbral, marcadas `\[ASSUMED NN %\]`/m],
-			["Fase 3: confianza entera", /`Confianza` es un entero `NN %`: la probabilidad de que la elección propuesta sea la correcta/],
-			["Fase 3: ≤ umbral y fugas a riesgos", /confianza `≤ umbral spec`[^\n]*fuga[^\n]*`## Riesgos y gaps`[^\n]*reporte/],
+			["Riesgos y gaps del template", SPEC_RISKS_TEMPLATE],
+			["Fase 1: sin contrato y confianza 100", /^- \*\*Si NO existe y la confianza es `100`\*\*: frenar\.[^\n]*ofrecer `[^`\s]*chiche-init --defaults` como vía rápida\.$/m],
+			["Fase 1: sin contrato y confianza menor que 100", /^- \*\*Si NO existe y la confianza es menor que 100\*\*: correr `[^`\s]*chiche-init --defaults` automáticamente, anotarlo en el reporte, y seguir\.$/m],
+			["Fase 3: confianza entera", /`Confianza` es un entero `NN %`: la probabilidad de que la elección propuesta sea la correcta; la confianza de la etapa es la `confianza spec` que imprime el resolver de «Controles efectivos» \(ver «Tipo y confianza»\)/],
+			["Fase 3: preguntar antes de publicar", /Antes de publicar, las inferencias con confianza `≤ confianza spec` se preguntan[^\n]*en rondas de hasta cuatro[^\n]*y las fugas con la misma regla; las que la superan no se preguntan: se resuelven con la elección propuesta y van a la sección `## Inferencias` de la spec, marcadas `\[ASSUMED NN %\]`\. Con `100` se preguntan todas y con `0` ninguna\./],
+			["Fase 3: la fuga se trata por confianza", /Una fuga \(una decisión de producto que llegó a la spec sin cerrar, ej\. "¿esto es solo UI o también API\?"\) entra a la tabla marcada `fuga` y se trata por confianza como cualquier otra: con confianza `≤ confianza spec` se pregunta y, si la supera, queda `\[ASSUMED NN %\]`; nunca frena la spec\./],
+			["Fase 3: riesgos de menor a mayor", /Las `\[ASSUMED NN %\]` se listan además en `## Riesgos y gaps` de menor a mayor confianza, con las fugas marcadas `fuga`, y el reporte nombra las fugas, para que el usuario las mire primero\./],
+			["Estado del template", /^Estado: siempre `draft` al publicar; `aprobada` solo por una de las tres transiciones de "Flujo sin fricción": elegir un run en el menú final, responder al menos una pregunta por debajo de 100, o `--until pr`\.$/m],
+			["MUST DO: listar todas", /^- Listar TODAS las inferencias nuevas en la spec, también las que superan la confianza de la etapa, marcadas `\[ASSUMED NN %\]`/m],
+			["MUST DO: preguntar antes de publicar", /^- Preguntar antes de publicar las inferencias técnicas y las fugas con confianza `≤ confianza spec`, en rondas de hasta cuatro\.$/m],
+			["MUST DO: contrato", /^- Leer `\.chiche\/project\.md` antes que nada; si no existe, exigir `[^`\s]*chiche-init` primero \(ofrecerlo con confianza `100`; orquestarlo con `--defaults` por debajo de 100\)\.$/m],
+			["MUST DO: menú", /^- Terminar con el menú final \(solo con confianza `100` y sin `--until pr`\): publicar primero, ofrecer el menú después\.$/m],
+			["MUST NOT: no frenar de más", /^- No frenar a preguntar el mecanismo ni el destino, ni una inferencia con confianza `> confianza spec`, antes de publicar: van escritos en la spec y se corrigen sobre la spec publicada\.$/m],
 		] as const) {
 			if (!pattern.test(markdown)) problems.push(`${file}: falta ${label} ${pattern}`);
 		}
-		for (const stale of [/\| media \|$/m, /\| alta \|$/m, /también las de confianza alta/, /inferencias de confianza baja que definen alcance/, /elegida por usuario: <x>/]) {
+		for (const stale of [/\| media \|$/m, /\| alta \|$/m, /también las de confianza alta/, /inferencias de confianza baja que definen alcance/, /elegida por usuario: <x>/, /La tabla NO se pregunta/, /No frenar a preguntar inferencias, mecanismo ni destino antes de publicar/, /volvé al grill/]) {
 			if (stale.test(markdown)) problems.push(`${file}: sobra ${stale}`);
 		}
 	}
 	assert.deepEqual(problems, []);
 });
 
-test("#119 CA-9: el menú final de chiche-spec sugiere el nivel en los cinco harnesses (la primera opción, marcada Recomendado, es chiche-run --autonomy A3 solo con k = 0, f = 0 y a = 0, y chiche-run en otro caso) y docs/harness-interaction-differences.md lo lleva a los menús en texto plano", async () => {
+test("#130 CA-18: el menú final de chiche-spec (solo con 100) ofrece Llevar a issue, chiche-run, chiche-run --mode pr-reviewed y Solicitar cambios, sugiere pr-reviewed sin fugas ni asumidas del grill, el reporte dice confianza spec · preguntadas · fugas, y docs/harness-interaction-differences.md lo lleva a los menús en texto plano", async () => {
 	const problems: string[] = [];
 	for (const harness of HARNESSES) {
-		const flow = delimitedDoctrine(await readRepoFile(`${harness}/chiche-spec/SKILL.md`), "chiche-spec-flow");
-		if (!SPEC_MENU_SUGGESTION.test(flow)) problems.push(`${harness}/chiche-spec: chiche-spec-flow no fija la regla del nivel sugerido`);
-		if (!/`k` = inferencias técnicas con confianza `≤ umbral spec`[^\n]*`f` = fugas/.test(flow)) problems.push(`${harness}/chiche-spec: el bloque no define k y f`);
+		const file = `${harness}/chiche-spec/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const flow = delimitedDoctrine(markdown, "chiche-spec-flow");
+		for (const [label, pattern] of [
+			["menú solo con 100", /\*\*Menú final \(solo con confianza `100`\)\.\*\*/],
+			["opciones de la spec en .md", /^- Spec en `\.md`: `Llevar a issue` \/ `chiche-run` \/ `chiche-run --mode pr-reviewed` \/ `Solicitar cambios`\.$/m],
+			["opciones de la spec en issue", /^- Spec en issue: `chiche-run` \/ `chiche-run --mode pr-reviewed` \/ `Solicitar cambios`\.$/m],
+			["opción sugerida", SPEC_MENU_SUGGESTION],
+			["k no entra en la regla", /`k`, las preguntadas del reporte, no entra en la regla: con `100` se preguntaron todas/],
+			["chiche-run sin flags", /`chiche-run` lanza el run sin flags: el run lee su posición del contrato\. `chiche-run --mode pr-reviewed` lo lanza con ese flag/],
+		] as const) {
+			if (!pattern.test(flow)) problems.push(`${harness}/chiche-spec: chiche-spec-flow no fija ${label}`);
+		}
+		for (const [label, pattern] of [
+			["línea de confianza del reporte", SPEC_REPORT_CONFIDENCE],
+			["revisar primero", SPEC_REPORT_REVIEW_FIRST],
+			["menú después del reporte", /el menú final de "Flujo sin fricción"[^\n]*\(solo con confianza `100` y sin `--until pr`\)/],
+		] as const) {
+			if (!pattern.test(markdown)) problems.push(`${file}: falta ${label} ${pattern}`);
+		}
 	}
 	const docs = await readRepoFile("docs/harness-interaction-differences.md");
-	if (!/menú final de `chiche-spec`[^\n]*texto plano[^\n]*primera opción numerada lleva `\(Recomendado\)`[^\n]*`chiche-run --autonomy A3`[^\n]*`debajo del umbral: 0` y `fugas: 0`[^\n]*`chiche-run` en cualquier otro caso/.test(docs)) problems.push("docs/harness-interaction-differences.md: no refleja el nivel sugerido para los menús en texto plano");
+	if (!/menú final de `chiche-spec`[^\n]*texto plano[^\n]*primera opción numerada lleva `\(Recomendado\)`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`fugas: 0`[^\n]*`chiche-run` en cualquier otro caso/.test(docs)) problems.push("docs/harness-interaction-differences.md: no refleja la opción sugerida para los menús en texto plano");
 	assert.deepEqual(problems, []);
 });
 
-test("#119 CA-10: las filas grill y chiche-spec de los dos README nombran la confianza numérica y el umbral, y no hablan de impacto alto", async () => {
+test("#130 CA-14 (chiche-spec): fuera de los bloques compartidos del dial, ningún chiche-spec/SKILL.md nombra niveles, --autonomy, umbrales ni [NEEDS-INPUT]", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-spec/SKILL.md`;
+		problems.push(...retiredDialProblems(file, await readRepoFile(file)));
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("autotest: retiredDialProblems marca el vocabulario de niveles fuera de los bloques compartidos, no lo marca adentro y acepta el vocabulario nuevo", () => {
+	const level = ["un", "attended"].join("");
+	const flag = ["--auto", "nomy"].join("");
+	const inside = ["<!-- autonomy-resolve:start -->", `\`${level}\` o \`A3\` → \`usá --confidence 0\``, "<!-- autonomy-resolve:end -->"].join("\n");
+	assert.deepEqual(retiredDialProblems("x", inside), []);
+	assert.equal(retiredDialProblems("x", `${inside}\nCon A2 o A3: no hay menú, y ${flag} A3 lanza el run.`).length, 2);
+	for (const phrase of ["debajo del umbral", "umbral spec: <n>", "**Nivel sugerido.**", "fugas [NEEDS-INPUT]", "en cualquier nivel de autonomía"]) {
+		assert.equal(retiredDialProblems("x", phrase).length, 1, `marca: ${phrase}`);
+	}
+	for (const phrase of ["confianza spec: <n> · preguntadas: <k> · fugas: <f>", "`chiche-run --mode pr-reviewed`", "**Opción sugerida.**", "`## Autonomy` del contrato", "por debajo de 100 no hay menú"]) {
+		assert.deepEqual(retiredDialProblems("x", phrase), [], `acepta: ${phrase}`);
+	}
+});
+
+test("#130 CA-27 (filas grill y chiche-spec): los dos README nombran la confianza numérica y el flag --confidence, sin niveles ni umbral, y no hablan de impacto alto", async () => {
 	const problems: string[] = [];
 	for (const [path, grill, spec] of [
-		["README.md", [/confianza numérica `NN %`/, /umbral/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/], [/`NN %`/, /umbral/, /`\[ASSUMED NN %\]`/, /`plan-approved`[^|]*debajo del umbral[^|]*tampoco muestra el menú/]],
-		["README.en.md", [/numeric confidence `NN %`/, /threshold/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/], [/`NN %`/, /threshold/, /`\[ASSUMED NN %\]`/, /`plan-approved`[^|]*below the threshold[^|]*skips the final menu/]],
+		["README.md", [/confianza numérica `NN %`/, /`--confidence`/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/, /por debajo de 100[^|]*congela el handoff sin pedir confirmación/], [/`NN %`/, /`--confidence`/, /`\[ASSUMED NN %\]`/, /por debajo de 100 no muestra el menú final/]],
+		["README.en.md", [/numeric confidence `NN %`/, /`--confidence`/, /`\[ASSUMED NN %\]`/, /\*\*Para la spec\.\*\*/, /below 100[^|]*freezes the handoff without asking for confirmation/], [/`NN %`/, /`--confidence`/, /`\[ASSUMED NN %\]`/, /below 100 it skips the final menu/]],
 	] as const) {
 		const markdown = await readRepoFile(path);
 		const grillRow = markdown.split("\n").find((line) => line.startsWith("| **`grill`** |")) ?? "";
@@ -2145,23 +2267,23 @@ test("#119 CA-10: las filas grill y chiche-spec de los dos README nombran la con
 		for (const pattern of grill) if (!pattern.test(grillRow)) problems.push(`${path} fila grill: falta ${pattern}`);
 		for (const pattern of spec) if (!pattern.test(specRow)) problems.push(`${path} fila chiche-spec: falta ${pattern}`);
 		if (/impacto alto|high-impact/.test(`${grillRow}\n${specRow}`)) problems.push(`${path}: las filas siguen hablando de impacto alto`);
+		for (const pattern of [...RETIRED_DIAL_WORDS, /\bthresholds?\b/i]) if (pattern.test(`${grillRow}\n${specRow}`)) problems.push(`${path}: las filas grill y chiche-spec siguen con ${pattern}`);
 	}
 	assert.deepEqual(problems, []);
 });
 
-// Review de #123 (ronda 1): la spec trata solo decisiones técnicas, consume `**Para la spec.**`, acota «sin preguntar» a A1,
-// y la aprobación de A2 cuenta las fugas; los README y el contrato lo dicen igual.
-test("review #123: la Fase 3 de chiche-spec es técnica (lo de producto es fuga), `**Para la spec.**` entra a la tabla con su confianza y cuenta para k, «sin preguntar» se acota a A1, una respuesta es `confirmada`, y los README nombran las fugas de A2", async () => {
+// Review de #123 (ronda 1) → issue #130: la spec trata solo decisiones técnicas, consume `**Para la spec.**`,
+// pregunta por confianza antes de publicar y aprueba al responder; los README y el contrato lo dicen igual.
+test("review #123 → #130: la Fase 3 de chiche-spec es técnica (lo de producto es fuga), `**Para la spec.**` entra a la tabla con su confianza y cuenta para k si se pregunta, una respuesta es `confirmada`, y los README nombran las fugas", async () => {
 	const problems: string[] = [];
 	for (const harness of HARNESSES) {
 		const file = `${harness}/chiche-spec/SKILL.md`;
 		const markdown = await readRepoFile(file);
 		for (const [label, pattern] of [
-			["idea fuerza acotada", /queda escrita en la spec como `\[ASSUMED NN %\]` con su confianza \(salvo lo que «Tipo y confianza» manda preguntar o marcar `\[NEEDS-INPUT\]`\)/],
+			["idea fuerza por confianza", /queda escrita en la spec con su confianza: `\[ASSUMED NN %\]` si supera la confianza de la etapa, o `confirmada` si se preguntó antes de publicar \(ver «Tipo y confianza»\)/],
 			["Fase 2 paso 2 no confirma Para la spec", /como fuente confirmada \(las decisiones técnicas anotadas en `\*\*Para la spec\.\*\*` no: van a la tabla de la Fase 3, ver sus Reglas\)/],
-			["categorías técnicas", /Toda decisión técnica que el pedido no fija explícitamente se lista como inferencia[^\n]*Categorías típicas: datos \(¿migración\? ¿backfill\?\), estructura y seams, compatibilidad hacia atrás, plataformas y herramientas, mecanismo de verificación\. Lo de producto \(alcance, comportamiento visible, UX\/copys\) no es inferencia: una decisión de producto que llega sin cerrar es una fuga, punto \(6\) de «Tipo y confianza»/],
-			["tabla no se pregunta en A1", /La tabla NO se pregunta en A1:[^\n]*\(A2 pregunta las que quedan debajo del umbral y las fugas; A3 las deja asumidas\)/],
-			["Para la spec en Reglas", /Las decisiones técnicas anotadas en `\*\*Para la spec\.\*\*` del handoff NO están fijadas: cada una entra a la tabla como inferencia técnica con su propia confianza `NN %` contra `umbral spec`[^\n]*y cuenta para `k`\. Una respuesta del usuario \(en A2, o por `Solicitar cambios`\) pasa la fila a `confirmada`/],
+			["categorías técnicas", /Toda decisión técnica que el pedido no fija explícitamente se lista como inferencia[^\n]*Categorías típicas: datos \(¿migración\? ¿backfill\?\), estructura y seams, compatibilidad hacia atrás, plataformas y herramientas, mecanismo de verificación\. Lo de producto \(alcance, comportamiento visible, UX\/copys\) no es inferencia: una decisión de producto que llega sin cerrar es una fuga, punto \(7\) de «Tipo y confianza»/],
+			["Para la spec en Reglas", /Las decisiones técnicas anotadas en `\*\*Para la spec\.\*\*` del handoff NO están fijadas: cada una entra a la tabla como inferencia técnica con su propia confianza `NN %` contra `confianza spec`[^\n]*y, si se pregunta, cuenta para `k`\. Una respuesta del usuario \(a una pregunta de esta fase, o por `Solicitar cambios`\) pasa la fila a `confirmada`/],
 		] as const) {
 			if (!pattern.test(markdown)) problems.push(`${file}: falta ${label}`);
 		}
@@ -2170,14 +2292,231 @@ test("review #123: la Fase 3 de chiche-spec es técnica (lo de producto es fuga)
 		}
 	}
 	for (const [path, pattern] of [
-		["README.md", /`plan-approved` pregunta solo las inferencias técnicas que quedan debajo del umbral y las fugas de producto, y tampoco muestra el menú/],
-		["README.en.md", /`plan-approved` asks only the technical inferences below the threshold and the product leaks, and skips the final menu too/],
+		["README.md", /pregunta antes de publicar las inferencias técnicas con confianza en o debajo de la confianza de la spec y las fugas de producto/],
+		["README.en.md", /asks before publishing the technical inferences at or below the spec confidence and the product leaks/],
 	] as const) {
 		const row = (await readRepoFile(path)).split("\n").find((line) => line.startsWith("| **`chiche-spec`** |")) ?? "";
-		if (!pattern.test(row)) problems.push(`${path}: la fila chiche-spec no nombra las fugas de A2`);
+		if (!pattern.test(row)) problems.push(`${path}: la fila chiche-spec no nombra las fugas`);
 	}
 	// Review #123-10: la fila del contrato describe la regla del menú como la fija la doctrina.
 	const contractRow = (await readRepoFile(".chiche/project.md")).split("\n").find((line) => line.startsWith("| gate anti-drift SDD |")) ?? "";
-	if (!/la primera opcion, marcada `\(Recomendado\)`, es `chiche-run --autonomy A3` solo con `k = 0`, `f = 0` y `a = 0`, y `chiche-run` en otro caso/.test(contractRow)) problems.push("contrato: la fila de harness-gate describe la regla del menú distinto que la doctrina");
+	if (!/la primera opcion, marcada `\(Recomendado\)`, es `chiche-run --mode pr-reviewed` solo sin fugas ni asumidas del grill en o debajo de su confianza, y `chiche-run` en otro caso/.test(contractRow)) problems.push("contrato: la fila de harness-gate describe la regla del menú distinto que la doctrina");
 	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #130, capa 2 (CA-19 y CA-20): la posición del run. `chiche-run` deja `--autonomy` y los niveles con nombre y
+// pasa a `--mode <ask|pr|pr-reviewed>`; la conducta de `ask`, `pr` y `pr-reviewed` es, regla por regla, la de A1, A2 y
+// A3. Reemplazan a los tests del run que vivían en autonomy-gate (CA-8 y CA-11 del issue #102, review #114-5/6 y
+// CA-13 del issue #119), con el vocabulario nuevo.
+
+const RUN_SUBAGENT_HARNESSES: readonly Harness[] = ["claude", "antigravity", "pi"];
+const RUN_SUBAGENT_TITLE = "Run con subagente (solo con pr-reviewed y sin --inline)";
+// Lo que cada harness suma después de `[--inline]`, donde ya existía: Claude Code fija modelo y effort; Antigravity
+// fija el modelo y acepta `--effort` solo para descartarlo (por eso está en la firma y no en el atajo de la Fase 0); y
+// Codex, opencode y Pi nada (los dos primeros corren inline; en Pi el hijo hereda la sesión).
+const RUN_SIGNATURE_TAIL: Record<Harness, string> = { claude: " [--model M] [--effort E]", codex: "", opencode: "", pi: "", antigravity: " [--model M] [--effort E]" };
+const RUN_SHORTCUT_TAIL: Record<Harness, string> = { ...RUN_SIGNATURE_TAIL, antigravity: " [--model M]" };
+const RUN_INLINE_HARNESS_NAME: Partial<Record<Harness, string>> = { codex: "Codex", opencode: "opencode" };
+
+// Sección por título (niveles 2 a 4), hasta el próximo heading del mismo nivel o superior; los headings dentro de un
+// fence no cuentan.
+function runSection(markdown: string, heading: RegExp): string {
+	const lines = markdown.split("\n");
+	let fence = false;
+	let start = -1;
+	let level = 0;
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index] ?? "";
+		if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+		if (fence) continue;
+		const match = /^(#{2,4}) (.*)$/.exec(line);
+		if (!match) continue;
+		const depth = match[1]?.length ?? 0;
+		if (start === -1) {
+			if (heading.test(match[2] ?? "")) {
+				start = index;
+				level = depth;
+			}
+			continue;
+		}
+		if (depth <= level) return lines.slice(start, index).join("\n");
+	}
+	return start === -1 ? "" : lines.slice(start).join("\n");
+}
+
+function missingIn(text: string, patterns: RegExp[]): string[] {
+	return patterns.filter((pattern) => !pattern.test(text)).map((pattern) => `falta ${pattern}`);
+}
+
+// Los bloques `autonomy-controls` y `autonomy-resolve` son compartidos (los gatea autonomy-gate) y nombran los niveles
+// viejos a propósito, en el mapa de equivalentes de `--autonomy`.
+function withoutAutonomyBlocks(markdown: string): string {
+	return markdown.replace(/<!-- (autonomy-[a-z]+):start -->\n[\s\S]*?\n<!-- \1:end -->/g, (block) => block.replace(/[^\n]/g, ""));
+}
+
+test("#130 CA-19: la firma de chiche-run lleva [--mode <ask|pr|pr-reviewed>] [--inline], --inline/--model/--effort exigen pr-reviewed con su diagnóstico literal, «Run con subagente» se titula por la posición en Claude Code, Antigravity y Pi, y Codex y opencode corren pr-reviewed inline", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const prefix = escapeRegExp(prefixes[harness]);
+		const args = runSection(markdown, /^Argumentos$/);
+		const signature = fencedBlocks(args)[0]?.content ?? "";
+		if (!signature.endsWith(` [--no-pr] [--base <branch>] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SIGNATURE_TAIL[harness]}`)) problems.push(`${file}: la firma no termina en [--no-pr] [--base <branch>] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SIGNATURE_TAIL[harness]}: ${signature}`);
+		const shortcut = `Atajo: ${prefixes[harness]}chiche-run <spec|#NN> [--no-pr] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SHORTCUT_TAIL[harness]} saltea este menu.`;
+		if (!runSection(markdown, /^Fase 0 — /).includes(shortcut)) problems.push(`${file}: la Fase 0 no trae '${shortcut}'`);
+		problems.push(...missingIn(args, [
+			new RegExp(`^- \`--mode <ask\\|pr\\|pr-reviewed>\` — posición del run en esta corrida; manda sobre la fila \`run\` de \`## Autonomy\` del contrato\\. \`ask\` pregunta ante choques del plan y desviaciones de alcance y ofrece el menú post-PR; \`pr\` corre hasta el PR sin preguntar \\(encadena \`${prefix}chiche-spec <target>\` sin flags y \`${prefix}chiche-init --defaults\` si faltan precondiciones, no frena ante choques del plan con políticas y resuelve desviaciones con sesgo mínimo seguro\\), lanza el \`Code review\` y termina; \`pr-reviewed\` [^\\n]*hasta 2 rondas \\(Fase 6\\)\\. Ver «Controles de autonomía» y «Controles efectivos»\\.$`, "m"),
+			/^- `--inline` — solo con `pr-reviewed` \(por flag o por contrato\): [^\n]*Con otra posición aborta con `--inline exige --mode pr-reviewed`\.$/m,
+		]).map((problem) => `${file} ## Argumentos: ${problem}`));
+		const inlineName = RUN_INLINE_HARNESS_NAME[harness];
+		if (inlineName) {
+			problems.push(...missingIn(args, [
+				new RegExp(`En ${inlineName} no hay subagentes: con \`pr-reviewed\` el run corre inline en esta sesión con la conducta de \`pr\` más la corrección automática del feedback de la Fase 6, hasta 2 rondas`),
+				new RegExp(`\`run: pr-reviewed · corre inline en ${inlineName}\``),
+				/`--model` y `--effort` abortan con `--model\/--effort: este harness corre pr-reviewed inline`/,
+				/^- `--mode <ask\|pr\|pr-reviewed>` — [^\n]*`pr-reviewed` corre inline con la conducta de `pr` más la corrección automática del feedback del review, hasta 2 rondas \(Fase 6\)\./m,
+			]).map((problem) => `${file} ## Argumentos: ${problem}`));
+			if (/^## Run con subagente/m.test(markdown)) problems.push(`${file}: no tiene subagentes y no debe ganar «Run con subagente»`);
+			if (/exigen --mode pr-reviewed/.test(markdown)) problems.push(`${file}: --model/--effort no existen acá: el único diagnóstico es el de pr-reviewed inline`);
+			continue;
+		}
+		const headings = markdown.split("\n").filter((line) => line.startsWith("## Run con subagente"));
+		if (headings.length !== 1 || headings[0] !== `## ${RUN_SUBAGENT_TITLE}`) problems.push(`${file}: el heading no es literalmente '## ${RUN_SUBAGENT_TITLE}': ${headings.join(" / ")}`);
+		const subagent = runSection(markdown, /^Run con subagente /);
+		problems.push(...missingIn(subagent, [
+			/^Con posición `pr-reviewed` y sin `--inline`, la sesión es \*\*lanzadora, no corredora\*\*/m,
+			/corre la Fase 6 de `pr-reviewed` él mismo/,
+			/Con `--inline` nada de esta sección aplica: el run corre en esta sesión con la conducta de `pr-reviewed`/,
+			/con la doctrina de `pr-reviewed`: sin preguntar/,
+			new RegExp(`encadenaría en background \`${prefix}chiche-init --defaults\` o \`${prefix}chiche-spec <target>\` sobre algo que nadie revisó`),
+			new RegExp(`^1\\. \\*\\*Contrato\\*\\* \\(Fase 1, paso 1\\): [^\\n]*Si no existe: correr \`${prefix}chiche-init --defaults\` y seguir\\.$`, "m"),
+			new RegExp(`^2\\. \\*\\*Spec\\*\\* \\(Fase 1, pasos 2 y 3\\): [^\\n]*Si no: encadenar \`${prefix}chiche-spec <target>\` en esta sesión, sin flags, y lanzar sobre la spec resultante`, "m"),
+			new RegExp(`\`${prefix}chiche-run <target> --mode pr-reviewed --inline\` \\(más \`--no-pr\`/\`--base\` si vinieron\\)`),
+			/^- Con `ask` o `pr`, o con `--inline`, nada de lo anterior aparece y el run corre en esta sesión\.$/m,
+		]).map((problem) => `${file} «Run con subagente»: ${problem}`));
+		if (harness === "pi") {
+			problems.push(...missingIn(subagent, [/tool `subagent`/, /agent: "implementer"/, /background: true/, /PI_SUBAGENT_DEPTH=1/, /En Pi no existen `--model` ni `--effort`/]).map((problem) => `${file}: ${problem}`));
+			// CA-25 (el código lo cambia otra unidad): la tool de Pi lleva `mode`, no `autonomy`.
+			if (!/invocá inmediatamente `launch_sdd_run` con ese target exacto, más `mode: <posición>` si vino `--mode <posición>`, y terminá el turno/.test(args)) problems.push(`${file}: launch_sdd_run no lleva mode: <posición>`);
+			if (/exigen --mode pr-reviewed/.test(markdown)) problems.push(`${file}: en Pi no existen --model ni --effort y no hay diagnóstico que dar`);
+			continue;
+		}
+		// Pi no nombra al subagente en «Ownership y tareas»: su lanzador delega con la tool `subagent` y el hijo no anida.
+		problems.push(...missingIn(runSection(markdown, /^Ownership y tareas$/), [
+			/lanzado por «Run con subagente» en `pr-reviewed`\) conserva ownership/,
+			/^- La sesión que lanza en `pr-reviewed` sin `--inline` no es el agente que corre/m,
+		]).map((problem) => `${file} Ownership y tareas: ${problem}`));
+		problems.push(...missingIn(args, [/[Ss]olo (?:son válidos|es válido) con `pr-reviewed` \(por flag o por contrato\); con otra posición abort(?:an|a) con `--model\/--effort exigen --mode pr-reviewed`/]).map((problem) => `${file} ## Argumentos: ${problem}`));
+		problems.push(...missingIn(subagent, [
+			/^- `pr-reviewed` no pregunta: `model` es `--model` si vino y, si no, el escalón derivado/m,
+			/solo (?:son válidos|es válido) con `pr-reviewed`: con otra posición el run aborta con `--model\/--effort exigen --mode pr-reviewed` antes de cualquier mutación/,
+		]).map((problem) => `${file} «Run con subagente»: ${problem}`));
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-19: la conducta de ask, pr y pr-reviewed es la de A1, A2 y A3 en los cinco harnesses: precondiciones y encadenamiento, choques del plan con políticas, desviaciones de alcance, preflight de stack, snapshot de la Fase 5 y MUST DO", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const prefix = escapeRegExp(prefixes[harness]);
+		problems.push(...missingIn(runSection(markdown, /^Fase 1 — /), [
+			new RegExp(`^1\\. \\*\\*Contrato\\*\\*: [^\\n]*Si no existe en ninguno de los dos: con \`ask\` → ofrecer \`${prefix}chiche-init\` ahí mismo; con \`pr\` o \`pr-reviewed\` → correr \`${prefix}chiche-init --defaults\` y seguir\\.`, "m"),
+			new RegExp(`^2\\. \\*\\*Spec\\*\\*: [^\\n]*Pedido libre sin spec → frenar: ofrecer \`${prefix}chiche-spec <pedido>\` \\(\`ask\`\\) o encadenar \`${prefix}chiche-spec <pedido>\` sin flags \\(\`pr\` o \`pr-reviewed\`\\)\\. La spec encadenada pregunta lo que pida su propia confianza: la posición del run no la cambia\\. NO improvisar una spec`, "m"),
+		]).map((problem) => `${file} Fase 1: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 2 — /), [
+			/si la spec entera no cabe, frenar y preguntar: [^\n]*; con `pr` o `pr-reviewed` → seguir y que el gate del cierre juzgue\./,
+			/`preguntar` → frenar y preguntar antes de implementar; con `pr` o `pr-reviewed`, no agregar la dep: replantear sin ella o dejarla como FALLA honesta\./,
+		]).map((problem) => `${file} Fase 2: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 3 — /), [
+			/^4\. \*\*Desviaciones\*\*: [^\n]*si cambia el alcance, con `ask` → preguntar con [^\n]* y editar la spec según la respuesta; con `pr` o `pr-reviewed` → abortar honesto con el estado committeado en el branch\./m,
+		]).map((problem) => `${file} Fase 3: ${problem}`));
+		problems.push(...missingIn(delimitedDoctrine(markdown, "chiche-run-flow"), [
+			/si cambia el alcance, preguntar \(con `pr` o `pr-reviewed`, abortar honesto con el estado committeado en el branch\)\./,
+			/La oferta existe solo en `ask`: con `pr` se lanza `Code review` y la corrida termina; con `pr-reviewed` corren `Code review` y `Resolver feedback automáticamente` sin preguntar \(ver «Por posición» en la Fase 6\)\./,
+		]).map((problem) => `${file} chiche-run-flow: ${problem}`));
+		problems.push(...missingIn(delimitedDoctrine(markdown, "chiche-run-stack"), [
+			/Si falta la extensión: con `ask`, ofrecer `gh extension install github\/gh-stack` ahí mismo y seguir si se instala; con `pr` o `pr-reviewed` frena antes de ramificar e imprime el comando exacto\. Una versión vieja de `gh` o de `git` frena en las tres posiciones, con el diagnóstico\./,
+		]).map((problem) => `${file} chiche-run-stack: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 5 — /), [
+			/si la posición es `ask` o `pr-reviewed` y la corrida creó un PR \(con `pr` se lanza el review y la corrida termina\)/,
+		]).map((problem) => `${file} Fase 5: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^MUST DO$/), [
+			new RegExp(`^- Exigir spec y contrato antes de tocar código; con \`pr\` o \`pr-reviewed\` encadenarlos \\(\`${prefix}chiche-spec <target>\` sin flags y \`${prefix}chiche-init --defaults\`\\), con \`ask\` ofrecerlos\\.$`, "m"),
+			/^- Después de un `Run completo` con PR en `ask`, ofrecer la remediación opt-in/m,
+		]).map((problem) => `${file} MUST DO: ${problem}`));
+		if (harness === "codex" && !/^En Codex, [^\n]*Con `pr` o `pr-reviewed`, saltear únicamente los gates que este skill declara salteables; nunca saltear permisos para efectos externos\.$/m.test(markdown)) problems.push(`${file}: la capa de Codex no acota qué gates se saltean con pr o pr-reviewed`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-19 (#119 CA-13): lanzado desde chiche-spec --until pr, chiche-run arranca en la posición del contrato, no vuelve a encadenar la spec, su traza repite until: pr y sigue sin aceptar --until, en los cinco harnesses", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		problems.push(...missingIn(runSection(markdown, /^Fase 1 — /), [
+			/^2\. \*\*Spec\*\*: [^\n]*Cuando esta sesión viene de `[^`]*chiche-spec --until pr` \(la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `leído de <fuente>`\./m,
+			/^2\. \*\*Spec\*\*: [^\n]*Este skill no acepta `--until`: `chiche-spec` lo consume y lanza el run sin flags, así que el run arranca en la posición del contrato\.$/m,
+		]).map((problem) => `${file} Fase 1: ${problem}`));
+		const signature = fencedBlocks(runSection(markdown, /^Argumentos$/))[0]?.content ?? "";
+		if (/--until/.test(signature)) problems.push(`${file}: la firma no debe ganar --until`);
+		if (!RUN_SUBAGENT_HARNESSES.includes(harness)) continue;
+		if (!/Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(runSection(markdown, /^Precondiciones del lanzador$/))) problems.push(`${file}: las precondiciones del lanzador no cierran el doble encadenado`);
+		if (!/^- Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `leído de <fuente>`, y el prompt del subagente lleva una línea que lo dice para que su traza lo repita/m.test(runSection(markdown, /^Traza$/))) problems.push(`${file}: la traza del lanzador no suma until: pr después de leído de <fuente>`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-20: la Fase 6 de chiche-run fija la conducta por posición en los cinco harnesses: ask ofrece el menú, pr lanza el review y termina, y pr-reviewed corrige solo, hasta 2 rondas, con el tope de 30 minutos y los reportes Feedback resuelto y SEGUIMIENTO DE FEEDBACK DETENIDO", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const phase6 = runSection(await readRepoFile(file), /^Fase 6 — /);
+		problems.push(...missingIn(phase6, [
+			/^1\. \*\*Baseline sin carrera\*\*: con posición `ask` o `pr-reviewed`, inmediatamente después de crear el PR/m,
+			/Con `pr` o `pr-reviewed` no se pregunta: ver «Por posición»\. Tampoco ofrecerla con `--no-pr`/,
+			/^\*\*Por posición\.\*\* Con `ask` rige el menú del paso 2\. Con `pr` no se pregunta: se lanza `Code review` \(con la rama de este harness\) y la corrida termina sin esperar; los findings los lee el humano\. Con `pr-reviewed` no se pregunta: se ejecutan `Code review` y `Resolver feedback automáticamente` y el run corrige el feedback del review solo, hasta 2 rondas; al tercer lote de feedback se dejan los threads abiertos y se reporta\./m,
+			/Corre en el mismo agente que corrió el run \(el `implementer` delegado, o la sesión con `--inline`\); el lanzador solo releva/,
+			/Sin `\.github\/workflows\/claude-review\.yml`, el review corre en ese mismo agente con el code review nativo \(`[^`]*code-review[^`]*` sobre el PR\), sin lanzar otro subagente/,
+			/[Ss]i el code review nativo no está disponible[^\n]*avisar y seguir, sin bloquear el run/,
+			/El snapshot del paso 1 y la conservación del worktree aplican también en `pr-reviewed`\./,
+			/La espera tiene tope: 30 minutos sin feedback nuevo terminan el seguimiento: `Feedback resuelto` si todo finding válido quedó atendido y `SEGUIMIENTO DE FEEDBACK DETENIDO` solo con trabajo pendiente; al cortar por el tope de 2 rondas se emite `SEGUIMIENTO DE FEEDBACK DETENIDO` con los threads abiertos listados\. En los dos casos se limpia el worktree si está limpio\.$/m,
+			/^Al salir, emitir `Feedback resuelto` solo si todo finding válido detectado quedó atendido y no hay bloqueos; [^\n]*usar `SEGUIMIENTO DE FEEDBACK DETENIDO`\./m,
+		]).map((problem) => `${file} Fase 6: ${problem}`));
+		if (/ciclos de corrección|tope de 2 ciclos|Por nivel/.test(phase6)) problems.push(`${file} Fase 6: sigue contando ciclos o hablando de niveles`);
+		// Review #114-5/6: sin GHA, `pr` corre el review nativo inline donde no hay subagente que lo corra.
+		if ((harness === "codex" || harness === "opencode") && !/Con `pr` y sin GHA, el review nativo corre inline \(`[^`]*code-review <PR>`\) y la corrida termina\./.test(phase6)) problems.push(`${file}: pr sin GHA no corre el review nativo inline`);
+		if (harness === "pi" && !/Con `pr` y sin GHA ni la tool `subagent`, el review nativo corre inline \(`\/skill:code-review <PR>`\) y la corrida termina\./.test(phase6)) problems.push(`${file}: pr sin GHA ni subagent no corre el review nativo inline`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+// Los nombres de nivel, `--autonomy` y el vocabulario del resolver viejo no pueden quedar fuera de los bloques
+// compartidos. El aborto por fuga de `chiche-spec` tampoco: desde 6.0.0 una fuga se trata por confianza y nunca aborta.
+const RUN_RETIRED_WORDS = /supervised|plan-approved|unattended|\bA[0-5]\b|--autonomy|Rehearsed|unrehearsed|umbral grill|umbral spec|nivel efectivo|Niveles de autonomía|Nivel efectivo|Nivel sugerido|Por nivel|nivel de autonomía|ciclos de corrección|decisión de producto sin cerrar/g;
+
+export function retiredRunWordProblems(file: string, markdown: string): string[] {
+	const problems: string[] = [];
+	withoutAutonomyBlocks(markdown).split("\n").forEach((line, index) => {
+		const hits = [...new Set(line.match(RUN_RETIRED_WORDS) ?? [])];
+		if (hits.length > 0) problems.push(`${file}:${index + 1}: ${hits.join(", ")}`);
+	});
+	return problems;
+}
+
+test("#130 CA-19: fuera de los bloques autonomy-*, ningún chiche-run nombra un nivel, --autonomy, el nivel efectivo ni el aborto por fuga; el autotest prueba que el chequeo ve una línea vieja y saltea los bloques", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		problems.push(...retiredRunWordProblems(file, await readRepoFile(file)));
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+	const synthetic = ["uno", "<!-- autonomy-resolve:start -->", "`unattended` o `A3` → `usá --mode pr-reviewed`", "<!-- autonomy-resolve:end -->", "con A2 o A3 frena", "ALTA 4 / MEDIA 1", "`--autonomy A3`"].join("\n");
+	assert.deepEqual(retiredRunWordProblems("x.md", synthetic), ["x.md:5: A2, A3", "x.md:7: --autonomy, A3"]);
 });

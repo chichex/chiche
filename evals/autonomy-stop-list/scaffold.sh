@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scaffold del caso autonomy-stop-list-a3: copia el fixture mini-cli-publish al
+# Scaffold del caso autonomy-stop-list: copia el fixture mini-cli-publish al
 # workspace del run y lo deja como repo git con branch main, porque
 # `/chiche-run --inline --no-pr` ramifica desde la base y commitea en un branch.
 # `claude plugin eval` lo ejecuta con cwd = workspace temporal del agente y con

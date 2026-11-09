@@ -86,17 +86,33 @@ function missing(text: string, patterns: RegExp[]): string[] {
 	return patterns.filter((pattern) => !pattern.test(text)).map((pattern) => `falta ${pattern}`);
 }
 
+// Issue #130: los dos bloques compartidos de autonomía que lleva chiche-land. `autonomy-resolve` conserva
+// el mapa de equivalentes de `--autonomy`, así que el vocabulario retirado se busca fuera de ellos.
+const AUTONOMY_BLOCKS = ["autonomy-controls", "autonomy-resolve"] as const;
+
+function outsideAutonomyBlocks(markdown: string): string {
+	return markdown.replace(/<!-- autonomy-(?:controls|resolve):start -->\n[\s\S]*?\n<!-- autonomy-(?:controls|resolve):end -->/g, "");
+}
+
+// Issue #130 CA-14: palabras del modelo de niveles que no pueden quedar fuera de los bloques compartidos.
+const RETIRED_AUTONOMY_WORDS = /--autonomy|\bsupervised\b|\bplan-approved\b|\bunattended\b|\bA[0-5]\b|Rehearsed|unrehearsed|umbral grill|umbral spec|nivel efectivo|Niveles de autonomía|Nivel efectivo|Nivel sugerido|fila `land`/;
+
+function retiredAutonomyWords(text: string): string[] {
+	return text.split("\n").filter((line) => RETIRED_AUTONOMY_WORDS.test(line));
+}
+
 // Doctrina por CA, la misma en los cuatro harnesses.
 const DOCTRINE: Record<string, RegExp[]> = {
 	"CA-13": [
-		/\/chiche-land \[<stack#> \| <PR#> \| <URL de PR> \.\.\.\] \[--method merge\|squash\|rebase\] \[--wait N\] \[--dry-run\] \[--clean-only\]/,
+		// Issue #130 CA-24: la firma termina en `[--clean-only]`; `--autonomy` se retiró en 6.0.0.
+		/^\/chiche-land \[<stack#> \| <PR#> \| <URL de PR> \.\.\.\] \[--method merge\|squash\|rebase\] \[--wait N\] \[--dry-run\] \[--clean-only\]$/m,
 		/Pelado[\s\S]*lista los PRs abiertos del repo agrupados por stack[\s\S]*pregunta cuál/,
 		/`--clean-only` \(sin targets\)[\s\S]*salta el merge[\s\S]*checkout principal[\s\S]*limpieza local[\s\S]*barrido[\s\S]*reporte/,
 		/`Solo limpiar y sincronizar`[\s\S]*equivale a `--clean-only`/,
 		/`<PR#>` dentro de un stack significa «hasta ese PR inclusive»[\s\S]*`gh stack merge <PR>`[\s\S]*el plan lista exactamente qué PRs aterrizan/,
 		/Un PR sin stack es un stack de uno/,
 		/`isCrossRepository`[\s\S]*se rechazan con diagnóstico/,
-		/No existe `--yes`, y `--autonomy` solo acepta `supervised`/,
+		/^- No existe `--yes`: la confirmación del plan es siempre humana y ningún control de autonomía la saltea \(ver «Controles de autonomía» y «Controles efectivos»\)\.$/m,
 	],
 	"CA-14": [
 		/`gh auth status`/,
@@ -502,11 +518,12 @@ test("#84 CA-4: la doctrina de chiche-land no ejecuta `git reset --hard` ni `git
 
 test("PR #91 CA-14 (issue #102 CA-22, review #113-10): fuera de los bloques compartidos de autonomía, ninguna línea de chiche-land frena el merge por la stop list del contrato, y nadie cita ## Limites", async () => {
 	for (const harness of HARNESSES) {
-		// Review #113-10: los bloques compartidos (`autonomy-levels`, `autonomy-resolve`) se sacan enteros con
-		// sus markers, en vez de eximir frases; el bloque nombra él mismo la excepción de merge de chiche-land.
+		// Review #113-10: los bloques compartidos (`autonomy-controls`, que desde el issue #130 reemplaza a
+		// `autonomy-levels`, y `autonomy-resolve`) se sacan enteros con sus markers, en vez de eximir frases;
+		// el bloque nombra él mismo la excepción de merge de chiche-land.
 		const markdown = await readRepoFile(`${harness}/chiche-land/SKILL.md`);
-		for (const block of ["autonomy-levels", "autonomy-resolve"]) assert.ok(delimitedBlock(markdown, block) !== null, `${harness}/chiche-land/SKILL.md: bloque ${block}`);
-		const outside = markdown.replace(/<!-- autonomy-(?:levels|resolve):start -->\n[\s\S]*?\n<!-- autonomy-(?:levels|resolve):end -->/g, "");
+		for (const block of AUTONOMY_BLOCKS) assert.ok(delimitedBlock(markdown, block) !== null, `${harness}/chiche-land/SKILL.md: bloque ${block}`);
+		const outside = outsideAutonomyBlocks(markdown);
 		const lines = outside.split("\n");
 		const frena = lines.filter((line) => (/stop list/.test(line) && /\b(frena|frenar|manda)\b|por encima/.test(line) && !/no (?:los )?frenan?\b/.test(line)) || /contrato[^.]*manda/.test(line));
 		assert.deepEqual(frena, [], `${harness}/chiche-land/SKILL.md`);
@@ -515,7 +532,11 @@ test("PR #91 CA-14 (issue #102 CA-22, review #113-10): fuera de los bloques comp
 	}
 });
 
-test("issue #102 CA-22: chiche-land conserva la excepción de merge por fila de la stop list y acepta --autonomy solo en supervised", async () => {
+test("issue #130 CA-24 (issue #102 CA-22): chiche-land conserva la excepción de merge por fila de la stop list, no lleva --autonomy en la firma y la confirmación del plan es siempre humana, sin nombrar niveles", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	// La guarda distingue el texto de 5.x del de 6.0.0.
+	assert.equal(retiredAutonomyWords("- No existe `--yes`, y `--autonomy` solo acepta `supervised`: la confirmación del plan es siempre humana.\n- Lee la fila `land` del contrato solo para la traza. Ver «Niveles de autonomía» y «Nivel efectivo».").length, 2, "la guarda reconoce el texto viejo");
+	assert.deepEqual(retiredAutonomyWords("- No existe `--yes`: la confirmación del plan es siempre humana y ningún control de autonomía la saltea (ver «Controles de autonomía» y «Controles efectivos»)."), [], "la guarda no marca el texto nuevo");
 	for (const harness of HARNESSES) {
 		const file = `${harness}/chiche-land/SKILL.md`;
 		const markdown = await readRepoFile(file);
@@ -524,8 +545,12 @@ test("issue #102 CA-22: chiche-land conserva la excepción de merge por fila de 
 		assert.match(preflight, /el plan de la Fase 2 cita esa fila textual y avisa que confirmar la pisa/, `${file}: el plan cita la fila`);
 		assert.match(preflight, /En un contrato sin `## Autonomy`, las prohibiciones de merge de su `## Limites` tampoco frenan este skill: el plan las cita textuales y avisa que confirmar las pisa\./, `${file}: la excepción cubre la prosa de un repo sin migrar (review #113-2)`);
 		assert.match(section(markdown, /^## MUST DO$/), /^- Respetar la stop list de `## Autonomy` del contrato, salvo los comandos exactos del plan confirmado \(`gh pr merge <N> --<method>` y `gh stack merge <N> --merge-method <m> --yes`\)/m, `${file}: MUST DO`);
-		assert.match(section(markdown, /^## Argumentos$/), /`--autonomy <level>`[^\n]*aborta con cualquier valor distinto de `supervised`\/`A1`/, `${file}: --autonomy solo supervised`);
-		assert.ok(delimitedBlock(markdown, "autonomy-levels") !== null && delimitedBlock(markdown, "autonomy-resolve") !== null, `${file}: bloques autonomy-levels y autonomy-resolve`);
+		const args = outsideAutonomyBlocks(section(markdown, /^## Argumentos$/));
+		const signature = args.split("\n").find((line) => line.startsWith(`${prefixes[harness]}chiche-land `)) ?? "";
+		assert.equal(signature, `${prefixes[harness]}chiche-land [<stack#> | <PR#> | <URL de PR> ...] [--method merge|squash|rebase] [--wait N] [--dry-run] [--clean-only]`, `${file}: firma sin --autonomy`);
+		assert.match(args, /^- No existe `--yes`: la confirmación del plan es siempre humana y ningún control de autonomía la saltea \(ver «Controles de autonomía» y «Controles efectivos»\)\.$/m, `${file}: la confirmación es siempre humana`);
+		for (const block of AUTONOMY_BLOCKS) assert.ok(delimitedBlock(markdown, block) !== null, `${file}: bloque ${block}`);
+		assert.deepEqual(retiredAutonomyWords(outsideAutonomyBlocks(markdown)), [], `${file}: fuera de los bloques compartidos no queda el modelo de niveles`);
 	}
 });
 

@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { type AutonomyCode, parseAutonomyLevel, withAutonomy } from "./autonomy.ts";
+import { parseRunMode, type RunMode, withFlag } from "./autonomy.ts";
 
 import type { EvidenceRef, IssueRef } from "../workflow-resolution/index.ts";
 import { exactObject, isRecord } from "./validation.ts";
@@ -25,7 +25,8 @@ export interface DirectRunRequestV1 {
 	target: DirectIssueTargetV1 | DirectSpecTargetV1;
 	summary: string;
 	evidence: EvidenceRef[];
-	autonomy?: AutonomyCode;
+	// Issue #130, CA-25: posición del run (`ask`, `pr` o `pr-reviewed`); viaja a /chiche-run como --mode <posición>.
+	mode?: RunMode;
 }
 
 export interface DirectGrillRequestV1 {
@@ -82,8 +83,9 @@ export interface DirectGrillLaunchDescriptor {
 export type DirectWorkflowLaunchDescriptor = DirectRunLaunchDescriptor | DirectGrillLaunchDescriptor;
 
 const REQUEST_FIELDS = ["version", "kind", "repo", "cwd", "target", "summary", "evidence"] as const;
-// Issue #102 (review #114-7): `autonomy` opcional, el código A1–A3 que /chiche-run recibe como --autonomy.
-const REQUEST_OPTIONAL_FIELDS = ["autonomy"] as const;
+// Issue #130, CA-25: `mode` es el único campo opcional. El campo del dial por niveles se retiró en 6.0.0:
+// un pedido que lo trae cae en `extra-field` como cualquier otro campo desconocido.
+const REQUEST_OPTIONAL_FIELDS = ["mode"] as const;
 const ISSUE_TARGET_FIELDS = ["type", "canonicalReference", "issue"] as const;
 const SPEC_TARGET_FIELDS = ["type", "canonicalReference", "path", "issue"] as const;
 const ISSUE_FIELDS = ["repository", "number"] as const;
@@ -190,14 +192,14 @@ export function validateDirectRunRequest(input: unknown): DirectRunValidation {
 		diagnostics.push({ path: "$.summary", code: "invalid-value", message: `Summary exceeds ${MAX_SUMMARY_LENGTH} characters` });
 	}
 	const evidence = evidenceValue(object.evidence, diagnostics);
-	let autonomy: AutonomyCode | undefined;
-	if (object.autonomy !== undefined) {
-		if (typeof object.autonomy !== "string") {
-			diagnostics.push({ path: "$.autonomy", code: "invalid-type", message: "Expected an autonomy level (A1-A3 or its name)" });
+	let mode: RunMode | undefined;
+	if (object.mode !== undefined) {
+		if (typeof object.mode !== "string") {
+			diagnostics.push({ path: "$.mode", code: "invalid-type", message: "Expected a run mode (ask, pr or pr-reviewed)" });
 		} else {
-			const parsed = parseAutonomyLevel(object.autonomy);
-			if (parsed.ok) autonomy = parsed.code;
-			else diagnostics.push({ path: "$.autonomy", code: "invalid-value", message: parsed.message });
+			const parsed = parseRunMode(object.mode);
+			if (parsed.ok) mode = parsed.mode;
+			else diagnostics.push({ path: "$.mode", code: "invalid-value", message: parsed.message });
 		}
 	}
 
@@ -266,7 +268,7 @@ export function validateDirectRunRequest(input: unknown): DirectRunValidation {
 			target,
 			summary: object.summary as string,
 			evidence,
-			...(autonomy === undefined ? {} : { autonomy }),
+			...(mode === undefined ? {} : { mode }),
 		},
 	};
 }
@@ -280,9 +282,9 @@ export function validateDirectGrillRequest(input: unknown):
 			? { ok: false, diagnostics: [{ path: "$", code: "invalid-value", message: "Expected kind=grill" }] }
 			: invalid;
 	}
-	// `autonomy` es opcional solo en el run: un grill lo rechaza en vez de ignorarlo (ronda 2, #116-22).
-	if (Object.hasOwn(input, "autonomy")) {
-		return { ok: false, diagnostics: [{ path: "$.autonomy", code: "extra-field", message: "Unexpected field autonomy on a grill request" }] };
+	// `mode` es opcional solo en el run: un grill lo rechaza en vez de ignorarlo (ronda 2, #116-22; issue #130, CA-25).
+	if (Object.hasOwn(input, "mode")) {
+		return { ok: false, diagnostics: [{ path: "$.mode", code: "extra-field", message: "Unexpected field mode on a grill request" }] };
 	}
 	const runValidation = validateDirectRunRequest({ ...input, kind: "sdd-run" });
 	if (!runValidation.ok) return runValidation;
@@ -335,7 +337,7 @@ export function describeDirectRun(request: DirectRunRequestV1): DirectRunLaunchD
 		},
 		skill: {
 			name: "chiche-run",
-			args: withAutonomy(target.type === "issue" ? `#${target.issue.number}` : target.path, request.autonomy),
+			args: withFlag(target.type === "issue" ? `#${target.issue.number}` : target.path, "--mode", request.mode),
 		},
 	};
 }
