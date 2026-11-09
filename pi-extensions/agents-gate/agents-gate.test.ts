@@ -1756,18 +1756,18 @@ const SUBAGENT_OWNERSHIP_DOCTRINE: RegExp[] = [
 ];
 
 // CA-8: el parrafo Claude de chiche-spec (fuera de chiche-spec-flow) reusa la
-// doctrina y conserva los literales que harness-gate ya exige. Issue #102 CA-8
-// y CA-9: la opcion es `chiche-run --autonomy A3` y `chiche-run` propaga el nivel.
+// doctrina y conserva los literales que harness-gate ya exige. Issue #130 CA-18:
+// la opcion es `chiche-run --mode pr-reviewed` y `chiche-run` se lanza sin flags.
 const SDD_SPEC_SUBAGENT_DOCTRINE: RegExp[] = [
-	/carga el skill `chiche-run` sobre el target con `--autonomy A3` \(`\/chiche-run <target> --autonomy A3`\)/,
+	/carga el skill `chiche-run` sobre el target con `--mode pr-reviewed` \(`\/chiche-run <target> --mode pr-reviewed`\)/,
 	/sigue la sección «Run con subagente» de `chiche-run`/,
 	/imprime la traza sin preguntar/,
 	/subagent_type: "implementer"/,
 	/run_in_background/,
 	/`model` y `effort`/,
 	/`general-purpose`[\s\S]*(anunci|avis)/i,
-	/`\/chiche-run <target> --autonomy A3 --inline`/,
-	/con `--autonomy <level>` si esta corrida lo recibió/,
+	/`\/chiche-run <target> --mode pr-reviewed --inline`/,
+	/carga el skill `chiche-run` sobre el target en esta sesión, sin flags \(`\/chiche-run <target>`\): el run lee su posición del contrato/,
 ];
 
 function sliceBetween(markdown: string, start: RegExp, end: RegExp): string | null {
