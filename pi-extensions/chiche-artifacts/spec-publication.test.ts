@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { parseSddArtifact } from "./index.ts";
 import {
-	persistSpecPublication,
+	persistSpecPublication, specPublicationEvents,
 	validateSpecPublication,
 	type SpecPublicationPorts,
 } from "./spec-publication.ts";
@@ -764,5 +764,10 @@ test("#134 CA-16: a new issue created in a repository other than the spec's writ
 	assert.match(published, /^<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=acme\/backlog#5; grill=session%2033%2F%C3%A1; superseded-by=none -->$/m);
 	const parsed = parseSddArtifact(published);
 	assert.equal(parsed.kind === "metadata" && parsed.metadata.type === "spec" ? parsed.metadata.issue : undefined, "acme/backlog#5");
-	if (result.ok) assert.deepEqual(result.receipt.documents[0]?.destinations, ["issue:acme/backlog#5"]);
+	if (result.ok) {
+		assert.deepEqual(result.receipt.documents[0]?.destinations, ["issue:acme/backlog#5"]);
+		// Review #140-6: el campo `spec` de los eventos lleva la misma referencia calificada que el marker.
+		const events = specPublicationEvents(result.published, { approved: false, spec: null });
+		assert.deepEqual(events.map((event) => [event.event, event.issue, event.spec]), [["spec.approved", "acme/backlog#5", "acme/backlog#5"]]);
+	}
 });

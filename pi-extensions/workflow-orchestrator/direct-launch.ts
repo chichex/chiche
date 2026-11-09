@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { publicationSettings } from "../lib/publication.ts";
+import { readPublicationSettings } from "../lib/publication.ts";
 import { artifactReadDirs, declaredArtifactDir, localArtifactDir, readProjectContract, resolveArtifactName, resolveGitCommonDir, trackedArtifactDirs } from "../lib/chiche-paths.ts";
 import { parseSddArtifact } from "../chiche-artifacts/index.ts";
 import { inspectMarkdownArtifact } from "../workflow-resolution/index.ts";
@@ -179,27 +179,25 @@ export async function declaredIssueRepository(
 	root: string,
 	readFile: (path: string, encoding: "utf8") => Promise<string>,
 ): Promise<string | null> {
-	for (const directory of [".chiche", ".sdd"]) {
-		try {
-			return canonicalRepository(publicationSettings(await readFile(join(root, directory, "project.md"), "utf8")).repo ?? "");
-		} catch (error) {
-			// Solo un contrato ausente (ENOENT) cae al siguiente lugar; uno ilegible no declara nada, como en hasCanonicalContract.
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
-		}
-	}
-	return null;
+	// El mismo lector que persist_sdd_spec (review #140, simplificación): .chiche/project.md y, solo ante ENOENT, .sdd/project.md.
+	return canonicalRepository((await readPublicationSettings(root, (path) => readFile(path, "utf8"))).repo ?? "");
+}
+
+export interface ResolveIssueProjectOptions {
+	// Review #140-8: el repo declarado entra explícito desde launch_sdd_run; /grill (direct-grill) no lo pasa y sigue en origin.
+	declaredRepository?: string | null;
 }
 
 export async function resolveIssueProject(
 	parsed: ParsedIssueTarget,
 	originRoot: string,
 	dependencies: ResolveDirectRunDependencies = {},
+	options: ResolveIssueProjectOptions = {},
 ): Promise<ResolveIssueProjectResult> {
 	const repositoryPort = dependencies.resolveRepository ?? defaultRepository;
 	const repositoryRootPort = dependencies.resolveRepositoryRoot ?? resolveKnownRepositoryRoot;
 	const gitRootPort = dependencies.resolveGitRoot ?? defaultGitRoot;
 	const realpathPort = dependencies.realpath ?? realpathDefault;
-	const readPort = dependencies.readFile ?? readFileDefault;
 
 	let originRepository: string | null = null;
 	try {
@@ -207,7 +205,7 @@ export async function resolveIssueProject(
 	} catch {
 		originRepository = null;
 	}
-	const declaredRepository = await declaredIssueRepository(originRoot, readPort);
+	const declaredRepository = options.declaredRepository ?? null;
 	const repository = parsed.repository ?? declaredRepository ?? originRepository;
 	if (!repository) {
 		return resolverFailure("unresolved-repository", "Resolve the current GitHub repository or use owner/repo#NN before retrying");
@@ -337,7 +335,7 @@ export async function resolveDirectRunRequest(
 
 	const parsedIssue = parseIssueTarget(target);
 	if (parsedIssue) {
-		const issueProject = await resolveIssueProject(parsedIssue, originRoot, dependencies);
+		const issueProject = await resolveIssueProject(parsedIssue, originRoot, dependencies, { declaredRepository: await declaredIssueRepository(originRoot, readPort) });
 		if (!issueProject.ok) return issueProject;
 		const { number, repository: repo, root: issueRoot } = issueProject;
 		if (!await hasCanonicalContract(issueRoot, readPort)) return contractFailure(issueRoot);

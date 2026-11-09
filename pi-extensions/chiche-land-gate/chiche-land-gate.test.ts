@@ -617,7 +617,9 @@ function issueFilter(markdown: string): string {
 test("#134 CA-18: el filtro del issue del body imprime la primera referencia Closes/Refs, también owner/repo#NN, y nada sin referencia; es idéntico en los cuatro harnesses", async () => {
 	const filter = issueFilter(await readRepoFile("claude/chiche-land/SKILL.md"));
 	for (const harness of HARNESSES) assert.equal(issueFilter(await readRepoFile(`${harness}/chiche-land/SKILL.md`)), filter, `${harness} diverge del filtro de claude`);
-	for (const [fixture, expected] of [["pr-body-cross-repo.md", "pramaestudio/backlog#42\n"], ["pr-body-same-repo.md", "#7\n"], ["pr-body-none.md", ""]] as const) {
+	// Review #140-7: el filtro ancla a inicio de línea, así que la prosa que menciona `refs #7` no le gana al `Refs #134` real.
+	assert.match(filter, /\^\[\[:space:\]\]\*\(Closes\|Refs\)/, "el filtro ancla la referencia al inicio de la línea");
+	for (const [fixture, expected] of [["pr-body-cross-repo.md", "pramaestudio/backlog#42\n"], ["pr-body-same-repo.md", "#134\n"], ["pr-body-none.md", ""]] as const) {
 		const path = fileURLToPath(new URL(`./fixtures/${fixture}`, import.meta.url));
 		// El body entra por stdin, como se lo entrega `gh pr view <n> --json body --jq .body` al pipe.
 		const run = spawnSync("bash", ["-c", filter], { encoding: "utf8", input: await readFile(path, "utf8") });

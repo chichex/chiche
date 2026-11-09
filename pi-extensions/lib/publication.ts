@@ -34,7 +34,8 @@ function publicationRow(contract: string, key: string): string {
 	const lines = contract.replace(/\r/g, "").split("\n");
 	const start = lines.indexOf("## Publicacion");
 	if (start === -1) return "";
-	const pattern = new RegExp(`^\\|\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|([^|]*)\\|`);
+	// Sin exigir el `|` de cierre: una fila GFM sin pipe final vale como en el comando canónico (`cut -d'|' -f3`).
+	const pattern = new RegExp(`^\\|\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\|([^|]*)`);
 	for (const line of lines.slice(start + 1)) {
 		if (line.startsWith("## ")) break;
 		const match = pattern.exec(line);
@@ -50,6 +51,7 @@ export function publicationSettings(contract: string): PublicationSettings {
 	return {
 		specs: specsRaw === "issue" || specsRaw === "local" ? specsRaw : "auto",
 		folder: publicationFolder(contract),
+		// `none` explícito vale como sin repo de issues (review #138-1), igual que una fila ausente.
 		repo: REPOSITORY.test(repoRaw) ? repoRaw : null,
 		template: templateRaw.includes("{title}") && templateRaw.includes("{body}") ? templateRaw : DEFAULT_ISSUE_TEMPLATE,
 	};
@@ -111,15 +113,72 @@ function tokenize(input: string): string[] {
 export function issueCommandArgv(template: string, values: { repo: string; title: string; body: string }): string[] {
 	const tokens = tokenize(template);
 	if (tokens.length === 0) throw new Error("La plantilla de `crear issue` está vacía");
-	return tokens.map((token) => token.replaceAll("{repo}", values.repo).replaceAll("{title}", values.title).replaceAll("{body}", values.body));
+	// Una sola pasada: el valor insertado por un placeholder nunca se vuelve a reemplazar (review #140-4).
+	return tokens.map((token) => token.replace(/\{(repo|title|body)\}/g, (_match, key: "repo" | "title" | "body") => values[key]));
 }
 
-/** La primera URL `https://github.com/<owner>/<repo>/issues/<N>` de la salida, o `null`. */
+/** La última URL `https://github.com/<owner>/<repo>/issues/<N>` de la salida (`gh issue create` la imprime al final), o `null`. */
 export function issueUrlFromOutput(output: string): CreatedIssueUrl | null {
-	const match = ISSUE_URL.exec(output);
+	const match = [...output.matchAll(new RegExp(ISSUE_URL.source, "g"))].at(-1);
 	if (!match?.[1] || !match[2]) return null;
 	const number = Number(match[2]);
 	return Number.isSafeInteger(number) ? { repository: match[1], number, url: match[0] } : null;
+}
+
+// ---------------------------------------------------------------------------
+// Stop list de ## Autonomy (review #140-3): la plantilla se compara antes de correrla.
+
+const POSIX_CLASSES: Record<string, string> = {
+	"[:alnum:]": "A-Za-z0-9",
+	"[:alpha:]": "A-Za-z",
+	"[:digit:]": "0-9",
+	"[:lower:]": "a-z",
+	"[:upper:]": "A-Z",
+	"[:space:]": " \\t\\n\\r\\f\\v",
+	"[:blank:]": " \\t",
+	"[:punct:]": "!-\\/:-@\\[-`{-~",
+	"[:xdigit:]": "0-9A-Fa-f",
+	"[:word:]": "A-Za-z0-9_",
+};
+
+/** Los `Pattern` de la stop list (segunda tabla de `## Autonomy`), hasta la primera línea que no empieza con `|`. */
+export function stopListPatterns(contract: string): string[] {
+	const lines = contract.replace(/\r/g, "").split("\n");
+	const start = lines.indexOf("## Autonomy");
+	if (start === -1) return [];
+	const section: string[] = [];
+	for (const line of lines.slice(start + 1)) {
+		if (line.startsWith("## ")) break;
+		section.push(line);
+	}
+	const header = section.findIndex((line) => /^\|\s*Action\s*\|\s*Pattern\s*\|\s*Reason\s*\|/.test(line));
+	if (header === -1) return [];
+	const patterns: string[] = [];
+	for (const line of section.slice(header + 2)) {
+		if (!line.startsWith("|")) break;
+		const pattern = (line.split("|")[2] ?? "").trim();
+		if (pattern) patterns.push(pattern);
+	}
+	return patterns;
+}
+
+/** Un `Pattern` POSIX extendido (`grep -E`) como RegExp de JavaScript, o `null` si no compila. */
+export function posixPatternToRegExp(pattern: string): RegExp | null {
+	const translated = pattern.replace(/\[:(alnum|alpha|digit|lower|upper|space|blank|punct|xdigit|word):\]/g, (match) => POSIX_CLASSES[match] ?? match);
+	try {
+		return new RegExp(translated);
+	} catch {
+		return null;
+	}
+}
+
+/** La primera fila de la stop list cuyo `Pattern` matchea el comando, o `null`; un patrón que no compila se ignora, como hacen los skills. */
+export function stopListMatch(command: string, patterns: readonly string[]): string | null {
+	for (const pattern of patterns) {
+		const regexp = posixPatternToRegExp(pattern);
+		if (regexp && regexp.test(command)) return pattern;
+	}
+	return null;
 }
 
 /** El número de la URL impresa, solo si su repo es `repository` (sin distinguir mayúsculas). */

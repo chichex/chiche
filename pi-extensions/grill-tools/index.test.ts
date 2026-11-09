@@ -2183,6 +2183,8 @@ test("#139-1: un handoff que vive solo en <carpeta>/grills/ aparece en el invent
 	writeFileSync(join(main, "docs", "sdd", "grills", "solo-carpeta.md"), canonicalHandoff("carpeta-declarada-sola", "finalized", "Handoff solo en la carpeta declarada", main));
 	const labels = await selectLabels(main, { status: "all", scope: "current-project", query: "carpeta-declarada" });
 	assert.equal(labels.filter((label) => label.includes("Handoff solo en la carpeta declarada")).length, 1, `el handoff de la carpeta declarada aparece una vez: ${JSON.stringify(labels)}`);
+});
+
 // ---------------------------------------------------------------------------
 // Issue #134, CA-20: persist_sdd_spec acepta el repo declarado en ## Publicacion y crea el issue con la plantilla.
 
@@ -2306,6 +2308,55 @@ test("#134 CA-20: el repositorio del pedido puede ser el de origin o el repo dec
 		const result = await persistNewIssue(tool, plain, "chichex/chiche");
 		assert.equal(result.details.ok, true, JSON.stringify(result.details.diagnostics));
 		assert.deepEqual(plainSeen.find((entry) => entry.args[1] === "create")?.args, ["issue", "create", "--repo", "chichex/chiche", "--title", "Declared repo publication", "--body-file", plainSeen.find((entry) => entry.args[1] === "create")?.args[7]]);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+});
+
+// Review #140-3: en Pi la plantilla `crear issue` se compara contra la stop list de ## Autonomy antes de correrla.
+test("#140-3: persist_sdd_spec no corre la plantilla si una fila de la stop list matchea el comando armado, y la creación falla citando la fila", { skip: !PI_PACKAGE_ROOT }, async () => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const contract = [
+		contractWithIssueRepo("acme/backlog", "gh issue create --repo {repo} --label spec --title {title} --body-file {body}").trimEnd(),
+		"",
+		"## Autonomy",
+		"| Stage | Value | Since |",
+		"|---|---|---|",
+		"| run | ask | 2026-11-09 |",
+		"",
+		"| Action | Pattern | Reason |",
+		"|---|---|---|",
+		"| git push origin main | git push .*[ :/]main([^-[:alnum:]_/.].*)?$ | push a main solo via PR |",
+		"| gh issue create --label spec | gh issue create .*--label spec | los issues con label spec los crea el humano |",
+		"",
+	].join("\n");
+	const projectPath = declaredRepoProject("declared-repo-stoplist", contract);
+	const seen: Exec[] = [];
+	execHandler = githubExec(projectPath, "acme/backlog", "https://github.com/acme/backlog/issues/9\n", seen, {});
+	try {
+		const result = await persistNewIssue(tool, projectPath, "chichex/chiche");
+		assert.equal(result.details.ok, false, "la stop list frena la creación");
+		const diagnostic = result.details.diagnostics.find((d: { code: string }) => d.code === "issue-creation-failed");
+		assert.ok(diagnostic, JSON.stringify(result.details.diagnostics));
+		assert.match(diagnostic.message, /stop list/);
+		assert.match(diagnostic.message, /gh issue create \.\*--label spec/, "cita el Pattern de la fila");
+		assert.equal(seen.some((entry) => entry.command === "gh" && entry.args[1] === "create"), false, "la plantilla no se corrió");
+		assert.deepEqual(result.details.createdIssues, []);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+	// Una fila que no matchea (la de main) no frena nada: la creación sigue.
+	const plain = declaredRepoProject("declared-repo-stoplist-ok", [
+		contractWithIssueRepo("acme/backlog").trimEnd(), "", "## Autonomy", "| Stage | Value | Since |", "|---|---|---|", "| run | ask | 2026-11-09 |", "",
+		"| Action | Pattern | Reason |", "|---|---|---|", "| git push origin main | git push .*[ :/]main([^-[:alnum:]_/.].*)?$ | push a main solo via PR |", "",
+	].join("\n"));
+	const plainSeen: Exec[] = [];
+	execHandler = githubExec(plain, "acme/backlog", "https://github.com/acme/backlog/issues/10\n", plainSeen, {});
+	try {
+		const result = await persistNewIssue(tool, plain, "chichex/chiche");
+		assert.equal(result.details.ok, true, JSON.stringify(result.details.diagnostics));
+		assert.equal(plainSeen.some((entry) => entry.args[1] === "create"), true);
 	} finally {
 		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
 	}

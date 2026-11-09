@@ -284,11 +284,11 @@ El análisis termina después de confirmar, serializar y emitir el resultado. Es
 ## Fase 1 — Resolver raíz y fuentes
 
 1. Resolvé la raíz con `git rev-parse --show-toplevel` y trabajá siempre desde allí.
-2. Resolvé `owner/repo` con `gh repo view --json nameWithOwner`.
+2. Resolvé `owner/repo` con `gh repo view --json nameWithOwner` y, encima, el `repo` de «Publicación efectiva» (el de `origin` sin la fila): es el repo de las fuentes y del combinado.
 3. Cargá cada fuente con:
 
 ```bash
-gh issue view <N> --json number,title,body,url,state,updatedAt,author,labels,assignees,milestone,comments
+gh issue view <N> --repo <repo> --json number,title,body,url,state,updatedAt,author,labels,assignees,milestone,comments
 ```
 
 4. Exigí que todos existan y estén abiertos. Si alguno está cerrado, mostralo y frená: el usuario debe corregir la selección.
@@ -421,7 +421,7 @@ Ordená las fuentes y construí, con `repo` igual al `repo` de «Publicación ef
 <!-- Issue-Triage: repo=owner/repo; sources=12,13 -->
 ```
 
-Antes de crear nada, buscá ese marker en todos los issues mediante `gh api --paginate` (no dependas sólo de los primeros 100). Si ya existe un issue combinado con el marker exacto, reutilizalo y no crees otro. Informá que se recuperó una canonicalización previa.
+Antes de crear nada, buscá ese marker en todos los issues mediante `gh api --paginate repos/<repo>/issues?state=all` (no dependas sólo de los primeros 100). Si ya existe un issue combinado con el marker exacto, reutilizalo y no crees otro. Informá que se recuperó una canonicalización previa.
 
 ### 5.2 Contenido combinado
 
@@ -460,7 +460,7 @@ Creá el issue corriendo la plantilla `crear issue` de «Publicación efectiva»
 Sólo después de obtener y verificar el número nuevo:
 
 1. En cada original, buscá el marker `<!-- Issue-Triage-Replaced-By: #NEW -->`.
-2. Si falta, comentá que fue reemplazado por `#NEW`, incluyendo el marker.
+2. Si falta, comentá (`gh issue comment <N> --repo <repo>`) que fue reemplazado por `#NEW`, incluyendo el marker.
 3. Si sigue abierto, cerralo con `gh issue close <N> --repo <repo> --reason "not planned"`.
 4. Nunca elimines los originales.
 5. Procesá best-effort y reportá éxitos/fallos por issue.

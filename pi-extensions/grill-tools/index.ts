@@ -14,10 +14,11 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { parseConfidence, retiredAutonomyMessage, withFlag } from "../workflow-orchestrator/autonomy.ts";
 import { menuItems, selectMenu, type MenuItem } from "../lib/menu.ts";
-import { issueCommandArgv, issueUrlFromOutput, readPublicationSettings } from "../lib/publication.ts";
+import { issueCommandArgv, issueUrlFromOutput, readPublicationSettings, stopListMatch, stopListPatterns } from "../lib/publication.ts";
 import {
 	artifactReadDirs,
 	artifactWriteDir,
+	readProjectContract,
 	isArtifactPath,
 	listArtifacts,
 	resolveArtifactDirs,
@@ -514,6 +515,23 @@ async function runGh(
 	signal: AbortSignal | undefined,
 ): Promise<string> {
 	return runCommand(pi, ["gh", ...args], cwd, signal);
+}
+
+// La stop list se lee del contrato del branch default, como «Controles efectivos» (`git show origin/<default>:…`),
+// y si eso no resuelve, del contrato de la raíz operativa. Best-effort: sin contrato no hay filas.
+async function stopList(pi: ExtensionAPI, root: string, signal: AbortSignal | undefined): Promise<string[]> {
+	try {
+		const ref = (await pi.exec("git", ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], { cwd: root, timeout: 5_000, signal })).stdout.trim();
+		if (ref) {
+			for (const path of [".chiche/project.md", ".sdd/project.md"]) {
+				const shown = await pi.exec("git", ["show", `${ref}:${path}`], { cwd: root, timeout: 10_000, signal });
+				if (shown.code === 0) return stopListPatterns(shown.stdout);
+			}
+		}
+	} catch {
+		// sin branch default resoluble: el contrato de la raíz operativa
+	}
+	return stopListPatterns(await readProjectContract(root));
 }
 
 async function withLocalMutationQueues<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
@@ -1464,12 +1482,15 @@ export default function grillTools(pi: ExtensionAPI) {
 					}
 					// Issue #134, CA-15 y CA-20: corre la plantilla `crear issue` con los placeholders reemplazados (cada
 					// valor es un argumento, sin shell) y toma el numero de la URL impresa, cuyo repo tiene que ser el esperado.
-					const output = await withTemporaryBody(stagingBody, (bodyPath) => runCommand(
-						pi,
-						issueCommandArgv(publication.template, { repo: targetRepository, title, body: bodyPath }),
-						root,
-						signal,
-					));
+					const output = await withTemporaryBody(stagingBody, async (bodyPath) => {
+						const argv = issueCommandArgv(publication.template, { repo: targetRepository, title, body: bodyPath });
+						// Review #140-3: la stop list de ## Autonomy frena el comando armado antes de correrlo, como exige la doctrina.
+						const matched = stopListMatch(argv.join(" "), await stopList(pi, root, signal));
+						if (matched !== null) {
+							throw new Error(`The \`crear issue\` command matches the stop list of ## Autonomy (Pattern \`${matched}\`): not run; the human creates this issue`);
+						}
+						return runCommand(pi, argv, root, signal);
+					});
 					const created = issueUrlFromOutput(output);
 					if (!created) {
 						throw new Error(`Could not resolve the created issue identity: the \`crear issue\` output has no https://github.com/<owner>/<repo>/issues/<N> URL: ${output.trim()}`);

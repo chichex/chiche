@@ -2,7 +2,7 @@
 
 ## Contexto
 
-refs #7 no es una referencia de cierre en mayúscula, pero el filtro no distingue mayúsculas.
+La prosa dice que refs #7 no es una referencia de cierre, y el filtro no la cuenta porque no abre la línea.
 
 Refs #134
 
