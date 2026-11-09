@@ -409,8 +409,7 @@ const SDD_INIT_POLICIES: RegExp[] = [
 	/también en `--update` aunque se elija `Mantener`/,
 	/baseline/,
 	/`Generar design system`[^\n]*solo si hay al menos una superficie `sin sistema`/,
-	/invoca `\/design-system` sin flags/,
-	/nunca con `--autonomy` ≥ A2/,
+	/invoca `\/design-system` sin flags, nunca con `--defaults`: la dirección visual es una elección humana\./,
 ];
 
 test("CA-2: la Fase 1 de chiche-init releva DISEÑO por superficie con el censo común", async () => {
@@ -450,7 +449,7 @@ test("CA-3: la Fase 3.5 ofrece ratchets de diseño y Generar design system; el r
 		const path = `${harness}/chiche-init/SKILL.md`;
 		const markdown = await readRepoFile(path);
 		if (!section(markdown, /^## Fase 3\.5 — Políticas de generación$/).includes("<!-- chiche-init-design-policies:start -->")) problems.push(`${path}: los gates de diseño no están en la Fase 3.5`);
-		if (!section(markdown, /^## Reporte$/).includes("- design-system: <referenciado|generado|no existe (ofrecido)|con sistema (no ofrecido)|--autonomy ≥ A2: no ofrecido|sin superficies UI>")) problems.push(`${path}: el reporte no tiene la línea design-system`);
+		if (!section(markdown, /^## Reporte$/).includes("- design-system: <referenciado|generado|no existe (ofrecido)|con sistema (no ofrecido)|--defaults: no ofrecido|sin superficies UI>")) problems.push(`${path}: el reporte no tiene la línea design-system`);
 	}
 	assert.deepEqual(problems, []);
 });
