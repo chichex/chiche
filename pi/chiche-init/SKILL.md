@@ -291,7 +291,7 @@ if [ ! -e .chiche ]; then git mv .sdd .chiche; { git ls-files -z -- .chiche; git
 { cat "$moved"; for f in CLAUDE.md AGENTS.md .gitignore; do if [ -f "$f" ]; then printf '%s\0' "$f"; fi; done; } | while IFS= read -r -d '' f; do
   [ -L "$f" ] && continue
   grep -Iq -e '\.sdd/' -e 'SDD-Tracking: version=1;' "$f" || continue
-  awk 'BEGIN{done=0} { if (!done && index($0,"<!-- SDD-Tracking: version=1;")==1) { sub(/<!-- SDD-Tracking: version=1;/,"<!-- Chiche-Tracking: version=2;"); done=1 } gsub(/\.sdd\//,".chiche/"); print }' "$f" > "$f.chiche-migrate" && cat "$f.chiche-migrate" > "$f" && rm "$f.chiche-migrate"; done
+  awk 'BEGIN{done=0} { if (!done && sub(/^<!-- SDD-Tracking: version=1;/,"<!-- Chiche-Tracking: version=2;")) done=1; gsub(/\.sdd\//,".chiche/"); print }' "$f" > "$f.chiche-migrate" && cat "$f.chiche-migrate" > "$f" && rm "$f.chiche-migrate"; done
 common_note=
 if [ -d "$common/sdd" ] && mkdir -p "$common/chiche" 2>/dev/null && [ -w "$common/chiche" ]; then
   common_note=" y <git-common-dir>/sdd/ paso a <git-common-dir>/chiche/"

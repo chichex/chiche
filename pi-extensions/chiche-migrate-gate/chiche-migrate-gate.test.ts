@@ -165,6 +165,16 @@ test("CA-13: el bloque trae un único fence y es bash", async () => {
 	assert.deepEqual(problems, []);
 });
 
+test("el bloque no usa parámetros posicionales ni $ARGUMENTS: el harness los sustituye al cargar el skill con argumentos", async () => {
+	const { blocks, problems } = await migrateBlocks();
+	assert.equal(blocks.size + problems.length, 5);
+	for (const [path, block] of blocks) {
+		const hit = block.match(/\$(?:[0-9]|ARGUMENTS|@|\*)/);
+		if (hit) problems.push(`${path}: contiene ${hit[0]}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
 test("CA-13: el bloque nombra la pregunta, las dos opciones, la regla de --autonomy ≥ A2, Decisiones humanas, la nota sin .sdd/ y conservado", async () => {
 	const block = await referenceBlock();
 	assert.deepEqual(missing(block, [
