@@ -2,7 +2,7 @@
 
 > 🇬🇧 [Read this in English](./README.en.md)
 
-**Anda un chiche.** chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — `supervised`, `plan-approved` o `unattended`, por etapa en el contrato o por corrida con `--autonomy` — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
+chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — `supervised`, `plan-approved` o `unattended`, por etapa en el contrato o por corrida con `--autonomy` — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
 
 Los skills son piezas de conocimiento reutilizable que un agente carga bajo demanda: cada carpeta es un skill con su `SKILL.md` (frontmatter `name` + `description` que decide cuándo aplica) y, opcionalmente, archivos de referencia que el skill lee cuando los necesita.
 

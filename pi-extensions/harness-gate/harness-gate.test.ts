@@ -1345,7 +1345,7 @@ test("issue #103 CA-17: el grep mira archivos trackeados y deja afuera .chiche/g
 // --- #103 CA-18: los README presentan chiche ------------------------------------
 
 const README_PITCH = [
-	{ path: "README.md", tagline: "anda un chiche", flow: "## El flujo chiche", retirement: "se retiraron en 4.0.0" },
+	{ path: "README.md", tagline: "vos elegís cuánto decide el agente", flow: "## El flujo chiche", retirement: "se retiraron en 4.0.0" },
 	{ path: "README.en.md", tagline: "you choose how much the agent decides", flow: "## The chiche workflow", retirement: "were retired in 4.0.0" },
 ] as const;
 
@@ -1382,6 +1382,8 @@ test("issue #103 CA-18 (issue #102 CA-20): los README se titulan # chiche, abren
 		// Las primeras 8 líneas: título, tagline y el párrafo de apertura.
 		const opening = lines.slice(0, 8).join("\n");
 		if (!opening.toLowerCase().includes(readme.tagline)) problems.push(`${readme.path}: las primeras 8 líneas no dicen «${readme.tagline}»`);
+		// El tagline «anda un chiche» se retiró en 5.6.3 y no vuelve.
+		if (markdown.toLowerCase().includes("anda un chiche")) problems.push(`${readme.path}: dice «anda un chiche», el tagline retirado`);
 		// Issue #102 CA-20: las primeras 8 líneas nombran los tres niveles y el flag del dial.
 		for (const token of ["`supervised`", "`plan-approved`", "`unattended`", "`--autonomy`"]) {
 			if (!opening.includes(token)) problems.push(`${readme.path}: las primeras 8 líneas no nombran ${token}`);
