@@ -551,6 +551,29 @@ test("CA-10 (review #95): la guarda de 1024 bytes, con LC_ALL=C, cuenta bytes: e
 	assert.equal(logLines(common).length, 1, "un byte más no agrega la línea");
 });
 
+test("CA-3 (#136): con la carga con argumentos simulada, cada `$0` a `$9` y `$ARGUMENTS` del bloque reemplazado por una palabra, el comando escribe la misma línea, con bash y con sh", async (t) => {
+	const command = await canonicalCommand();
+	// Claude Code reemplaza en el texto del skill `$1` por uno de los argumentos de quien lo abre
+	// (`/chiche-spec quiero que en el init…` mostró `[ "que" = none ]` y `s=que`): el comando copiado
+	// del texto cargado tiene que seguir escribiendo lo que dicen los valores, no esa palabra.
+	const loaded = command.replace(/\$(?:[0-9]|ARGUMENTS)/g, "que");
+	const { base, main, common } = repoWithLinkedWorktree("loaded-with-arguments");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	const moved = { ...STARTED, harness: "claude", event: "spec.moved", issue: "#134", spec: "#134", previous: ".sdd/specs/llevar.md", grill: "none" };
+	for (const shell of ["bash", "sh"] as const) {
+		const run = runCommand(loaded, main, moved, { shell });
+		assert.equal(run.status, 0, `${shell}: ${run.stderr}`);
+		assert.equal(run.stderr, "", `${shell}: sin aviso`);
+	}
+	const lines = logLines(common);
+	assert.equal(lines.length, 2);
+	assert.equal(lines[0]?.replace(/"ts":"[^"]*"/, ""), lines[1]?.replace(/"ts":"[^"]*"/, ""), "bash y sh escriben la misma línea");
+	assert.match(lines[0] ?? "", /"spec":"%23134","previous":".sdd%2Fspecs%2Fllevar.md","grill":"none"/);
+	const parsed = parseSddEventLine(lines[0] ?? "");
+	assert.equal(parsed.kind, "event", `${lines[0]}: ${JSON.stringify(parsed)}`);
+	assert.equal(parsed.kind === "event" ? parsed.event.spec : "", "#134");
+});
+
 test("CA-4 (#103): la lectura une el chiche/events.jsonl del comando con un sdd/events.jsonl previo, ordenada por ts", async (t) => {
 	const command = await canonicalCommand();
 	const { base, main, linked, common } = repoWithLinkedWorktree("read-both");
