@@ -15,14 +15,13 @@ Tres ideas fuerza:
 ## Argumentos
 
 ```text
-$design-system [<raíz de la superficie>] [--no-link] [--autonomy <level>]
+$design-system [<raíz de la superficie>] [--no-link]
 ```
 
 - `<raíz de la superficie>` — directorio de la superficie a documentar (el del manifest que la detecta); saltea la elección de superficie de la Fase 1.
 - `--no-link` — saltea el enganche de la Fase 5: escribe el doc y no toca ningún otro archivo.
-- `--autonomy <level>` — se acepta por uniformidad y aborta con cualquier valor distinto de `supervised`/`A1`: la dirección visual es del humano y este skill no tiene modo desatendido (no tiene fila en `## Autonomy`). Ver «Niveles de autonomía» y «Nivel efectivo».
 
-`$chiche-init` lo invoca sin flags al terminar el contrato, y nunca con `--autonomy` ≥ A2: este skill no tiene modo desatendido.
+`$chiche-init` lo invoca sin flags al terminar el contrato, y nunca con `--defaults`: este skill no tiene modo desatendido. La ronda de dirección visual se pregunta siempre: ningún control de autonomía la saltea (ver «Controles de autonomía» y «Controles efectivos»).
 
 <!-- autonomy-controls:start -->
 **Controles de autonomía.** Son tres y cada uno hace una sola cosa. **Confianza** (`grill` y `chiche-spec`, flag `--confidence <n>`): un entero de 0 a 100 que dice qué se pregunta: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y confirma cada paso. **Posición del run** (`chiche-run`, flag `--mode <posición>`): dónde frena el run: `ask` frena ante dudas y ofrece el menú tras el PR; `pr` abre el PR, lanza el review y termina; `pr-reviewed` además corrige el feedback del review solo, hasta 2 rondas. **Cadena** (`grill` y `chiche-spec`, flag `--until pr`): con el flag, grill llama a la spec y la spec al run; sin el flag, cada etapa termina en lo suyo. Ningún control cambia a otro: la cadena no toca la confianza ni la posición. Sin flag rige lo que resuelve «Controles efectivos». `--confidence` o `--mode` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. `--autonomy` y los niveles con nombre se retiraron en 6.0.0: recibir `--autonomy` aborta antes de cualquier mutación con el diagnóstico literal `--autonomy se retiró en 6.0.0: <equivalente>`.
