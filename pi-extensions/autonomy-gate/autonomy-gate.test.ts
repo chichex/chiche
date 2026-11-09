@@ -260,7 +260,8 @@ test("CA-4: el bloque autonomy-resolve es idéntico en los 35 SKILL.md tras norm
 		/`git fetch` best-effort/,
 		/`git show origin\/<default>:\.chiche\/project\.md`, con fallback a `\.sdd\/project\.md`/,
 		new RegExp(escapeRegExp(`\`${WORKING_TREE_NOTICE}\``)),
-		/`unrehearsed` o `FAILED`, rige `supervised \(A1\)` con aviso/,
+		/La columna `Rehearsed` ya no se lee: el nivel escrito en la fila rige \(el ensayo de niveles se retiró en 5\.7\.0\)/,
+		/\(la única excepción es la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan\)/,
 		new RegExp(escapeRegExp(`\`${LIMITES_FALLBACK}\``)),
 		/esa prosa sigue rigiendo como restricción/,
 		/se lee de la misma fuente y frena en todo nivel/,
@@ -272,6 +273,12 @@ test("CA-4: el bloque autonomy-resolve es idéntico en los 35 SKILL.md tras norm
 	assert.match(command, /git symbolic-ref -q --short refs\/remotes\/origin\/HEAD/);
 	assert.match(command, /git show "\$ref:\.chiche\/project\.md"[^\n]*git show "\$ref:\.sdd\/project\.md"/);
 	assert.match(command, /echo "nivel efectivo: \$nivel, leído de \$src"/);
+	// Issue #130, CA-4: ni la caída por falta de ensayo ni la excepción del comando del ensayo.
+	for (const [path, text] of blocks) {
+		assert.doesNotMatch(text, /`unrehearsed` o `FAILED`, rige/, `${path}: la fila sin ensayo ya no cae a A1`);
+		assert.doesNotMatch(text, /ensayo de `chiche-init`|pregunta de costo/, `${path}: la stop list ya no exime el comando del ensayo`);
+		assert.doesNotMatch(text, /sin ensayo|reh=/, `${path}: el comando ya no lee la columna Rehearsed`);
+	}
 });
 
 test("CA-4: ningún bloque autonomy-* contiene parámetros posicionales ni $ARGUMENTS, en ninguno de los 35 archivos", async () => {
@@ -449,33 +456,44 @@ test("CA-4: el flag manda sobre el contrato y la stop list igual se lee; A0/A4/A
 	}
 });
 
-test("CA-4: sin remote lee el working tree y avisa; una fila FAILED o unrehearsed cae a A1 con aviso", async (t) => {
+test("CA-4 → #130 CA-3: sin remote lee el working tree y avisa; el nivel escrito rige con unrehearsed, FAILED, — o rehearsed en Rehearsed, sin aviso de ensayo", async (t) => {
 	const command = await canonicalCommand();
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-local-")));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
-	git(root, "init", "-q", "-b", "main");
-	mkdirSync(join(root, ".chiche"));
-	writeFileSync(join(root, ".chiche/project.md"), contract(LEVELS_TABLE("| spec | plan-approved | 2026-11-05 | rehearsed 2026-11-05 |\n| run | unattended | 2026-11-05 | FAILED (2 preguntas) |\n| grill | plan-approved | 2026-11-05 | unrehearsed |")));
-	git(root, "add", "-A");
-	git(root, "commit", "-q", "-m", "contrato local");
+	const repo = (name: string, rows: string): string => {
+		const dir = join(root, name);
+		mkdirSync(join(dir, ".chiche"), { recursive: true });
+		git(dir, "init", "-q", "-b", "main");
+		writeFileSync(join(dir, ".chiche/project.md"), contract(LEVELS_TABLE(rows)));
+		git(dir, "add", "-A");
+		git(dir, "commit", "-q", "-m", "contrato local");
+		return dir;
+	};
+	const first = repo("uno", "| spec | plan-approved | 2026-11-05 | unrehearsed | 80 |\n| run | unattended | 2026-11-05 | FAILED (4 preguntas) | — |\n| grill | plan-approved | 2026-11-05 | rehearsed 2026-11-01 | 80 |");
+	const second = repo("dos", "| spec | unattended | 2026-11-05 | — | 80 |\n| run | plan-approved | 2026-11-05 | — | — |\n| grill | unattended | 2026-11-05 | unrehearsed | 80 |");
+	const expected: Array<[string, string, string]> = [
+		[first, "spec", "plan-approved (A2)"],
+		[first, "run", "unattended (A3)"],
+		[first, "grill", "plan-approved (A2)"],
+		[second, "spec", "unattended (A3)"],
+		[second, "run", "plan-approved (A2)"],
+		[second, "grill", "unattended (A3)"],
+	];
 	for (const shell of shells(t)) {
-		const spec = runResolve(command, root, "spec", "", shell);
-		assert.equal(spec.status, 0, `${shell}: ${spec.stderr}`);
-		assert.match(spec.stdout, /^nivel efectivo: plan-approved \(A2\), leído de working tree$/m, `${shell}: ${spec.stdout}`);
-		assert.match(spec.stderr, new RegExp(escapeRegExp(WORKING_TREE_NOTICE)), `${shell}: ${spec.stderr}`);
-		const failed = runResolve(command, root, "run", "", shell);
-		assert.match(failed.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m, `${shell}: ${failed.stdout}`);
-		assert.match(failed.stderr, /fila run sin ensayo \(FAILED \(2 preguntas\)\): rige supervised \(A1\)/, `${shell}: ${failed.stderr}`);
-		const unrehearsed = runResolve(command, root, "grill", "", shell);
-		assert.match(unrehearsed.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m);
-		assert.match(unrehearsed.stderr, /fila grill sin ensayo \(unrehearsed\)/);
-		const none = runResolve(command, root, "none", "", shell);
+		for (const [cwd, stage, level] of expected) {
+			const run = runResolve(command, cwd, stage, "", shell);
+			assert.equal(run.status, 0, `${shell} ${stage}: ${run.stderr}`);
+			assert.match(run.stdout, new RegExp(`^nivel efectivo: ${escapeRegExp(level)}, leído de working tree$`, "m"), `${shell} ${stage}: ${run.stdout}`);
+			assert.match(run.stderr, new RegExp(escapeRegExp(WORKING_TREE_NOTICE)), `${shell} ${stage}: ${run.stderr}`);
+			assert.doesNotMatch(run.stderr, /sin ensayo|rige supervised/, `${shell} ${stage}: el nivel escrito rige sin aviso (${run.stderr})`);
+		}
+		const none = runResolve(command, first, "none", "", shell);
 		assert.match(none.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m, `${shell}: los skills sin fila resuelven supervised`);
-		const absent = runResolve(command, root, "land", "", shell);
+		const absent = runResolve(command, first, "land", "", shell);
 		assert.match(absent.stdout, /^nivel efectivo: supervised \(A1\), leído de working tree$/m);
 		assert.match(absent.stderr, /## Autonomy sin fila land/);
 	}
-	assert.equal(git(root, "status", "--porcelain"), "");
+	for (const dir of [first, second]) assert.equal(git(dir, "status", "--porcelain"), "");
 });
 
 test("CA-4: un contrato que sigue en .sdd/ se lee desde el branch default; uno con ## Limites y sin ## Autonomy da A1 con el aviso literal", async (t) => {
@@ -769,236 +787,44 @@ test("CA-11: la Fase 6 de chiche-run fija la conducta por nivel en los cinco har
 // ---------------------------------------------------------------------------
 // Capa 3 (CA-13 a CA-17): ensayo de niveles, stop list y recetas de deploy
 
-const HOST = "claude/chiche-init/rehearsal-host.mjs";
+// El nombre del host retirado se arma por partes para que este archivo no aparezca en el grep de CA-1.
+const RETIRED_HOST = ["rehearsal", "host"].join("-");
 const REHEARSAL_NOTICE = "ensayo disponible desde Claude Code: corré chiche-init --update ahí";
 
-// Un `claude` falso que habla el stream de `claude -p --input-format stream-json
-// --output-format stream-json --permission-prompt-tool stdio`: emite el `init`,
-// N `control_request` de AskUserQuestion (esperando cada `control_response`) y el
-// `result`. FAKE_QUESTIONS fija N, FAKE_TOOLS la lista del init y FAKE_MARK el
-// archivo que escribe solo si llega al `result` (un corte lo deja sin escribir).
-function fakeClaude(dir: string): string {
-	const script = join(dir, "fake-claude.mjs");
-	writeFileSync(script, `
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { createInterface } from "node:readline";
-const n = Number(process.env.FAKE_QUESTIONS ?? "0");
-const per = Number(process.env.FAKE_QPER ?? "1");
-const tools = (process.env.FAKE_TOOLS ?? "AskUserQuestion,Bash,Read").split(",");
-const resultSubtype = process.env.FAKE_RESULT_SUBTYPE ?? "success";
-const resultError = process.env.FAKE_RESULT_IS_ERROR === "1";
-const assistantMode = process.env.FAKE_ASSISTANT ?? "";
-const bashCommand = process.env.FAKE_BASH ?? "";
-const writePath = process.env.FAKE_WRITE ?? "";
-writeFileSync(process.env.FAKE_ARGV, JSON.stringify(process.argv.slice(2)));
-if (process.env.FAKE_PID) writeFileSync(process.env.FAKE_PID, String(process.pid));
-if (process.env.FAKE_IGNORE_SIGTERM === "1") process.on("SIGTERM", () => {});
-const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
-const decide = (name, msg) => { if (process.env.FAKE_DECISIONS) appendFileSync(process.env.FAKE_DECISIONS, name + " " + (msg.response?.response?.behavior ?? "?") + "\\n"); };
-const rl = createInterface({ input: process.stdin });
-const pending = new Map();
-let asked = 0;
-let started = false;
-let step = 0;
-const steps = [];
-if (bashCommand && !process.env.FAKE_BASH_AFTER) steps.push({ kind: "bash" });
-if (writePath) steps.push({ kind: "write" });
-for (let i = 0; i < n; i += 1) steps.push({ kind: "ask" });
-if (bashCommand && process.env.FAKE_BASH_AFTER) steps.push({ kind: "bash" });
-if (assistantMode === "orphan") steps.push({ kind: "orphan" });
-function questions(count) {
-	return Array.from({ length: count }, (_, i) => ({ question: i === 0 ? "¿Formato?" : "¿Pregunta " + i + "?", header: "JSON", options: [{ label: "Compacto (Recomendado)", description: "" }, { label: "Indentado", description: "" }], multiSelect: false }));
-}
-function next() {
-	const current = steps[step];
-	step += 1;
-	if (!current) {
-		if (process.env.FAKE_HANG === "1") return;
-		// Review #116-9: una etapa real deja spec, handoff o commit; el falso deja un archivo salvo que el test pida lo contrario.
-		if (process.env.FAKE_NO_WORK !== "1") writeFileSync("ensayo-output-" + process.pid + ".txt", "hecho");
-		out({ type: "result", subtype: resultSubtype, is_error: resultError, total_cost_usd: 0.01 });
-		if (process.env.FAKE_MARK) writeFileSync(process.env.FAKE_MARK, "done");
-		setTimeout(() => process.exit(0), 20);
-		return;
-	}
-	const id = "req-" + step;
-	if (current.kind === "orphan") {
-		out({ type: "assistant", message: { content: [{ type: "tool_use", id: "toolu_orphan", name: "AskUserQuestion", input: { questions: questions(1) } }] } });
-		next();
-		return;
-	}
-	if (current.kind === "ask") {
-		asked += 1;
-		const input = { questions: questions(per) };
-		if (assistantMode === "linked" || assistantMode === "orphan") out({ type: "assistant", message: { content: [{ type: "tool_use", id: "toolu_" + asked, name: "AskUserQuestion", input }] } });
-		pending.set(id, "ask");
-		out({ type: "control_request", request_id: id, request: { subtype: "can_use_tool", tool_name: "AskUserQuestion", input, tool_use_id: "toolu_" + asked } });
-		return;
-	}
-	if (current.kind === "bash") {
-		pending.set(id, "bash");
-		out({ type: "control_request", request_id: id, request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: bashCommand }, tool_use_id: "toolu_bash" } });
-		return;
-	}
-	pending.set(id, "write");
-	out({ type: "control_request", request_id: id, request: { subtype: "can_use_tool", tool_name: "Write", input: { file_path: writePath, content: "x" }, tool_use_id: "toolu_write" } });
-}
-rl.on("line", (line) => {
-	let msg;
-	try { msg = JSON.parse(line); } catch { return; }
-	if (msg.type === "user" && !started) {
-		started = true;
-		if (process.env.FAKE_PROMPT) writeFileSync(process.env.FAKE_PROMPT, String(msg.message?.content ?? ""));
-		out({ type: "system", subtype: "init", tools, model: "fake" });
-		next();
-		return;
-	}
-	if (msg.type === "control_response") {
-		const id = msg.response?.request_id;
-		const kind = pending.get(id);
-		if (!pending.delete(id)) return;
-		decide(kind === "ask" ? "AskUserQuestion" : kind === "bash" ? "Bash" : "Write", msg);
-		// Un Write aprobado se ejecuta, como haría la tool real.
-		if (kind === "write" && msg.response?.response?.behavior === "allow") { mkdirSync(dirname(writePath), { recursive: true }); writeFileSync(writePath, "x"); }
-		const answers = msg.response?.response?.updatedInput?.answers ?? {};
-		if (kind === "ask" && process.env.FAKE_ANSWERS) writeFileSync(process.env.FAKE_ANSWERS, JSON.stringify(answers));
-		// Un deny en un ensayo real llega junto con el corte: el falso se queda quieto salvo que el test pida seguir.
-		if (msg.response?.response?.behavior === "deny" && process.env.FAKE_CONTINUE_AFTER_DENY !== "1") return;
-		next();
-	}
-});
-if (process.env.FAKE_IGNORE_SIGTERM !== "1") process.on("SIGTERM", () => process.exit(143));
-`);
-	const bin = join(dir, "claude");
-	writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`, { mode: 0o755 });
-	return bin;
-}
-
-// Fixture del ensayo: repo git con contrato, la spec chica de la fila run y un commit base (review #116-9: el host
-// compara una foto del repo antes y después; review #115-3: --stage run con --fixture exige la spec).
-function gitFixture(dir: string, contractText = contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |")), name = "fixture"): string {
-	const fixture = join(dir, name);
-	mkdirSync(join(fixture, ".chiche/specs"), { recursive: true });
-	writeFileSync(join(fixture, ".chiche/project.md"), contractText);
-	writeFileSync(join(fixture, ".chiche/specs/json-flag.md"), "# Spec — Flag --json\n<!-- Chiche-Tracking: version=2; type=spec; state=draft; issue=none; grill=none; superseded-by=none -->\n");
-	git(fixture, "init", "-q", "-b", "main");
-	git(fixture, "add", "-A");
-	git(fixture, "commit", "-q", "-m", "base");
-	return fixture;
-}
-
-function runHost(args: string[], env: Record<string, string>, cwd: string): { status: number | null; stdout: string; stderr: string } {
-	const result = spawnSync(process.execPath, [repoPath(HOST), ...args], { cwd, encoding: "utf8", env: { ...process.env, ...env }, timeout: 60_000 });
-	return { status: result.status, stdout: result.stdout, stderr: result.stderr };
-}
-
-test("CA-13: el host cuenta las AskUserQuestion del hijo headless: 0 → rehearsed, 1 en A3 → FAILED con corte, 3 en A2 → rehearsed, 4 en A2 → FAILED con corte, init sin la tool → unrehearsed", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-host-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const fixture = gitFixture(dir);
-	const today = new Date().toISOString().slice(0, 10);
-	const scenario = (name: string, args: string[], env: Record<string, string>) => {
-		const mark = join(dir, `${name}.done`);
-		const argv = join(dir, `${name}.argv`);
-		const answers = join(dir, `${name}.answers`);
-		const run = runHost(["--claude", claude, "--fixture", fixture, ...args], { FAKE_MARK: mark, FAKE_ARGV: argv, FAKE_ANSWERS: answers, ...env }, dir);
-		return { ...run, done: existsSync(mark), argv: existsSync(argv) ? (JSON.parse(readFileSync(argv, "utf8")) as string[]) : [], answers: existsSync(answers) ? readFileSync(answers, "utf8") : "" };
-	};
-
-	const zero = scenario("zero", ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0" });
-	assert.equal(zero.status, 0, zero.stderr);
-	assert.equal(zero.stdout.trim(), `rehearsed ${today}`);
-	assert.equal(zero.done, true, "sin corte: el hijo llegó al result");
-	assert.ok(zero.argv.includes("--permission-prompt-tool") && zero.argv[zero.argv.indexOf("--permission-prompt-tool") + 1] === "stdio", `argv: ${zero.argv.join(" ")}`);
-	for (const flag of ["-p", "--input-format", "--output-format", "--max-budget-usd"]) assert.ok(zero.argv.includes(flag), `argv sin ${flag}: ${zero.argv.join(" ")}`);
-	assert.equal(zero.argv[zero.argv.indexOf("--input-format") + 1], "stream-json");
-	assert.equal(zero.argv[zero.argv.indexOf("--output-format") + 1], "stream-json");
-
-	const oneA3 = scenario("one-a3", ["--stage", "grill", "--level", "unattended"], { FAKE_QUESTIONS: "1" });
-	assert.equal(oneA3.status, 1, oneA3.stderr);
-	assert.equal(oneA3.stdout.trim(), "FAILED (1 preguntas)");
-	assert.match(oneA3.stderr, /corte: tope de 0 preguntas superado/);
-	assert.equal(oneA3.done, false, "el host corta al hijo al superar el tope");
-
-	const threeA2 = scenario("three-a2", ["--stage", "spec", "--level", "A2"], { FAKE_QUESTIONS: "3" });
-	assert.equal(threeA2.status, 0, threeA2.stderr);
-	assert.equal(threeA2.stdout.trim(), `rehearsed ${today}`);
-	assert.match(threeA2.stderr, /preguntas: 3 \(tope 3\)/);
-	assert.match(threeA2.answers, /"¿Formato\?":"Compacto \(Recomendado\)"/, "el host responde la opción recomendada");
-
-	const fourA2 = scenario("four-a2", ["--stage", "run", "--level", "plan-approved"], { FAKE_QUESTIONS: "4" });
-	assert.equal(fourA2.status, 1, fourA2.stderr);
-	assert.equal(fourA2.stdout.trim(), "FAILED (4 preguntas)");
-	assert.match(fourA2.stderr, /corte: tope de 3 preguntas superado/);
-	assert.equal(fourA2.done, false);
-
-	const noTool = scenario("no-tool", ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_TOOLS: "Bash,Read" });
-	assert.equal(noTool.status, 2, noTool.stderr);
-	assert.equal(noTool.stdout.trim(), "unrehearsed");
-	assert.match(noTool.stderr, /init sin AskUserQuestion/);
-
-	const unsupported = runHost(["--claude", claude, "--fixture", fixture, "--stage", "spec", "--level", "A4"], {}, dir);
-	assert.equal(unsupported.status, 2);
-	assert.match(unsupported.stderr, /--autonomy A4: no soportado todavía \(v1 honra A1–A3\)/);
-	const a1 = runHost(["--claude", claude, "--fixture", fixture, "--stage", "spec", "--level", "A1"], {}, dir);
-	assert.equal(a1.status, 2);
-	assert.match(a1.stderr, /solo se ensayan plan-approved \(A2\) y unattended \(A3\)/);
+test("#130 CA-1: el host del ensayo de niveles no existe y solo lo nombran las entradas fechadas del contrato y los artefactos históricos", async () => {
+	assert.equal(existsSync(repoPath(`claude/chiche-init/${RETIRED_HOST}.mjs`)), false, "el host del ensayo se borró");
+	const grep = spawnSync("git", ["grep", "-l", "-F", RETIRED_HOST], { cwd: repoPath(""), encoding: "utf8" });
+	assert.ok(grep.status === 0 || grep.status === 1, `git grep falló: ${grep.stderr}`);
+	const files = grep.stdout.split("\n").filter(Boolean);
+	assert.deepEqual(files.filter((file) => file !== ".chiche/project.md" && !file.startsWith(".chiche/grills/") && !file.startsWith(".chiche/specs/")), [], "solo el contrato y los artefactos históricos nombran el host");
+	const outside = (await readRepoFile(".chiche/project.md")).split("\n").filter((line) => line.includes(RETIRED_HOST) && !/^- \d{4}-\d{2}-\d{2}: /.test(line));
+	assert.deepEqual(outside.map((line) => line.slice(0, 80)), [], "en el contrato solo lo nombran entradas fechadas de ## Decisiones humanas");
 });
 
-test("CA-13: sin --fixture el host genera el proyecto de juguete fuera del repo (CLI, test en verde, contrato con ## Autonomy y spec) y lo borra salvo --keep", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-toy-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const kept = runHost(["--claude", claude, "--stage", "run", "--level", "A3", "--keep"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "keep.argv") }, dir);
-	assert.equal(kept.status, 0, kept.stderr);
-	const toy = kept.stderr.match(/^fixture: (.+)$/m)?.[1] ?? "";
-	assert.ok(toy && existsSync(toy), `el host anuncia el fixture: ${kept.stderr}`);
-	t.after(() => rmSync(toy, { recursive: true, force: true }));
-	assert.ok(!toy.startsWith(repoPath("")), "el proyecto de juguete vive fuera del repo");
-	const tests = spawnSync(process.execPath, ["--test"], { cwd: toy, encoding: "utf8" });
-	assert.equal(tests.status, 0, tests.stderr);
-	const contract = readFileSync(join(toy, ".chiche/project.md"), "utf8");
-	assert.match(contract, /^## Autonomy$/m);
-	assert.match(contract, /^\| Action \| Pattern \| Reason \|$/m);
-	assert.ok(existsSync(join(toy, ".chiche/specs/json-flag.md")), "spec chica para la fila run");
-	assert.equal(spawnSync("git", ["-C", toy, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" }).stdout.trim(), "true", "el juguete es un repo git para chiche-run --no-pr");
-	const argv = JSON.parse(readFileSync(join(dir, "keep.argv"), "utf8")) as string[];
-	assert.ok(!argv.includes(toy), "el prompt viaja por stdin, no por argv");
-
-	const dropped = runHost(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "drop.argv") }, dir);
-	assert.equal(dropped.status, 0, dropped.stderr);
-	const dropToy = dropped.stderr.match(/^fixture: (.+)$/m)?.[1] ?? "";
-	assert.ok(dropToy, dropped.stderr);
-	assert.equal(existsSync(dropToy), false, "sin --keep el juguete se borra al terminar");
-});
-
-test("CA-13 y CA-14: chiche-init ensaya grill, spec y run solo en Claude Code con rehearsal-host.mjs; los otros harnesses escriben unrehearsed con el aviso literal; --no-verify escribe unrehearsed en todos", async () => {
+test("#130 CA-2: ningún chiche-init ensaya niveles: sin sección, sin pregunta de costo, sin aviso ni fila de upgrade, y Rehearsed lleva — en toda fila", async () => {
 	const problems: string[] = [];
-	const claude = await skillFile("claude", "chiche-init");
-	const rehearsal = section(claude, /^Ensayo de niveles/);
-	problems.push(...missing(rehearsal, [
-		/`rehearsal-host\.mjs`/,
-		/`claude -p --input-format stream-json --output-format stream-json --permission-prompt-tool stdio --max-budget-usd <tope>`/,
-		/`control_request` `can_use_tool` de `AskUserQuestion`/,
-		/`unattended` \(A3\) exige 0 y `plan-approved` \(A2\) exige hasta 3; al pasar el tope corta el hijo/,
-		/agregar un flag --json que imprima el resultado como JSON/,
-		/`rehearsed <fecha>` si pasó, `FAILED \(<n> preguntas\)` o `FAILED \(stop list: <Pattern>\)` si no/,
-		/no lista `AskUserQuestion` o el hijo no termina, escribe `unrehearsed`, nunca `rehearsed`/,
-		/Se saltea con `--no-verify`/,
-		/--stage <grill\|spec\|run> --level <A2\|A3>/,
-		/`review`, `land` y los ambientes no se ensayan/,
-	]).map((problem) => `claude/chiche-init «Ensayo de niveles»: ${problem}`));
-	if (!/toda fila ≥ A2 de `grill`, `spec` y `run` se ensaya/.test(section(claude, /^Fase 3 — /))) problems.push("claude/chiche-init Fase 3: no manda al ensayo");
-	if (/ensayo disponible desde Claude Code/.test(claude)) problems.push("claude/chiche-init: el aviso de otro harness no va acá");
-	for (const harness of ["codex", "opencode", "pi", "antigravity"] as const) {
-		const markdown = await skillFile(harness, "chiche-init");
-		if (/^## Ensayo de niveles/m.test(markdown) || /rehearsal-host/.test(markdown)) problems.push(`${harness}/chiche-init: el ensayo es solo de Claude Code`);
-		if (!new RegExp(`\`unrehearsed\` en toda fila ≥ A2, con el aviso literal \`${escapeRegExp(REHEARSAL_NOTICE)}\``).test(section(markdown, /^Fase 3 — /))) problems.push(`${harness}/chiche-init Fase 3: falta unrehearsed con el aviso literal`);
-	}
 	for (const harness of HARNESSES) {
-		if (!/`--no-verify`[^\n]*`unrehearsed` en todas/.test(section(await skillFile(harness, "chiche-init"), /^Fase 3 — /))) problems.push(`${harness}/chiche-init Fase 3: --no-verify no escribe unrehearsed en todas`);
+		const markdown = await skillFile(harness, "chiche-init");
+		for (const [label, pattern] of [
+			["la sección «Ensayo de niveles»", /^## Ensayo de niveles/m],
+			["la opción `Ensayar ahora`", /Ensayar ahora/],
+			["la opción `Dejar unrehearsed`", /Dejar unrehearsed/],
+			["el aviso del ensayo en otro harness", new RegExp(escapeRegExp(REHEARSAL_NOTICE))],
+			["la fila `Ensayo de niveles` de «Upgrade de contrato»", /^\| Ensayo de niveles \|/m],
+			["el host del ensayo", new RegExp(escapeRegExp(RETIRED_HOST))],
+			["la regla de ensayar toda fila ≥ A2", /toda fila ≥ A2[^\n]*se ensaya/],
+			["la regla «sin ensayo rige supervised»", /sin ensayo rige `supervised`/],
+		] as const) {
+			if (pattern.test(markdown)) problems.push(`${harness}/chiche-init: sigue ${label}`);
+		}
+		if (!/`Rehearsed` lleva `—` en toda fila: el ensayo de niveles se retiró en 5\.7\.0 y el nivel escrito rige desde que se escribe/.test(section(markdown, /^Fase 3 — /))) problems.push(`${harness}/chiche-init Fase 3: no dice que Rehearsed lleva — en toda fila`);
+		const template = fencedBlocks(section(markdown, /^Fase 4 — /)).find((fence) => /^# Contrato de autonomia/m.test(fence.content))?.content ?? "";
+		const rows = template.split("\n").filter((line) => /^\| [a-z]+ \| (?:supervised|plan-approved|unattended) \| /.test(line));
+		if (rows.length < 5) problems.push(`${harness}/chiche-init: el template no trae las filas de nivel`);
+		for (const row of rows) if (row.split("|")[4]?.trim() !== "—") problems.push(`${harness}/chiche-init: una fila del template no lleva — en Rehearsed: ${row}`);
+		const contractBlock = delimitedBlock(markdown, "autonomy-contract") ?? "";
+		if (!/`Rehearsed` lleva `—` en toda fila: la columna queda en el formato pero ya no se escribe ni se lee/.test(contractBlock)) problems.push(`${harness}/chiche-init: autonomy-contract no dice que Rehearsed ya no se lee`);
+		if (/solo rige si está `rehearsed`/.test(contractBlock)) problems.push(`${harness}/chiche-init: autonomy-contract sigue atando el nivel al ensayo`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -1041,20 +867,17 @@ test("CA-15: el ensayo de la stop list corre cada Pattern contra su Action y con
 	}
 });
 
-test("CA-16: las recetas de deploy son filas `deploy <ambiente>` de ## Comandos y una fila de ambiente sin su deploy verificado queda unrehearsed, en el template y en la Fase 2", async () => {
+test("CA-16: las recetas de deploy son filas `deploy <ambiente>` de ## Comandos, en el template y en la Fase 2; desde #130 la fila de ambiente lleva — en Rehearsed", async () => {
 	const problems: string[] = [];
 	for (const harness of HARNESSES) {
 		const markdown = await skillFile(harness, "chiche-init");
 		const template = fencedBlocks(section(markdown, /^Fase 4 — /)).find((fence) => /^# Contrato de autonomia/m.test(fence.content))?.content ?? "";
 		if (!/^\| deploy staging \| /m.test(template)) problems.push(`${harness}/chiche-init: el template no trae una fila deploy <ambiente> en ## Comandos`);
-		if (!/cuyo deploy <ambiente> no esta verificado queda unrehearsed/.test(template)) problems.push(`${harness}/chiche-init: el template no fija la regla del ambiente unrehearsed`);
-		if (!/\*\*Recetas de deploy\*\*[^\n]*`deploy <ambiente>`[^\n]*`verificado`[^\n]*`unrehearsed`/.test(section(markdown, /^Fase 2 — /))) problems.push(`${harness}/chiche-init: la Fase 2 no documenta las recetas de deploy`);
-		// Reviews #113-7, #115-6, #115-17: el ejemplo no muestra rehearsed, staging queda unrehearsed y la stop list frena su propia receta.
-		if (/rehearsed 20/.test(template)) problems.push(`${harness}/chiche-init: el ejemplo muestra rehearsed, que esta capa no puede producir sin ensayo`);
-		if (!/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no queda unrehearsed con su deploy no probado (y Umbral —, #119 CA-1)`);
+		if (!/\*\*Recetas de deploy\*\*[^\n]*`deploy <ambiente>`[^\n]*`verificado \| FALLA \| no probado`/.test(section(markdown, /^Fase 2 — /))) problems.push(`${harness}/chiche-init: la Fase 2 no documenta las recetas de deploy`);
+		// Reviews #113-7, #115-6, #115-17 e issue #130: el ejemplo no muestra un valor de ensayo, staging lleva — y la stop list frena su propia receta.
+		if (/rehearsed/.test(template.replace(/^Rehearsed: [^\n]*$/m, "").replace(/\| Rehearsed \|/, ""))) problems.push(`${harness}/chiche-init: el ejemplo muestra un valor de ensayo`);
+		if (!/^\| staging \| supervised \| 2026-07-02 \| — \| — \|$/m.test(template)) problems.push(`${harness}/chiche-init: el ejemplo staging no lleva — en Rehearsed y en Umbral (#119 CA-1, #130 CA-2)`);
 		if (!/^\| \.\/deploy\.sh staging \| deploy\\\.sh \|/m.test(template)) problems.push(`${harness}/chiche-init: la fila de deploy del ejemplo no frena ./deploy.sh staging`);
-		if (!/una fila `supervised` lleva `—`, salvo una fila de ambiente cuyo `deploy <ambiente>` no está `verificado`, que lleva `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no dice cuál de las dos reglas de Rehearsed manda`);
-		if (!/Una fila de ambiente cuyo `deploy <ambiente>` de `## Comandos` no está `verificado` queda `unrehearsed`/.test(delimitedBlock(markdown, "autonomy-contract") ?? "")) problems.push(`${harness}/chiche-init: autonomy-contract no fija la regla del ambiente`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -1108,80 +931,6 @@ test("CA-17: el caso autonomy-stop-list-a3 existe con su fixture y graders, eval
 
 // ---------------------------------------------------------------------------
 // Reviews del stack #117, grupo A: seguridad del dial
-
-function runHostAsync(args: string[], env: Record<string, string>, cwd: string) {
-	return spawn(process.execPath, [repoPath(HOST), ...args], { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
-}
-
-test("review #115-1: un result con is_error o con subtype de error nunca es rehearsed: unrehearsed con el subtype en el motivo", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-result-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const fixture = join(dir, "fixture");
-	mkdirSync(fixture);
-	for (const [name, env] of [
-		["budget", { FAKE_RESULT_SUBTYPE: "error_max_budget_usd", FAKE_RESULT_IS_ERROR: "1" }],
-		["auth", { FAKE_RESULT_SUBTYPE: "success", FAKE_RESULT_IS_ERROR: "1" }],
-		["exec", { FAKE_RESULT_SUBTYPE: "error_during_execution", FAKE_RESULT_IS_ERROR: "0" }],
-	] as const) {
-		const run = runHost(["--claude", claude, "--fixture", fixture, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, `${name}.argv`), ...env }, dir);
-		assert.equal(run.status, 2, `${name}: ${run.stderr}`);
-		assert.equal(run.stdout.trim(), "unrehearsed", name);
-		assert.match(run.stderr, new RegExp(`result ${env.FAKE_RESULT_SUBTYPE}`), `${name}: el motivo nombra el subtype`);
-		if (env.FAKE_RESULT_IS_ERROR === "1") assert.match(run.stderr, /is_error/, name);
-	}
-});
-
-test("review #115-2: el host cuenta preguntas, no llamadas, y suma los tool_use de AskUserQuestion del stream sin doble conteo", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-count-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const fixture = gitFixture(dir);
-	const run = (name: string, args: string[], env: Record<string, string>) => runHost(["--claude", claude, "--fixture", fixture, ...args], { FAKE_ARGV: join(dir, `${name}.argv`), ...env }, dir);
-	const fourInOne = run("four-in-one", ["--stage", "spec", "--level", "A2"], { FAKE_QUESTIONS: "1", FAKE_QPER: "4" });
-	assert.equal(fourInOne.status, 1, fourInOne.stderr);
-	assert.equal(fourInOne.stdout.trim(), "FAILED (4 preguntas)", "una llamada con 4 preguntas supera el tope 3");
-	const threeInOne = run("three-in-one", ["--stage", "spec", "--level", "A2"], { FAKE_QUESTIONS: "1", FAKE_QPER: "3" });
-	assert.equal(threeInOne.status, 0, threeInOne.stderr);
-	assert.match(threeInOne.stderr, /preguntas: 3 \(tope 3\)/);
-	const linked = run("linked", ["--stage", "spec", "--level", "A2"], { FAKE_QUESTIONS: "2", FAKE_ASSISTANT: "linked" });
-	assert.equal(linked.status, 0, linked.stderr);
-	assert.match(linked.stderr, /preguntas: 2 \(tope 3\)/, "el tool_use y su can_use_tool con el mismo id cuentan una vez");
-	const orphan = run("orphan", ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ASSISTANT: "orphan" });
-	assert.equal(orphan.status, 1, orphan.stderr);
-	assert.equal(orphan.stdout.trim(), "FAILED (1 preguntas)", "un tool_use de AskUserQuestion sin can_use_tool también cuenta");
-});
-
-test("review #115-3: el host atrapa SIGTERM y SIGINT: mata al hijo, borra el juguete, imprime unrehearsed y sale con 2; chiche-init lo corre con run_in_background", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-signal-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	for (const signal of ["SIGTERM", "SIGINT"] as const) {
-		const child = runHostAsync(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_HANG: "1", FAKE_ARGV: join(dir, `${signal}.argv`) }, dir);
-		let stdout = "";
-		let stderr = "";
-		child.stdout.on("data", (chunk) => { stdout += chunk; });
-		child.stderr.on("data", (chunk) => { stderr += chunk; });
-		await new Promise<void>((resolve) => {
-			const poll = setInterval(() => {
-				if (/^fixture: /m.test(stderr) && existsSync(join(dir, `${signal}.argv`))) {
-					clearInterval(poll);
-					setTimeout(resolve, 100);
-				}
-			}, 25);
-		});
-		const toy = stderr.match(/^fixture: (.+)$/m)?.[1] ?? "";
-		assert.ok(toy && existsSync(toy), `${signal}: juguete creado`);
-		child.kill(signal);
-		const code = await new Promise<number | null>((resolve) => child.on("close", (status) => resolve(status)));
-		assert.equal(code, 2, `${signal}: exit 2 (${stderr})`);
-		assert.equal(stdout.trim(), "unrehearsed", signal);
-		assert.match(stderr, new RegExp(`${signal}`), `${signal}: el motivo nombra la señal`);
-		assert.equal(existsSync(toy), false, `${signal}: el juguete se borró`);
-	}
-	const skill = section(await skillFile("claude", "chiche-init"), /^Ensayo de niveles/);
-	assert.match(skill, /`run_in_background`/, "chiche-init corre el host en background: la tool Bash corta a los 600 s");
-});
 
 test("review #113-4, #115-18: ## Autonomy sin stop list legible avisa y el nivel del contrato cae a A1; el flag sigue mandando; el ensayo falla con stop list ausente o vacía", async (t) => {
 	const command = await canonicalCommand();
@@ -1334,40 +1083,11 @@ test("review #113-1: chiche-init preserva ## Limites verbatim hasta migrar; Auto
 		problems.push(...missing(upgrade, [
 			/^\| Autonomy \| no existe la sección `## Autonomy`[^\n]*con un `## Limites` presente, `## Autonomy` se escribe solo junto con la migración de `Stop list`[^\n]*elegir `Autonomy` arrastra `Stop list`[^\n]*con `--autonomy` ≥ A2 no se escribe y queda `mejora disponible`/m,
 			/^\| Stop list \| existe `## Limites` en prosa[^\n]*`## Limites` se preserva verbatim hasta que se migre[^\n]*con `--autonomy` ≥ A2 no migra y queda `mejora disponible`/m,
-			/^\| Ensayo de niveles \| hay una fila ≥ A2 de `grill`, `spec` o `run` sin `rehearsed <fecha>`/m,
 		]).map((problem) => `${harness}/chiche-init Upgrade: ${problem}`));
 		const phase4 = section(markdown, /^Fase 4 — /);
 		if (!/`## Limites`[^\n]*se preserva verbatim/.test(phase4)) problems.push(`${harness}/chiche-init Fase 4: --update no preserva ## Limites`);
-		if (!/`## Autonomy` \(preservar verbatim[^\n]*salvo la columna `Rehearsed`/.test(phase4)) problems.push(`${harness}/chiche-init Fase 4: la columna Rehearsed no es la excepción al verbatim`);
+		if (!/`## Autonomy` \(preservar verbatim, salvo el prefijo `FAILED` del ensayo de la stop list y la columna `Umbral`/.test(phase4)) problems.push(`${harness}/chiche-init Fase 4: las excepciones al verbatim no son el prefijo FAILED y la columna Umbral (#130: Rehearsed ya no se reescribe)`);
 	}
-	assert.deepEqual(problems, []);
-});
-
-test("review #115-16, #115-5: antes del ensayo pago se muestra el costo y se pregunta Ensayar ahora / Dejar unrehearsed; con --autonomy ≥ A2 no se ensaya; la checklist ensaya filas unrehearsed en Claude Code", async () => {
-	const table = await interactionTable();
-	const problems: string[] = [];
-	const claude = section(await skillFile("claude", "chiche-init"), /^Ensayo de niveles/);
-	problems.push(...missing(claude, [
-		/costo estimado/,
-		/`Ensayar ahora \(Recomendado\)` \/ `Dejar unrehearsed`/,
-		/`AskUserQuestion`/,
-		/Con `--autonomy` ≥ A2 no se ensaya/,
-		/fila `Ensayo de niveles` de «Upgrade de contrato»/,
-	]).map((problem) => `claude/chiche-init «Ensayo de niveles»: ${problem}`));
-	for (const harness of HARNESSES) {
-		const upgrade = section(await skillFile(harness, "chiche-init"), /^Upgrade de contrato/);
-		const row = upgrade.split("\n").find((line) => line.startsWith("| Ensayo de niveles |")) ?? "";
-		if (!row) {
-			problems.push(`${harness}/chiche-init: falta la fila Ensayo de niveles`);
-			continue;
-		}
-		if (harness === "claude" && !/ensaya esa fila[^\n]*solo la columna `Rehearsed`/.test(row)) problems.push("claude/chiche-init: la fila no ensaya ni acota la excepción a Rehearsed");
-		if (harness !== "claude" && !new RegExp(escapeRegExp(REHEARSAL_NOTICE)).test(row)) problems.push(`${harness}/chiche-init: la fila no manda a Claude Code con el aviso literal`);
-		void table;
-	}
-	const contractEntry = (await readRepoFile(".chiche/project.md")).split("\n").find((line) => line.startsWith("- 2026-11-05: capa 4 del dial de autonomia")) ?? "";
-	assert.doesNotMatch(contractEntry, /todo `unrehearsed`/, "la entrada del contrato no dice «todo unrehearsed»: run, review y land llevan —");
-	assert.match(contractEntry, /`grill` y `spec` `unrehearsed`[^\n]*fila `Ensayo de niveles`/, "la entrada dice qué filas y cómo se ensayan");
 	assert.deepEqual(problems, []);
 });
 
@@ -1382,8 +1102,6 @@ const STOP_LIST_PATTERNS: Array<[string, RegExp, string[], string[]]> = [
 	["tag v", /^git push \.\* v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+$/, ["git push origin v5.1.1"], ["git push origin v-branch"]],
 	["eval", /^claude plugin eval$/, ["claude plugin eval . --runs 1"], ["claude plugin validate ."]],
 	["workflow eval", /^gh workflow run plugin-eval$/, ["gh workflow run plugin-eval.yml"], ["gh workflow run claude-review.yml"]],
-	// Review #116-2: la fila frena la corrida del host (también con opciones de node), no su edición ni su chequeo.
-	["host", /^node \.\*rehearsal-host\\\.mjs \.\*--stage$/, ["node claude/chiche-init/rehearsal-host.mjs --stage spec --level A3", "node --no-warnings claude/chiche-init/rehearsal-host.mjs --stage run --level A2"], ["node --test", "git add claude/chiche-init/rehearsal-host.mjs", "node --check claude/chiche-init/rehearsal-host.mjs", "git diff claude/chiche-init/rehearsal-host.mjs"]],
 	// Review #116-15.
 	["follow-tags", /^git push \.\*--follow-tags$/, ["git push --follow-tags origin sdd/x/1-a"], ["git push -u origin sdd/x/1-a"]],
 ];
@@ -1560,7 +1278,7 @@ test("review #115-8: el ensayo de la stop list corre en la Fase 4 sobre el archi
 	assert.deepEqual(problems, []);
 });
 
-test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fuera de la historia, el README del fixture nombra su caso, el host cita el pedido, y parada: imprime los patrones con barras invertidas intactos en bash, dash y zsh", async (t) => {
+test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fuera de la historia, el README del fixture nombra su caso, y parada: imprime los patrones con barras invertidas intactos en bash, dash y zsh", async (t) => {
 	const contractText = await readRepoFile(".chiche/project.md");
 	assert.doesNotMatch(section(contractText, /^Gaps$/), /## Limites/, "## Gaps ya no cita ## Limites");
 	assert.doesNotMatch(contractText, /\(por limite\)/, "la fila de pi-clean ya no dice (por limite)");
@@ -1571,23 +1289,6 @@ test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fu
 
 	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-prompt-")));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const fixture = gitFixture(dir);
-	for (const [stage, expected] of [
-		["grill", '/grill "agregar un flag --json que imprima el resultado como JSON" --autonomy A3'],
-		["spec", '/chiche-spec "agregar un flag --json que imprima el resultado como JSON" --autonomy A3 --out local'],
-		["run", "/chiche-run .chiche/specs/json-flag.md --autonomy A3 --inline --no-pr"],
-	] as const) {
-		const prompt = join(dir, `${stage}.prompt`);
-		const run = runHost(["--claude", claude, "--fixture", fixture, "--stage", stage, "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, `${stage}.argv`), FAKE_PROMPT: prompt }, dir);
-		assert.equal(run.status, 0, `${stage}: ${run.stderr}`);
-		assert.equal(readFileSync(prompt, "utf8"), expected, stage);
-	}
-	// Ronda 2 (#116-17): --inline solo en A3; chiche-run aborta con `--inline exige --autonomy A3` en A2.
-	const promptA2 = join(dir, "run-a2.prompt");
-	runHost(["--claude", claude, "--fixture", fixture, "--stage", "run", "--level", "A2"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "run-a2.argv"), FAKE_PROMPT: promptA2 }, dir);
-	assert.equal(readFileSync(promptA2, "utf8"), "/chiche-run .chiche/specs/json-flag.md --autonomy A2 --no-pr", "ronda 2: --inline solo en A3");
-
 	const command = await canonicalCommand();
 	const repo = join(dir, "repo");
 	mkdirSync(join(repo, ".chiche"), { recursive: true });
@@ -1604,62 +1305,6 @@ test("review #116-7, #115-19, #115-15, #113-5: el contrato no cita ## Limites fu
 
 // ---------------------------------------------------------------------------
 // Reviews del stack #117, grupo C
-
-test("review #115-13: el host niega Bash que matchea la stop list del juguete (FAILED), Write/Edit fuera del directorio del ensayo, y todo can_use_tool con veredicto ya fijado", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-deny-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const fixture = gitFixture(dir, contract(LEVELS_TABLE("| run | supervised | 2026-11-05 | — |", "| npm publish | npm publish | nunca |")));
-	const run = (name: string, args: string[], env: Record<string, string>) => {
-		const decisions = join(dir, `${name}.decisions`);
-		const result = runHost(["--claude", claude, "--fixture", fixture, ...args], { FAKE_ARGV: join(dir, `${name}.argv`), FAKE_DECISIONS: decisions, ...env }, dir);
-		return { ...result, decisions: existsSync(decisions) ? readFileSync(decisions, "utf8").trim().split("\n") : [] };
-	};
-	const publish = run("publish", ["--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_BASH: "npm publish --access public" });
-	assert.equal(publish.status, 1, publish.stderr);
-	assert.equal(publish.stdout.trim(), "FAILED (stop list: npm publish)", "review #116-7: la celda cita el Pattern, no el comando");
-	assert.deepEqual(publish.decisions, ["Bash deny"]);
-	const tests = run("tests", ["--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_BASH: "node --test" });
-	assert.equal(tests.status, 0, tests.stderr);
-	assert.deepEqual(tests.decisions, ["Bash allow"]);
-	// La raíz escribible es el padre del fixture (ahí cae el worktree hermano de chiche-run); afuera de eso, deny.
-	const outside = run("outside", ["--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_WRITE: join(dirname(dir), "autonomy-gate-afuera.txt"), FAKE_CONTINUE_AFTER_DENY: "1" });
-	assert.equal(outside.status, 0, outside.stderr);
-	assert.deepEqual(outside.decisions, ["Write deny"]);
-	assert.equal(existsSync(join(dirname(dir), "autonomy-gate-afuera.txt")), false);
-	const inside = run("inside", ["--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_WRITE: join(fixture, "src", "nuevo.mjs") });
-	assert.deepEqual(inside.decisions, ["Write allow"]);
-	// Con el veredicto fijado (tope superado), lo que siga se niega: la pregunta cortada y el Bash posterior.
-	const after = run("after", ["--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "1", FAKE_BASH: "node --test", FAKE_BASH_AFTER: "1", FAKE_CONTINUE_AFTER_DENY: "1" });
-	assert.equal(after.status, 1, after.stderr);
-	assert.deepEqual(after.decisions, ["AskUserQuestion deny", "Bash deny"]);
-});
-
-test("review #115-11, #115-12, #115-14: el juguete vive en <tmp>/mini-cli y se borra el padre (el worktree hermano cae adentro); stdout en utf8; --timeout y --budget inválidos son uso", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-toy2-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const kept = runHost(["--claude", claude, "--stage", "run", "--level", "A3", "--keep"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "keep.argv"), FAKE_WRITE: "" }, dir);
-	assert.equal(kept.status, 0, kept.stderr);
-	const toy = kept.stderr.match(/^fixture: (.+)$/m)?.[1] ?? "";
-	assert.ok(toy.endsWith("/mini-cli"), `el juguete es <tmp>/mini-cli: ${toy}`);
-	const parent = toy.slice(0, -"/mini-cli".length);
-	t.after(() => rmSync(parent, { recursive: true, force: true }));
-	const sibling = runHost(["--claude", claude, "--fixture", toy, "--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "sib.argv"), FAKE_DECISIONS: join(dir, "sib.decisions"), FAKE_WRITE: join(parent, "mini-cli-sdd-json-flag", "src", "cli.mjs") }, dir);
-	assert.equal(sibling.status, 0, sibling.stderr);
-	assert.equal(readFileSync(join(dir, "sib.decisions"), "utf8").trim(), "Write allow", "el worktree hermano del ensayo de run queda dentro del padre y se permite");
-	const dropped = runHost(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "drop.argv") }, dir);
-	const dropToy = dropped.stderr.match(/^fixture: (.+)$/m)?.[1] ?? "";
-	assert.equal(existsSync(dropToy.slice(0, -"/mini-cli".length)), false, "sin --keep se borra el padre entero");
-	assert.match(await readRepoFile(HOST), /child\.stdout\.setEncoding\("utf8"\)/, "la decodificación es por stream, no por chunk");
-	for (const args of [["--timeout", "abc"], ["--timeout", "0"], ["--timeout", "-5"], ["--budget", "nan"], ["--budget", "0"], ["--budget", "-1"]]) {
-		const bad = runHost(["--claude", claude, "--fixture", dir, "--stage", "spec", "--level", "A3", ...args], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "bad.argv") }, dir);
-		assert.equal(bad.status, 2, args.join(" "));
-		assert.equal(bad.stdout.trim(), "unrehearsed", args.join(" "));
-		assert.match(bad.stderr, new RegExp(`${args[0]}: número finito mayor que 0`), args.join(" "));
-		assert.equal(existsSync(join(dir, "bad.argv")), false, `${args.join(" ")}: no se lanza el hijo`);
-	}
-});
 
 test("review #115-20: la fila de evals del contrato dice qué alcanza el grant de Bash y que la calibración de 1.15 USD ya no vale", async () => {
 	const row = (await readRepoFile(".chiche/project.md")).split("\n").find((line) => line.startsWith("| evals del plugin (Claude Code) |")) ?? "";
@@ -1785,8 +1430,6 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 		const init = await skillFile(harness, "chiche-init");
 		// #116-2: la confirmación del costo autoriza el comando del host y nada más.
 		// El ensayo pago vive solo en Claude Code (review #115-16): los otros harnesses mandan ahí con el aviso literal.
-		if (harness === "claude" && !/\*\*Costo y confirmación\.\*\*[^\n]*Confirmar `Ensayar ahora` autoriza ese comando del host y ningún otro\./.test(init)) problems.push(`${harness}/chiche-init: Ensayar ahora no acota la autorización al comando del host`);
-		if (harness === "claude" && !/`FAILED \(<n> preguntas\)` o `FAILED \(stop list: <Pattern>\)` si no\./.test(init)) problems.push(`${harness}/chiche-init: el resultado no nombra FAILED (stop list: <Pattern>) (review #116-7)`);
 		// #116-12: el párrafo canónico queda arriba.
 		if (!/\*\*Ensayo de la stop list\.\*\* Con el archivo escrito, correr el comando canónico de «`## Autonomy`» \(arriba, «Ensayo de la stop list»\)/.test(init)) problems.push(`${harness}/chiche-init: la referencia al párrafo canónico no dice «arriba»`);
 		if (/\(abajo, «Ensayo de la stop list»\)/.test(init)) problems.push(`${harness}/chiche-init: sigue diciendo «abajo»`);
@@ -1796,7 +1439,7 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 		if (!/`--autonomy` sin valor \(no hay token siguiente, o el siguiente empieza con `--`\) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor\./.test(levels)) problems.push(`${harness}/chiche-run: autonomy-levels no define --autonomy sin valor`);
 		const resolveBlock = delimitedBlock(run, "autonomy-resolve") ?? "";
 		if (!/`<flag>` se sustituye solo si cumple `\^\[A-Za-z0-9-\]\+\$`; si no, el skill aborta como valor inválido sin correr el comando/.test(resolveBlock)) problems.push(`${harness}/chiche-run: autonomy-resolve no sanea <flag>`);
-		if (!/las únicas excepciones son la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan, y el comando exacto del ensayo de `chiche-init`, que la pregunta de costo autoriza/.test(resolveBlock)) problems.push(`${harness}/chiche-run: autonomy-resolve no exime el ensayo de chiche-init (review #116-2)`);
+		if (!/la única excepción es la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan/.test(resolveBlock)) problems.push(`${harness}/chiche-run: autonomy-resolve no deja a chiche-land como única excepción (review #116-2, #130 CA-4)`);
 		// #114-5: --inline exige A3 en los cinco harnesses.
 		if (!/^- `--inline` — [^\n]*Con otro nivel efectivo aborta con `--inline exige --autonomy A3`\./m.test(run)) problems.push(`${harness}/chiche-run: --inline no exige A3`);
 		if ((harness === "codex" || harness === "opencode") && !/^- `--inline` — solo con `--autonomy A3`: acá A3 ya corre inline, y se acepta por uniformidad con los harnesses que delegan\./m.test(run)) problems.push(`${harness}/chiche-run: --inline no explica que acá A3 ya corre inline`);
@@ -1829,135 +1472,6 @@ test("review ronda 1 (#114-1, #114-3, #114-5, #114-6, #114-8, #116-2, #116-10, #
 	if (!/y su paso tras escribir el contrato \(Fase 4\)/.test(row)) problems.push("contrato: la fila del gate no nombra la Fase 4");
 	if (/su paso en la Fase 2/.test(row)) problems.push("contrato: la fila del gate sigue diciendo Fase 2");
 	assert.deepEqual(problems, []);
-});
-
-test("review #116-9: rehearsed exige que la etapa haya dejado algo (archivo, commit o handoff); un hijo success sin cambios es unrehearsed; el tope superado sigue siendo FAILED", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-work-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const today = new Date().toISOString().slice(0, 10);
-	const run = (name: string, fixture: string, args: string[], env: Record<string, string>) => runHost(["--claude", claude, "--fixture", fixture, ...args], { FAKE_ARGV: join(dir, `${name}.argv`), ...env }, dir);
-	for (const stage of ["grill", "spec", "run"] as const) {
-		for (const level of ["A2", "A3"] as const) {
-			const empty = run(`empty-${stage}-${level}`, gitFixture(dir, undefined, `empty-${stage}-${level}`), ["--stage", stage, "--level", level], { FAKE_QUESTIONS: "0", FAKE_NO_WORK: "1" });
-			assert.equal(empty.status, 2, `${stage} ${level}: ${empty.stderr}`);
-			assert.equal(empty.stdout.trim(), "unrehearsed", `${stage} ${level}: sin cambios no se certifica`);
-			assert.match(empty.stderr, /sin cambios en el repo del ensayo/, `${stage} ${level}: ${empty.stderr}`);
-		}
-	}
-	const worked = run("worked", gitFixture(dir, undefined, "worked"), ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0" });
-	assert.equal(worked.status, 0, worked.stderr);
-	assert.equal(worked.stdout.trim(), `rehearsed ${today}`);
-	// Un handoff de grill vive en el common dir del repo (`.git/chiche/grills`): también cuenta como trabajo.
-	const handoffFixture = gitFixture(dir, undefined, "handoff");
-	const handoffDir = join(handoffFixture, ".git/chiche/grills");
-	const handoff = run("handoff", handoffFixture, ["--stage", "grill", "--level", "A2"], { FAKE_QUESTIONS: "0", FAKE_NO_WORK: "1", FAKE_WRITE: join(handoffDir, "json-flag.md") });
-	assert.equal(handoff.status, 0, `${handoff.stderr}`);
-	assert.equal(handoff.stdout.trim(), `rehearsed ${today}`, "el handoff en el common dir cuenta como trabajo");
-	// Un hijo que solo escribe fuera del fixture no deja huella adentro: unrehearsed.
-	const outsideFixture = gitFixture(dir, undefined, "outside");
-	const outside = run("outside", outsideFixture, ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_NO_WORK: "1", FAKE_WRITE: join(dir, "afuera.txt"), FAKE_CONTINUE_AFTER_DENY: "1" });
-	assert.equal(outside.status, 2, outside.stderr);
-	assert.equal(outside.stdout.trim(), "unrehearsed");
-	const over = run("over", gitFixture(dir, undefined, "over"), ["--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "1" });
-	assert.equal(over.status, 1, over.stderr);
-	assert.equal(over.stdout.trim(), "FAILED (1 preguntas)", "el tope manda sobre la foto");
-});
-
-test("review #115-3, #116-6: --stage run con --fixture exige la spec chica y rechaza --request; un --fixture relativo se resuelve y no niega los Write de adentro", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-fixture-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const bare = join(dir, "sin-spec");
-	mkdirSync(join(bare, ".chiche"), { recursive: true });
-	git(bare, "init", "-q", "-b", "main");
-	const noSpec = runHost(["--claude", claude, "--fixture", bare, "--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "nospec.argv") }, dir);
-	assert.equal(noSpec.status, 2, noSpec.stderr);
-	assert.equal(noSpec.stdout.trim(), "unrehearsed");
-	assert.match(noSpec.stderr, /--stage run con --fixture: falta \.chiche\/specs\/json-flag\.md/, noSpec.stderr);
-	assert.equal(existsSync(join(dir, "nospec.argv")), false, "no se lanza el hijo");
-	const fixture = gitFixture(dir);
-	const withRequest = runHost(["--claude", claude, "--fixture", fixture, "--stage", "run", "--level", "A3", "--request", "otro pedido"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "request.argv") }, dir);
-	assert.equal(withRequest.status, 2, withRequest.stderr);
-	assert.match(withRequest.stderr, /--request no aplica a --stage run/, withRequest.stderr);
-	assert.equal(existsSync(join(dir, "request.argv")), false, "no se lanza el hijo");
-	const relative = runHost(["--claude", claude, "--fixture", "fixture", "--stage", "run", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "rel.argv"), FAKE_DECISIONS: join(dir, "rel.decisions"), FAKE_WRITE: join(fixture, "src", "nuevo.mjs") }, dir);
-	assert.equal(relative.status, 0, relative.stderr);
-	assert.equal(readFileSync(join(dir, "rel.decisions"), "utf8").trim(), "Write allow", "con --fixture relativo el Write de adentro se aprueba (review #116-6)");
-	assert.match(relative.stderr, new RegExp(`^fixture: ${escapeRegExp(fixture)}$`, "m"), "el host anuncia la ruta resuelta");
-});
-
-test("review #115-4: el juguete se arma con core.hooksPath neutralizado y, si git falla o falta, el host sale con uso (unrehearsed, exit 2) sin hijo ni juguete huérfano", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-toygit-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const today = new Date().toISOString().slice(0, 10);
-	// Un hook global que falla no debe romper el commit del juguete.
-	const home = join(dir, "home");
-	const hooks = join(home, "hooks");
-	mkdirSync(hooks, { recursive: true });
-	writeFileSync(join(hooks, "pre-commit"), "#!/bin/sh\necho hook global fallando >&2\nexit 1\n", { mode: 0o755 });
-	writeFileSync(join(home, ".gitconfig"), `[core]\n\thooksPath = ${hooks}\n`);
-	const hooked = runHost(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "hooked.argv"), HOME: home, XDG_CONFIG_HOME: join(home, "xdg") }, dir);
-	assert.equal(hooked.status, 0, hooked.stderr);
-	assert.equal(hooked.stdout.trim(), `rehearsed ${today}`, "el hook global no rompe el juguete");
-	assert.doesNotMatch(hooked.stderr, /hook global fallando/, "core.hooksPath queda neutralizado");
-	// Sin git en PATH, el juguete no se puede armar: uso, sin lanzar el hijo.
-	const emptyPath = join(dir, "empty-path");
-	mkdirSync(emptyPath);
-	// TMPDIR propio (ronda 2, #116-23): el chequeo de huérfanos mira solo lo que creó este caso, no un --keep de otra corrida.
-	const hostTmp = join(dir, "tmp");
-	mkdirSync(hostTmp);
-	const noGit = runHost(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_ARGV: join(dir, "nogit.argv"), PATH: emptyPath, TMPDIR: hostTmp }, dir);
-	assert.equal(noGit.status, 2, noGit.stderr);
-	assert.equal(noGit.stdout.trim(), "unrehearsed");
-	assert.match(noGit.stderr, /git init falló armando el juguete/, noGit.stderr);
-	assert.equal(existsSync(join(dir, "nogit.argv")), false, "no se lanza el hijo");
-	assert.deepEqual(readdirSync(hostTmp), [], "el host no deja juguete al fallar git");
-});
-
-test("review #116-8: si el hijo ignora SIGTERM, el handler de señales del host lo mata con SIGKILL a los 2 s y recién entonces concluye con unrehearsed", async (t) => {
-	const dir = realpathSync(mkdtempSync(join(tmpdir(), "autonomy-gate-sigkill-")));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
-	const claude = fakeClaude(dir);
-	const pidFile = join(dir, "child.pid");
-	const host = runHostAsync(["--claude", claude, "--stage", "spec", "--level", "A3"], { FAKE_QUESTIONS: "0", FAKE_HANG: "1", FAKE_IGNORE_SIGTERM: "1", FAKE_PID: pidFile, FAKE_ARGV: join(dir, "kill.argv") }, dir);
-	let stdout = "";
-	let stderr = "";
-	host.stdout.on("data", (chunk) => { stdout += chunk; });
-	host.stderr.on("data", (chunk) => { stderr += chunk; });
-	await new Promise<void>((resolve) => {
-		const poll = setInterval(() => {
-			if (/^fixture: /m.test(stderr) && existsSync(pidFile)) {
-				clearInterval(poll);
-				setTimeout(resolve, 100);
-			}
-		}, 25);
-	});
-	const pid = Number(readFileSync(pidFile, "utf8"));
-	const started = Date.now();
-	host.kill("SIGTERM");
-	const code = await new Promise<number | null>((resolve) => host.on("close", (status) => resolve(status)));
-	const elapsed = Date.now() - started;
-	assert.equal(code, 2, `exit 2 (${stderr})`);
-	assert.equal(stdout.trim(), "unrehearsed");
-	assert.ok(elapsed >= 1900 && elapsed < 10_000, `concluye tras el SIGKILL de los 2 s, no antes ni colgado: ${elapsed} ms`);
-	await new Promise((resolve) => setTimeout(resolve, 200));
-	assert.throws(() => process.kill(pid, 0), /ESRCH/, "el hijo que ignoraba SIGTERM murió por SIGKILL");
-});
-
-test("review #116-14, #116-16: el host nombra withinCap con el comentario correcto y la stop list del juguete trae las cuatro filas de push de la plantilla", async () => {
-	const host = await readRepoFile(HOST);
-	assert.match(host, /Devuelve true si el id ya se contó\n\/\/ \(ese `can_use_tool` se aprueba sin recontar\) y false si el tope quedó superado \(y entonces corta al hijo\)\./, "comentario de countQuestions");
-	assert.match(host, /const withinCap = countQuestions\(request\.tool_use_id, request\.input\);\n\s*if \(!withinCap \|\| verdict !== null\)/, "withinCap no tapa el Set counted");
-	assert.doesNotMatch(host, /const counted = countQuestions/, "el const que tapaba el Set se renombró");
-	for (const row of [
-		'"| git push origin main | git push .*[ :/]main([^-[:alnum:]_/.].*)?$ | solo via PR |",',
-		'"| git push --force | git push .*--force | nunca |",',
-		'"| git push -f | git push( .*)? -[a-zA-Z]*f | nunca |",',
-		'"| git push origin +main | git push .* \\\\+[^ ]+ | nunca |",',
-	]) assert.ok(host.includes(row), `falta la fila del juguete ${row}`);
-	assert.doesNotMatch(host, /\| git push origin main \| git push \.\* main \|/, "el patrón viejo del juguete se fue");
 });
 
 // Ronda 3 (#116-28 y #116-3 son el mismo hueco por dos caminos): invariante del resolver sobre toda la matriz de refs.
@@ -2039,7 +1553,7 @@ test("ronda 3: invariante del resolver — si el default tiene stop list, un niv
 	assert.deepEqual(problems, []);
 });
 
-test("ronda 3 (#116-31, #116-32, #116-34, #116-35, #116-36): pins cosméticos de Codex, Pi, el workflow de evals, el controller y chiche-init", async () => {
+test("ronda 3 (#116-31, #116-32, #116-34, #116-35): pins cosméticos de Codex, Pi, el workflow de evals y el controller", async () => {
 	const problems: string[] = [];
 	if (!/no se carga desde acá\. Elegir la opción del menú es la aprobación: `state=approved` y `spec\.approved` se escriben antes de imprimir el comando, aunque el usuario no lo envíe\./.test(await skillFile("codex", "chiche-spec"))) problems.push("codex/chiche-spec: la aprobación previa al comando impreso no está explicada (#116-31)");
 	const piRun = await skillFile("pi", "chiche-run");
@@ -2050,8 +1564,6 @@ test("ronda 3 (#116-31, #116-32, #116-34, #116-35, #116-36): pins cosméticos de
 	const controller = await readRepoFile("pi-extensions/workflow-orchestrator/controller.ts");
 	if ((controller.match(/from "\.\/direct-launch\.ts";/g) ?? []).length !== 1) problems.push("controller.ts: más de un import desde ./direct-launch.ts (#116-35)");
 	if (!/\ttype ResolveDirectRunOptions,\n\ttype ResolveDirectRunResult,\n\} from "\.\/direct-launch\.ts";/.test(controller)) problems.push("controller.ts: ResolveDirectRunOptions no está en el bloque de imports de direct-launch (#116-35)");
-	const init = await skillFile("claude", "chiche-init");
-	if (!/y queda lo que imprime el host \(`rehearsed <fecha>`, `FAILED \(<n> preguntas\)`, `FAILED \(stop list: <Pattern>\)` o `unrehearsed`\), porque sin ensayo rige `supervised`/.test(init)) problems.push("claude/chiche-init: la Fase 3 no nombra los cuatro veredictos del host (#116-36)");
 	assert.deepEqual(problems, []);
 });
 
@@ -2076,7 +1588,7 @@ test("#120 CA-2: el comando canónico imprime el mismo stdout y stderr en zsh qu
 		{ name: "fila grill unattended y rehearsed", cwd: high.work, stage: "grill", flag: "", stdout: /^nivel efectivo: unattended \(A3\), leído de origin\/main$/m, stderr: null },
 		{ name: "base A1 + branch A3", cwd: adversarial.work, stage: "run", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: null },
 		{ name: "--autonomy A3 sobre un contrato A1", cwd: adversarial.work, stage: "run", flag: "A3", stdout: /^nivel efectivo: unattended \(A3\), leído de --autonomy$/m, stderr: null },
-		{ name: "fila spec unrehearsed", cwd: high.work, stage: "spec", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: /^aviso: fila spec sin ensayo \(unrehearsed\): rige supervised \(A1\)$/m },
+		{ name: "fila spec unrehearsed (#130 CA-3: rige lo escrito)", cwd: high.work, stage: "spec", flag: "", stdout: /^nivel efectivo: plan-approved \(A2\), leído de origin\/main$/m, stderr: null },
 		{ name: "contrato sin la fila land", cwd: high.work, stage: "land", flag: "", stdout: /^nivel efectivo: supervised \(A1\), leído de origin\/main$/m, stderr: /^aviso: ## Autonomy sin fila land: rige supervised \(A1\)$/m },
 	];
 	const problems: string[] = [];
@@ -2222,11 +1734,11 @@ test("#119 CA-1: el template de la Fase 4 de los cinco chiche-init lleva la colu
 		problems.push(...missing(template, [
 			/^\| Stage \| Level \| Since \| Rehearsed \| Umbral \|\n\|---\|---\|---\|---\|---\|$/m,
 			/^\| grill \| supervised \| 2026-07-02 \| — \| 80 \|$/m,
-			/^\| spec \| plan-approved \| 2026-07-02 \| unrehearsed \| 80 \|$/m,
+			/^\| spec \| plan-approved \| 2026-07-02 \| — \| 80 \|$/m,
 			/^\| run \| supervised \| 2026-07-02 \| — \| — \|$/m,
 			/^\| review \| supervised \| 2026-07-02 \| — \| — \|$/m,
 			/^\| land \| supervised \| 2026-07-02 \| — \| — \|$/m,
-			/^\| staging \| supervised \| 2026-07-02 \| unrehearsed \| — \|$/m,
+			/^\| staging \| supervised \| 2026-07-02 \| — \| — \|$/m,
 			/Umbral: entero de 0 a 100 en grill y spec \(80 recomendado\), — en las demas/,
 		]).map((problem) => `${harness}/chiche-init template: ${problem}`));
 		const block = delimitedBlock(markdown, "autonomy-contract") ?? "";
@@ -2389,6 +1901,29 @@ test("#119 CA-4: el contrato de este repo lleva Umbral 80 en grill y spec y — 
 			assert.ok(ordered, `${shell} ${stage}: ${run.stdout}`);
 			assert.doesNotMatch(run.stderr, /umbral/, `${shell} ${stage}: ${run.stderr}`);
 		}
+	}
+});
+
+test("#130 CA-6: el contrato de este repo lleva — en Rehearsed de grill y spec y una decisión fechada; sembrado como origin/main, grill y spec rigen en plan-approved (A2) en bash, sh y zsh; los README no nombran el ensayo de niveles", async (t) => {
+	const contractText = await readRepoFile(".chiche/project.md");
+	const autonomy = section(contractText, /^Autonomy$/);
+	for (const stage of ["grill", "spec"]) assert.match(autonomy, new RegExp(`^\\| ${stage} \\| plan-approved \\| \\d{4}-\\d{2}-\\d{2} \\| — \\| 80 \\|$`, "m"), `fila ${stage}: plan-approved con — en Rehearsed`);
+	assert.doesNotMatch(autonomy, /unrehearsed|rehearsed \d/, "ninguna fila conserva un valor de ensayo");
+	const decision = section(contractText, /^Decisiones humanas$/).split("\n").find((line) => /^- \d{4}-\d{2}-\d{2}: .*issue #130.*5\.7\.0/.test(line)) ?? "";
+	assert.match(decision, /ensayo de niveles/, "## Decisiones humanas tiene la entrada fechada del retiro del ensayo");
+	const command = await canonicalCommand();
+	const { root, work } = repoWithRemote("contrato-sin-ensayo", contractText, contractText);
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	for (const shell of shells(t)) {
+		for (const stage of ["grill", "spec"]) {
+			const run = runResolve(command, work, stage, "", shell);
+			assert.equal(run.status, 0, `${shell} ${stage}: ${run.stderr}`);
+			assert.match(run.stdout, /^nivel efectivo: plan-approved \(A2\), leído de origin\/main$/m, `${shell} ${stage}: ${run.stdout}`);
+			assert.equal(run.stderr, "", `${shell} ${stage}: sin avisos`);
+		}
+	}
+	for (const readme of ["README.md", "README.en.md"]) {
+		assert.doesNotMatch(await readRepoFile(readme), /ensayo de niveles|ensaya los niveles|rehears/i, `${readme}: ya no nombra el ensayo de niveles`);
 	}
 });
 
