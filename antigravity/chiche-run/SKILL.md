@@ -285,7 +285,7 @@ Si hay una sola spec candidata (estado `draft` o `aprobada`), usarla directo inf
   if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
   defrepo=none
   url=$(git remote get-url origin 2>/dev/null) || url=''
-  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
+  cand=$(printf '%s\n' "$url" | sed -E 's,/+$,,; s,\.git$,,' | sed -n -E 's,^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$,\6,p')
   [ -z "$cand" ] || defrepo=$cand
   defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
   contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
