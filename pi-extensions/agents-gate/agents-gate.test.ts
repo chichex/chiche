@@ -1578,6 +1578,43 @@ test("issue #103 CA-23: install.sh all difiere un fallo de Pi que no es el Pi Pa
 	}
 });
 
+// Ubuntu 26.04 (la imagen nueva de `ubuntu-latest`) trae uutils coreutils: `mkdir -p` bajo un archivo falla con
+// `mkdir: Not a directory`, sin la ruta (verificado con uutils 0.10.0 en `ubuntu:26.04`). install.sh nombra él mismo
+// el destino que no pudo crear, así el error se entiende con cualquier coreutils. El `mkdir` simulado imita ese
+// mensaje para que el test no dependa de los coreutils de la máquina.
+test("install.sh nombra el destino que no pudo crear aunque mkdir no lo diga (uutils coreutils de Ubuntu 26.04)", async () => {
+	const root = await mkdtemp(join(tmpdir(), "chiche-mkdir-uutils-"));
+	try {
+		const fixtureRepo = await createMiniFixtureRepo(root, SKILL_HARNESSES, ["grill"]);
+		await mkdir(join(fixtureRepo, "pi-extensions"), { recursive: true });
+		await writeFile(join(fixtureRepo, "pi-extensions", "ext.ts"), "export default function ext() {}\n");
+		const fakeBin = join(root, "bin");
+		await mkdir(fakeBin, { recursive: true });
+		await writeFile(join(fakeBin, "pi"), "#!/bin/sh\nexit 0\n");
+		await writeFile(join(fakeBin, "mkdir"), "#!/bin/sh\nfor arg in \"$@\"; do case $arg in *not-a-dir*) echo 'mkdir: Not a directory' >&2; exit 1 ;; esac; done\nexec /bin/mkdir \"$@\"\n");
+		await chmod(join(fakeBin, "pi"), 0o755);
+		await chmod(join(fakeBin, "mkdir"), 0o755);
+		await mkdir(join(root, "dest"), { recursive: true });
+		await writeFile(join(root, "dest", "not-a-dir"), "soy un archivo\n");
+		const extensions = join(root, "dest", "not-a-dir", "extensions");
+
+		const result = runInstaller(join(fixtureRepo, "install.sh"), ["pi"], {
+			HOME: join(root, "home"),
+			PI_SKILLS_DIR: join(root, "dest", "pi-skills"),
+			PI_EXTENSIONS_DIR: extensions,
+			PI_THEMES_DIR: join(root, "dest", "pi-themes"),
+			CODEX_CONFIG_FILE: join(root, "dest", "codex-config.toml"),
+			PATH: `${fakeBin}${delimiter}/usr/bin${delimiter}/bin`,
+		});
+
+		assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+		assert.match(result.stderr, /^mkdir: Not a directory$/m, "el mkdir simulado falla sin nombrar la ruta");
+		assert.ok(result.stderr.includes(`✗ no se pudo crear ${extensions}`), `stderr nombra el destino: ${result.stderr}`);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("issue #103 CA-10: install.sh codex reemplaza el bloque viejo chichex/skills de config.toml por un unico bloque chichex/chiche", async () => {
 	const root = await mkdtemp(join(tmpdir(), "chichex-codex-block-"));
 	try {
