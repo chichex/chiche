@@ -367,16 +367,32 @@ test("autotest: question normalization only replaces the exact backticked tool i
 	}
 });
 
-// Issue #119, CA-15, CA-16 y CA-19: el triage imprime un veredicto para las rutas nuevas y el gate ofrece
-// confirmarlo (→ hasta el PR | la spec) o seguir supervisado; la tabla stage-chain lleva los argumentos.
+// Issue #130, CA-24 (reescribe los pins de #119 CA-15, CA-16 y CA-19): el triage imprime un veredicto para las
+// rutas nuevas, que ya no decide niveles; el gate ofrece `→ hasta el PR` o confirmar solo esa etapa, y la tabla
+// stage-chain agrega `--until pr` y ningún otro flag de autonomía.
 const ALL_HARNESSES = [...HARNESSES, "antigravity"] as const;
+const INVOCATION_PREFIX: Record<(typeof ALL_HARNESSES)[number], string> = { claude: "/", codex: "$", opencode: "/", pi: "/skill:", antigravity: "/" };
 const VERDICT_BLOCK = [
-	"Veredicto: <n> pregunta(s) de producto y después sigo solo hasta <el PR | la spec>.",
-	"- Te pregunto: <decisión> (<NN> %)        ← una línea por decisión de producto ≤ umbral grill",
-	"- Asumo: <decisión> (<NN> %)              ← una línea por decisión de producto > umbral grill",
-	"- Para la spec: <decisión> (<NN> %)       ← una línea por decisión técnica",
+	"Veredicto: <n> pregunta(s) de producto y <k> técnica(s) hasta el PR.",
+	"- Te pregunto: <decisión> (<NN> %)        ← una línea por decisión de producto ≤ confianza grill",
+	"- Asumo: <decisión> (<NN> %)              ← una línea por decisión de producto > confianza grill",
+	"- Para la spec: <decisión> (<NN> %)       ← una línea por decisión técnica; la spec pregunta las ≤ confianza spec",
 	"- Aviso: <riesgo de ejecución>            ← archivos tocados, tests del área; no suma preguntas",
 ].join("\n");
+
+// Las palabras del dial viejo (brief de la capa 2 del issue #130). Los bloques compartidos `autonomy-controls` y
+// `autonomy-resolve` las nombran para explicar el retiro: se sacan antes de buscar.
+const RETIRED_DIAL_WORDS = /supervised|plan-approved|unattended|\bA[0-5]\b|--autonomy|Rehearsed|unrehearsed|umbral|nivel efectivo|Niveles de autonomía|Nivel efectivo|Nivel sugerido|supervisado|hasta la spec/;
+
+export function withoutSharedAutonomyBlocks(markdown: string): string {
+	let stripped = markdown;
+	for (const name of ["autonomy-controls", "autonomy-resolve"]) {
+		const block = new RegExp(`<!-- ${name}:start -->\\n[\\s\\S]*?\\n<!-- ${name}:end -->`);
+		assert.match(stripped, block, `bloque compartido ${name} presente`);
+		stripped = stripped.replace(block, "");
+	}
+	return stripped;
+}
 
 export function triageVerdictBlock(markdown: string): string {
 	const match = markdown.match(/<!-- triage-verdict:start -->\n([\s\S]*?)\n<!-- triage-verdict:end -->/);
@@ -384,7 +400,42 @@ export function triageVerdictBlock(markdown: string): string {
 	return match[1];
 }
 
-test("#119 CA-15 y CA-16: issue-triage imprime el bloque Veredicto literal para grill, spec y join-* antes del gate, lee los umbrales del resolver, y ofrece las cuatro opciones en orden, en los cinco harnesses con el bloque equivalente", async () => {
+test("#130 CA-24: issue-triage no lleva flags de autonomía en la firma ni palabras del dial viejo fuera de los bloques compartidos, en los cinco harnesses", async () => {
+	for (const harness of ALL_HARNESSES) {
+		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
+		const signature = markdown.match(/## Invocación\n\n```text\n([^\n]+)\n```/)?.[1];
+		assert.equal(signature, `${INVOCATION_PREFIX[harness]}issue-triage #12 [#13 ... #N]`, `${harness}: la firma no lleva flags`);
+		const own = withoutSharedAutonomyBlocks(markdown);
+		for (const [index, line] of own.split("\n").entries()) {
+			assert.doesNotMatch(line, RETIRED_DIAL_WORDS, `${harness}: palabra del dial viejo fuera de los bloques compartidos (línea ${index + 1} sin los bloques)`);
+		}
+		assert.match(own, /Este skill no lleva flags de autonomía: la confirmación de la ruta es humana siempre\./, `${harness}: la confirmación sigue siendo humana`);
+		assert.match(own, /Ver «Controles de autonomía» y «Controles efectivos»\./, `${harness}: referencias cruzadas a los bloques nuevos`);
+	}
+});
+
+test("autotest: withoutSharedAutonomyBlocks saca solo los dos bloques compartidos y exige que estén", () => {
+	const markdown = [
+		"firma --autonomy",
+		"<!-- autonomy-controls:start -->",
+		"`--autonomy` se retiró",
+		"<!-- autonomy-controls:end -->",
+		"<!-- autonomy-resolve:start -->",
+		"supervised → usá --confidence 100",
+		"<!-- autonomy-resolve:end -->",
+		"<!-- triage-verdict:start -->",
+		"umbral grill",
+		"<!-- triage-verdict:end -->",
+	].join("\n");
+	const own = withoutSharedAutonomyBlocks(markdown);
+	assert.match(own, /firma --autonomy/);
+	assert.match(own, /umbral grill/);
+	assert.doesNotMatch(own, /se retiró|supervised/);
+	assert.match(own.split("\n")[0] ?? "", RETIRED_DIAL_WORDS);
+	assert.throws(() => withoutSharedAutonomyBlocks("sin bloques"), /bloque compartido autonomy-controls presente/);
+});
+
+test("#130 CA-24: issue-triage imprime el bloque Veredicto literal para grill, spec y join-* antes del gate, lee las dos confianzas del resolver sin decidir niveles, y ofrece las cuatro opciones en orden, en los cinco harnesses con el bloque equivalente", async () => {
 	const interaction = parseInteractionDifferences(await readRepoFile("docs/harness-interaction-differences.md"));
 	const blocks = new Map<string, string>();
 	for (const harness of ALL_HARNESSES) {
@@ -393,70 +444,87 @@ test("#119 CA-15 y CA-16: issue-triage imprime el bloque Veredicto literal para 
 		assert.ok(block.includes(VERDICT_BLOCK), `${harness}: el bloque Veredicto no es el literal de la spec`);
 		for (const rule of [
 			/`grill`, `spec`, `join-grill` o `join-spec`/,
-			/`umbral grill:` y `umbral spec:`/,
-			/`hasta el PR` cuando `k = 0`; `hasta la spec` cuando `k > 0`/,
+			/su tipo \(`producto` define el qué, `técnica` define el cómo\) y una confianza entera `NN %`/,
+			/lee las líneas `confianza grill:` y `confianza spec:` que imprime el resolver de «Controles efectivos»/,
+			/`n` \(decisiones de producto con confianza `≤ confianza grill`\) y `k` \(decisiones técnicas con confianza `≤ confianza spec`\)/,
 			/`grill` cuando `n > 0`, `spec` cuando `n = 0`/,
 			/Las rutas de rechazo y las artifact-aware no llevan veredicto/,
-			/`verdict`/,
-			/`accepted`/,
+			/promesa de esfuerzo, no un contrato: mandan el grill y la spec reales/,
+			/No decide ni cambia ningún control/,
+			/`verdict` \(`until` siempre `"pr"`, `thresholds` con las dos confianzas leídas del resolver/,
+			/`accepted` en `true` solo si el humano eligió `Confirmar <ruta> → hasta el PR`/,
 		]) assert.match(block, rule, `${harness}: ${rule}`);
+		assert.doesNotMatch(block, RETIRED_DIAL_WORDS, `${harness}: el veredicto ya no decide niveles ni promete «hasta la spec»`);
 		const actionable = markdown.split("### Rutas accionables\n")[1]?.split("## Fase 5")[0] ?? "";
-		const options = ["`Confirmar <ruta> → hasta <el PR | la spec> (Recomendado)`", "`Confirmar <ruta> supervisado`", "`Usar fallback: <ruta>`", "`Cancelar`"];
+		const options = ["`Confirmar <ruta> → hasta el PR (Recomendado)`", "`Confirmar <ruta>`", "`Usar fallback: <ruta>`", "`Cancelar`"];
 		let cursor = -1;
 		for (const option of options) {
 			const at = actionable.indexOf(option);
 			assert.ok(at > cursor, `${harness}: la opción ${option} falta o está fuera de orden`);
 			cursor = at;
 		}
-		assert.match(actionable, /sin veredicto[^\n]*`Confirmar <ruta recomendada> \(Recomendado\)`/, `${harness}: las rutas artifact-aware conservan el gate de hoy`);
-		assert.match(actionable, /`--autonomy` recibido[^\n]*gana sobre el nivel del veredicto/, `${harness}: el flag recibido gana`);
-		assert.match(actionable, /`accepted`[^\n]*`Confirmar <ruta> → hasta/, `${harness}: accepted true solo con → hasta`);
-		// Review #125-2, #125-1, #125-8: cancelar emite verdict null; con flag recibido no se ofrece → hasta; la opción nombra los niveles.
+		const withVerdict = actionable.split("Con veredicto (rutas nuevas), en este orden:\n\n")[1]?.split("\n\n")[0] ?? "";
+		assert.deepEqual(withVerdict.split("\n"), options.map((option) => `- ${option}`), `${harness}: el gate con veredicto ofrece exactamente las cuatro opciones`);
+		assert.match(actionable, /sin veredicto[^\n]*`Confirmar <ruta recomendada> \(Recomendado\)` \/ `Usar fallback: <ruta>` \/ `Cancelar`/, `${harness}: las rutas artifact-aware conservan el gate de hoy, sin → hasta`);
+		assert.match(actionable, /`→ hasta el PR` agrega `--until pr` a los argumentos de la ruta \(tabla `stage-chain`\)/, `${harness}: → hasta el PR es la cadena`);
+		assert.match(actionable, /la descripción de la opción dice que la cadena no cambia la confianza ni la posición del run y que la stop list sigue rigiendo/, `${harness}: la opción no impone valores`);
+		assert.match(actionable, /`Confirmar <ruta>` a secas encadena solo esa etapa, sin flags/, `${harness}: confirmar a secas`);
+		assert.match(actionable, /`accepted` es `true` solo con `Confirmar <ruta> → hasta el PR`; `Confirmar <ruta>` y fallback lo dejan en `false`/, `${harness}: accepted true solo con → hasta el PR`);
+		// Review #125-2: cancelar emite verdict null.
 		assert.match(actionable, /cancelar emite `verdict: null`/, `${harness}: cancelar no deja accepted false`);
-		assert.match(actionable, /Con un `--autonomy` recibido por este skill no se ofrece `→ hasta`/, `${harness}: con flag recibido sigue ofreciendo → hasta`);
-		assert.match(actionable, /`grill A2 → spec A3 → run A3`[^\n]*`spec A3 → run A3`/, `${harness}: la opción no nombra los niveles que impone`);
-		if (harness === "codex") assert.match(actionable, /En Codex, `→ hasta el PR` termina con el comando `\$chiche-run <target> --autonomy A3` listo para enviar/, "codex: hasta el PR no termina en PR");
+		if (harness === "codex") assert.match(actionable, /En Codex, `→ hasta el PR` termina con el comando `\$chiche-run <target>` listo para enviar/, "codex: hasta el PR no termina en PR");
+		if (harness === "pi") assert.match(actionable, /En Pi, el orquestador de `\/issues` arma los argumentos desde `verdict` y `accepted` al despachar la resolución: agrega `--until pr` solo con `accepted: true` y ningún otro flag/, "pi: el orquestador arma la cadena");
+		if (harness === "opencode") assert.match(markdown, /`Confirmar → hasta el PR \(Recommended\)` y `Confirmar` con veredicto; `Confirmar \(Recommended\)` sin veredicto; `Usar fallback`, `Cancelar`/, "opencode: labels cortos del gate");
 		blocks.set(harness, harness === "antigravity" ? block : normalizeArtifactAwareBlock(block, harness as Harness, interaction));
 	}
 	// Review #125-6: Antigravity también se compara (su bloque no lleva invocaciones ni tool, así que el crudo es el normalizado).
 	for (const harness of ALL_HARNESSES.slice(1)) assert.equal(blocks.get(harness), blocks.get("claude"), `${harness} diverge de claude en triage-verdict`);
 });
 
-test("#119 CA-16: la tabla stage-chain lleva los cinco casos del veredicto en los harnesses que encadenan, y WorkflowResolutionV1 declara verdict en el contrato de los cinco", async () => {
-	for (const harness of CHAINING_HARNESSES) {
+const STAGE_CHAIN_HARNESSES = [...CHAINING_HARNESSES, "antigravity"] as const;
+const UNTIL_ROUTES = ["grill", "join-grill", "spec", "join-spec"] as const;
+
+test("#130 CA-24: la tabla stage-chain agrega --until pr solo a grill, join-grill, spec y join-spec con → hasta el PR y ningún otro flag de autonomía, y WorkflowResolutionV1 declara verdict con until \"pr\" en el contrato de los cinco", async () => {
+	for (const harness of STAGE_CHAIN_HARNESSES) {
 		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
-		const args = stageChainArguments(stageChainBlock(markdown));
-		const grill = args.get("grill") ?? "";
-		const spec = args.get("spec") ?? "";
-		assert.match(grill, /`Confirmar → hasta el PR`[^|]*`--autonomy A2 --until pr`/, `${harness}: grill + hasta el PR`);
-		assert.match(grill, /`Confirmar → hasta la spec`[^|]*`--autonomy A2`/, `${harness}: grill + hasta la spec`);
-		assert.match(spec, /`Confirmar → hasta el PR`[^|]*`--autonomy A3 --until pr`/, `${harness}: spec + hasta el PR`);
-		assert.match(spec, /`Confirmar → hasta la spec`[^|]*`--autonomy A2`/, `${harness}: spec + hasta la spec`);
-		for (const row of [grill, spec]) {
-			assert.match(row, /`supervisado`[^|]*`--autonomy <level>` si vino/, `${harness}: supervisado → los argumentos de hoy`);
-			assert.match(row, /un `--autonomy <level>` recibido \(que gana sobre el veredicto: el gate no ofrece `→ hasta`/, `${harness}: el flag recibido gana y no ofrece → hasta`);
+		const block = stageChainBlock(markdown);
+		const args = stageChainArguments(block);
+		assert.deepEqual([...args.keys()].sort(), Object.keys(START_ROUTE_SKILLS).sort(), `${harness}: la tabla cubre todas las rutas accionables`);
+		for (const [route, cell] of args) {
+			if ((UNTIL_ROUTES as readonly string[]).includes(route)) {
+				assert.equal(cell, "`#<N>` del issue efectivo; con `Confirmar → hasta el PR`, más `--until pr`", `${harness}: ${route} agrega --until pr solo con → hasta el PR`);
+			} else {
+				assert.doesNotMatch(cell, /--until/, `${harness}: ${route} no lleva --until`);
+			}
+			assert.doesNotMatch(cell, /--autonomy|--confidence|--mode|supervisado|hasta la spec|\bA[0-5]\b|<level>/, `${harness}: ${route} lleva otro flag de autonomía`);
 		}
-		assert.equal(args.get("join-grill"), grill, `${harness}: join-grill usa el issue canónico con los mismos args`);
-		assert.equal(args.get("join-spec"), spec, `${harness}: join-spec usa el issue canónico con los mismos args`);
+		assert.equal(args.get("resume-grill"), "ruta del handoff del grill primario para retomar", `${harness}: resume-grill`);
+		assert.equal(args.get("spec-from-grill"), "`--from-grill <ruta del handoff finalized primario>`", `${harness}: spec-from-grill`);
+		assert.equal(args.get("update-existing-spec"), "ruta de la spec primaria local, o `#<N>` si vive en el issue, más `--triage-route <ruta>`", `${harness}: update-existing-spec`);
+		assert.equal(args.get("audit-existing-spec"), args.get("update-existing-spec"), `${harness}: audit-existing-spec`);
+		assert.equal(args.get("run-existing-spec"), "ruta de la spec primaria local, o `#<N>` si vive en el issue", `${harness}: run-existing-spec`);
+		assert.match(markdown, /`--until pr` es el único flag de autonomía que agrega este skill[^\n]*ninguna ruta lleva `--confidence` ni `--mode`: el skill encadenado lee sus controles del contrato/, `${harness}: la regla de flags de la Fase 7`);
 	}
 	for (const harness of ALL_HARNESSES) {
 		const markdown = await readRepoFile(`${harness}/issue-triage/SKILL.md`);
-		const contract = harness === "antigravity" ? markdown : artifactAwareBlock(markdown);
+		const contract = artifactAwareBlock(markdown);
+		assert.match(contract, /type WorkflowResolutionV1 = \{\n  version: 1;/, `${harness}: version 1 intacta`);
 		assert.match(contract, /verdict: WorkflowVerdict \| null;/, `${harness}: el tipo declara verdict`);
 		assert.match(contract, /type VerdictItem = \{ text: string; confidence: number \}/, `${harness}: VerdictItem`);
-		assert.match(contract, /until: "pr" \| "spec"; accepted: boolean; thresholds: \{ grill: number; spec: number \}; questions: VerdictItem\[\]; assumed: VerdictItem\[\]; forSpec: VerdictItem\[\]; warnings: string\[\]/, `${harness}: WorkflowVerdict`);
-		assert.match(contract, /un veredicto incoherente \(`until` tiene que salir de `forSpec` contra `thresholds.spec`/, `${harness}: la prosa del tipo no fija la coherencia (review #125-4)`);
+		assert.match(contract, /type WorkflowVerdict = \{ until: "pr"; accepted: boolean; thresholds: \{ grill: number; spec: number \}; questions: VerdictItem\[\]; assumed: VerdictItem\[\]; forSpec: VerdictItem\[\]; warnings: string\[\] \};/, `${harness}: WorkflowVerdict`);
+		assert.doesNotMatch(contract, /"spec"; accepted/, `${harness}: until ya no acepta "spec"`);
+		assert.match(contract, /`thresholds` conserva su nombre y lleva `confianza grill` y `confianza spec`, enteros de 0 a 100 como `confidence`/, `${harness}: thresholds lleva las dos confianzas`);
+		assert.match(contract, /`until` es siempre `"pr"`; `accepted` es `true` solo con `Confirmar <ruta> → hasta el PR`\./, `${harness}: until y accepted`);
+		assert.match(contract, /un `until` distinto de `"pr"` o un veredicto incoherente \(`questions` lleva solo confianzas `≤ thresholds.grill` y `assumed` solo `> thresholds.grill`\) es `invalid-value`/, `${harness}: la prosa del tipo fija la coherencia (review #125-4)`);
+		assert.doesNotMatch(contract, RETIRED_DIAL_WORDS, `${harness}: el contrato no nombra el dial viejo`);
 	}
-	const pi = await readRepoFile("pi/issue-triage/SKILL.md");
-	assert.match(pi, /`\/issues --autonomy <level>`[^\n]*gana sobre el nivel del veredicto/, "pi: /issues --autonomy gana");
 });
 
-test("#119 CA-19: las filas issue-triage de los dos README nombran el veredicto y las dos confirmaciones", async () => {
-	for (const [path, patterns] of [
-		["README.md", [/`Veredicto:`/, /`Confirmar → hasta <el PR \| la spec>`/, /`Confirmar supervisado`/, /`--until pr`/]],
-		["README.en.md", [/`Veredicto:`/, /`Confirmar → hasta <el PR \| la spec>`/, /`Confirmar supervisado`/, /`--until pr`/]],
-	] as const) {
+test("#130 CA-24 y CA-27: las filas issue-triage de los dos README nombran el veredicto, → hasta el PR con --until pr y la confirmación de solo esa etapa, sin niveles", async () => {
+	for (const path of ["README.md", "README.en.md"]) {
 		const row = (await readRepoFile(path)).split("\n").find((line) => line.startsWith("| **`issue-triage`**")) ?? "";
-		for (const pattern of patterns) assert.match(row, pattern, `${path}: ${pattern}`);
+		for (const pattern of [/`Veredicto:`/, /`Confirmar → hasta el PR`/, /`Confirmar <ruta>`/, /`--until pr`/]) assert.match(row, pattern, `${path}: ${pattern}`);
+		assert.doesNotMatch(row, RETIRED_DIAL_WORDS, `${path}: la fila nombra el dial viejo`);
+		assert.doesNotMatch(row, /la spec>`/, `${path}: la fila conserva «→ hasta la spec»`);
 	}
 });
