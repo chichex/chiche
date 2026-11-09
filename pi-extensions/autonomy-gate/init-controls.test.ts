@@ -107,7 +107,7 @@ async function initSkills(): Promise<Map<Harness, InitSkill>> {
 // CA-22: --defaults reemplaza al modo sin preguntas
 
 const DEFAULTS_FLAG =
-	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run`, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa) y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
+	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run` y `## Publicacion` con sus cuatro defaults, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa), sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible` (con la sección presente se preserva verbatim), y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
 
 test("#130 CA-22: --defaults reemplaza al modo sin preguntas en los cinco chiche-init: firma, lanzador, lo que escribe (80, 80 y ask) y lo que no hace (políticas, migraciones, design-system, coding-policies)", async () => {
 	const problems: string[] = [];
@@ -191,13 +191,14 @@ const RUN_QUESTION = [
 ].join("\n");
 
 // En Pi la respuesta libre no viene sola: la pregunta la pide con `allowOther: true`. Es capa de
-// interacción (parámetro de la tool) y la única diferencia tolerada en la Fase 3.
+// interacción (parámetro de la tool) y la única diferencia tolerada en la Fase 3 (también en las
+// preguntas de publicación del issue #134, que gatea publication-gate).
 const PI_OTHER = "la respuesta libre (Other, con `allowOther: true`) para otro entero de 0 a 100";
 const OTHER = "la respuesta libre (Other) para otro entero de 0 a 100";
 
 function phase3(skill: InitSkill, harness: Harness): string {
 	const text = section(skill.doctrine, /^Fase 3 — /);
-	return harness === "pi" ? text.replace(PI_OTHER, OTHER) : text;
+	return harness === "pi" ? text.replace(PI_OTHER, OTHER).replaceAll("(Other, con `allowOther: true`)", "(Other)") : text;
 }
 
 test("#130 CA-21: la Fase 3 de los cinco chiche-init pregunta la confianza de grill y de spec (80 recomendado, 100, 60, 0 y respuesta libre) y la posición del run (pr recomendado, ask, pr-reviewed con «hasta 2 rondas»), con la tool del harness y sin preguntas de nivel, umbral ni ensayo", async () => {
@@ -215,11 +216,12 @@ test("#130 CA-21: la Fase 3 de los cinco chiche-init pregunta la confianza de gr
 		if (harness === "pi" && !raw.includes(PI_OTHER)) problems.push(at("la pregunta de confianza no pide `allowOther: true` para la respuesta libre"));
 		if (harness !== "pi" && raw.includes("allowOther")) problems.push(at("`allowOther` es un parámetro de la tool de Pi"));
 
-		// Los párrafos titulados de la fase son exactamente estos tres, y las opciones numeradas, estas siete.
+		// Los párrafos titulados de la fase son exactamente estos cuatro (el de publicación lo fija
+		// publication-gate, issue #134), y las opciones numeradas, estas catorce.
 		const titled = [...text.matchAll(/^\*\*([^*\n]+)\.\*\*/gm)].map((match) => match[1]);
-		if (titled.join(" | ") !== "Confianza por etapa | Posición del run | Stop list") problems.push(at(`párrafos titulados de la Fase 3: ${titled.join(" | ")}`));
+		if (titled.join(" | ") !== "Confianza por etapa | Posición del run | Publicación | Stop list") problems.push(at(`párrafos titulados de la Fase 3: ${titled.join(" | ")}`));
 		const options = [...text.matchAll(/^\d+\. `([^`]+)`/gm)].map((match) => match[1]);
-		if (options.join(" | ") !== "80 (Recomendado) | 100 | 60 | 0 | pr (Recomendado) | ask | pr-reviewed") problems.push(at(`opciones numeradas de la Fase 3: ${options.join(" | ")}`));
+		if (options.join(" | ") !== "80 (Recomendado) | 100 | 60 | 0 | pr (Recomendado) | ask | pr-reviewed | auto (Recomendado) | issue | local | <git-common-dir>/chiche/ (Recomendado) | .chiche/ | En <origin> con gh issue create (Recomendado) | En otro repo") problems.push(at(`opciones numeradas de la Fase 3: ${options.join(" | ")}`));
 
 		// No quedan preguntas de nivel por fila, de umbral ni de ensayo, ni reglas que escriban otras filas.
 		for (const gone of [/¿Hasta dónde llega el agente solo/, /¿A partir de qué confianza asume/, /\bnivel(?:es)?\b/i, /umbral/i, /ensay/i, /una pregunta por fila/, /`review`/, /`land`/, /una por ambiente/, /`70`|`90`/]) {
@@ -257,6 +259,8 @@ const UPGRADE_ROWS = [
 	"Directorio .chiche/",
 	"Autonomy",
 	"Stop list",
+	// Issue #134: la sección ## Publicacion la ofrece --update sobre un contrato que no la tiene.
+	"Publicacion",
 ];
 
 const AUTONOMY_ROW =

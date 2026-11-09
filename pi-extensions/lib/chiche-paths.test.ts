@@ -16,9 +16,11 @@ import { test } from "node:test";
 
 import {
 	artifactReadDirs,
+	artifactWriteDir,
 	isArtifactPath,
 	listArtifacts,
 	localArtifactDir,
+	publicationFolder,
 	resolveArtifactDirs,
 	resolveArtifactName,
 	resolveGitCommonDir,
@@ -276,4 +278,86 @@ test("review #86: resolveRepoWorktrees lista los worktrees del repo con el princ
 	assert.deepEqual(await resolveRepoWorktrees(linked), [main, linked]);
 	assert.deepEqual(await resolveRepoWorktrees(main), [main, linked]);
 	assert.deepEqual(await resolveRepoWorktrees(join(base, "no-existe")), []);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #134, CA-13: la carpeta declarada en ## Publicacion del contrato se lee primero y recibe lo nuevo.
+
+const CONTRACT_WITH_FOLDER = (folder: string): string =>
+	["# Contrato de autonomia — demo", "", "## Publicacion", "| Clave | Valor |", "|---|---|", "| specs | auto |", `| carpeta | ${folder} |`, "", "## Verificacion autonoma", "1. node --test", ""].join("\n");
+
+test("#134 CA-13: publicationFolder lee la carpeta de ## Publicacion: relativa normalizada; null con el literal default, sin sección, absoluta, con `..` u otro placeholder", () => {
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("docs/sdd/")), "docs/sdd");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("./docs/sdd")), "docs/sdd");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER(".chiche/")), ".chiche");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("<git-common-dir>/chiche/")), null, "el literal default no declara carpeta");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("/tmp/specs")), null, "una absoluta es inválida");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("docs/../x")), null, "un segmento .. es inválido");
+	assert.equal(publicationFolder(CONTRACT_WITH_FOLDER("<otro>/x")), null, "otro placeholder es inválido");
+	assert.equal(publicationFolder("# Contrato\n\n## Comandos\n"), null, "sin la sección no hay carpeta");
+	// Review #139-5: una fila GFM sin el `|` de cierre vale igual que en el comando canónico (`cut -d'|' -f3`).
+	assert.equal(publicationFolder("## Publicacion\n| Clave | Valor |\n|---|---|\n| carpeta | docs/sdd/\n"), "docs/sdd");
+	assert.equal(publicationFolder(""), null);
+});
+
+test("#134 CA-13: con una carpeta declarada resolveArtifactDirs la pone primera en artifactReadDirs y la usa como destino de lo nuevo; un nombre existente en los cuatro lugares sigue resolviendo en su lugar", async (t) => {
+	const { base, main } = repoWithLinkedWorktree();
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	write(join(main, ".chiche"), "project.md", CONTRACT_WITH_FOLDER("docs/sdd/"));
+	write(join(main, ".sdd", "specs"), "vieja.md", "# vieja\n");
+	const dirs = await resolveArtifactDirs(main, "specs");
+	const declared = join(main, "docs", "sdd", "specs");
+	assert.equal(dirs.declared, declared);
+	assert.equal(artifactWriteDir(dirs), declared, "lo nuevo se escribe en la carpeta declarada");
+	assert.equal(dirs.local, join(main, ".git", "chiche", "specs"), "el common-dir se sigue leyendo");
+	assert.equal(dirs.tracked, join(main, ".chiche", "specs"), "los cuatro lugares de siempre siguen");
+	const places = artifactReadDirs(dirs);
+	assert.deepEqual(places.map((place) => place.path), [declared, join(main, ".chiche", "specs"), join(main, ".sdd", "specs"), join(main, ".git", "chiche", "specs"), join(main, ".git", "sdd", "specs")]);
+	assert.deepEqual(places[0], { path: declared, location: "tracked", brand: "chiche" });
+	assert.equal(await resolveArtifactName(dirs, "nueva.md"), join(declared, "nueva.md"));
+	assert.equal(await resolveArtifactName(dirs, "vieja.md"), join(main, ".sdd", "specs", "vieja.md"), "la existente se actualiza en su lugar");
+	assert.equal(isArtifactPath(dirs, join(declared, "x.md")), true);
+	assert.equal(isArtifactPath(dirs, join(main, "docs", "x.md")), false);
+	// Desde el worktree linkeado la carpeta declarada es la de ESE árbol: el contrato se lee de su raíz.
+	const linked = join(base, "repo-wt");
+	write(join(linked, ".chiche"), "project.md", CONTRACT_WITH_FOLDER("docs/sdd/"));
+	assert.equal((await resolveArtifactDirs(linked, "grills")).declared, join(linked, "docs", "sdd", "grills"));
+});
+
+test("#134 CA-13: con `.chiche/` declarada la carpeta coincide con el lugar trackeado y no se duplica; con la default o sin contrato nada cambia", async (t) => {
+	const { base, main } = repoWithLinkedWorktree();
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	const plain = await resolveArtifactDirs(main, "specs");
+	assert.equal(plain.declared, undefined);
+	assert.equal(plain.local, join(main, ".git", "chiche", "specs"));
+	assert.equal(artifactWriteDir(plain), plain.local, "sin carpeta declarada lo nuevo va al common-dir");
+	assert.equal(artifactReadDirs(plain).length, 4);
+	write(join(main, ".chiche"), "project.md", CONTRACT_WITH_FOLDER("<git-common-dir>/chiche/"));
+	const literal = await resolveArtifactDirs(main, "specs");
+	assert.equal(literal.declared, undefined);
+	assert.equal(literal.local, join(main, ".git", "chiche", "specs"));
+	write(join(main, ".chiche"), "project.md", CONTRACT_WITH_FOLDER(".chiche/"));
+	const tree = await resolveArtifactDirs(main, "specs");
+	assert.equal(tree.declared, join(main, ".chiche", "specs"));
+	assert.equal(artifactWriteDir(tree), tree.tracked);
+	assert.deepEqual(artifactReadDirs(tree).map((place) => place.path), [join(main, ".chiche", "specs"), join(main, ".sdd", "specs"), join(main, ".git", "chiche", "specs"), join(main, ".git", "sdd", "specs")]);
+});
+
+test("#134 CA-13: el lector del contrato es inyectable, lee .sdd/project.md cuando no hay .chiche/project.md y un fallo de lectura deja los lugares de siempre", async (t) => {
+	const { base, main } = repoWithLinkedWorktree();
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	write(join(main, ".sdd"), "project.md", CONTRACT_WITH_FOLDER("planning/"));
+	assert.equal((await resolveArtifactDirs(main, "specs")).declared, join(main, "planning", "specs"), "fallback a .sdd/project.md");
+	const asked: string[] = [];
+	const injected = await resolveArtifactDirs(main, "specs", undefined, async (path) => {
+		asked.push(path);
+		return CONTRACT_WITH_FOLDER("inyectada/");
+	});
+	assert.equal(injected.declared, join(main, "inyectada", "specs"));
+	assert.deepEqual(asked, [join(main, ".chiche", "project.md")]);
+	const failing = await resolveArtifactDirs(main, "specs", undefined, async () => {
+		throw new Error("boom");
+	});
+	assert.equal(failing.declared, undefined);
+	assert.equal(artifactWriteDir(failing), join(main, ".git", "chiche", "specs"));
 });

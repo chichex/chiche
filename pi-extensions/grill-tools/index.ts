@@ -14,8 +14,11 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { parseConfidence, retiredAutonomyMessage, withFlag } from "../workflow-orchestrator/autonomy.ts";
 import { menuItems, selectMenu, type MenuItem } from "../lib/menu.ts";
+import { issueCommandArgv, issueUrlFromOutput, readPublicationSettings, stopListMatch, stopListPatterns } from "../lib/publication.ts";
 import {
 	artifactReadDirs,
+	artifactWriteDir,
+	readProjectContract,
 	isArtifactPath,
 	listArtifacts,
 	resolveArtifactDirs,
@@ -251,20 +254,24 @@ type RepoHandoffOutcome = { path: string; diagnostics: string[]; content: string
 async function writeRepoHandoff(snapshot: GrillSnapshot): Promise<RepoHandoffOutcome> {
 	try {
 		const dirs = await resolveArtifactDirs(snapshot.projectPath, "grills");
-		await mkdir(dirs.local, { recursive: true });
+		const writeDir = artifactWriteDir(dirs);
+		await mkdir(writeDir, { recursive: true });
 		const names = handoffFileNames(snapshot);
 		// El primario existente decide el nombre: el local (chiche y después sdd) y,
 		// si no hay, el del árbol. Si es de otra sesión, planGrillHandoff usa el
 		// fallback; si es de esta, la revisión local lo reemplaza en el inventario
 		// (readHandoffCandidates).
-		const readOrder = artifactReadDirs(dirs).sort((left, right) => Number(left.location === "tracked") - Number(right.location === "tracked"));
+		// Issue #134, CA-13: con una carpeta declarada en ## Publicacion el destino es esa carpeta y se mira primero.
+		const destination = resolve(writeDir);
+		const rank = (entry: { path: string; location: string }) => (resolve(entry.path) === destination ? 0 : entry.location === "local" ? 1 : 2);
+		const readOrder = artifactReadDirs(dirs).sort((left, right) => rank(left) - rank(right));
 		let existing: string | null = null;
 		for (const directory of readOrder) {
 			existing = await readFile(join(directory.path, names.primary), "utf8").catch(() => null);
 			if (existing !== null) break;
 		}
 		const plan = planGrillHandoff(snapshot, existing);
-		const path = join(dirs.local, plan.fileName);
+		const path = join(writeDir, plan.fileName);
 		await writeFileAtomic(path, plan.content);
 		return { path, diagnostics: plan.diagnostics, content: plan.content };
 	} catch (error) {
@@ -399,19 +406,22 @@ function isInside(parent: string, candidate: string): boolean {
 	return fromParent === "" || (!fromParent.startsWith("..") && !isAbsolute(fromParent));
 }
 
-// Destino local de una spec (spec #84, CA-11; issue #103, CA-1). Una ruta
-// relativa es la ruta lógica `.chiche/specs/<x>.md` o `.sdd/specs/<x>.md`: el
+// Destino local de una spec (spec #84, CA-11; issue #103, CA-1; issue #134,
+// CA-13). Una ruta relativa es la ruta lógica `.chiche/specs/<x>.md` o
+// `.sdd/specs/<x>.md`, o `<carpeta>/specs/<x>.md` con una carpeta declarada: el
 // nombre se resuelve con la precedencia de lectura (si ya existe en alguno de
-// los cuatro lugares, se actualiza en su lugar) y si no existe se escribe en
-// `<git-common-dir>/chiche/specs/`. Una ruta absoluta tiene que caer
-// directamente bajo uno de los cuatro lugares.
+// los lugares de lectura, se actualiza en su lugar) y si no existe se escribe en
+// la carpeta declarada o, sin ella, en `<git-common-dir>/chiche/specs/`. Una
+// ruta absoluta tiene que caer directamente bajo uno de los lugares de lectura.
 async function confinedSpecPath(projectPath: string, dirs: ArtifactDirs, requestedPath: string): Promise<string> {
 	const cleaned = requestedPath.trim().replace(/^@/, "");
 	if (!cleaned) throw new Error("Local destination path is required");
 	const refuse = () => new Error(`Local spec destination must be one Markdown file directly under ${artifactReadDirs(dirs).map((entry) => entry.path).join(", ")}`);
 	let candidate = resolve(isAbsolute(cleaned) ? cleaned : resolve(projectPath, cleaned));
 	if (!isAbsolute(cleaned)) {
-		if (dirname(candidate) !== resolve(dirs.tracked) && dirname(candidate) !== resolve(dirs.legacyTracked)) throw refuse();
+		// Issue #134, CA-13: un `.md` directo bajo la carpeta declarada en ## Publicacion también es una ruta válida.
+		const logicalDirs = [dirs.tracked, dirs.legacyTracked, ...(dirs.declared ? [dirs.declared] : [])].map((directory) => resolve(directory));
+		if (!logicalDirs.includes(dirname(candidate))) throw refuse();
 		if (!candidate.endsWith(".md")) throw refuse();
 		candidate = await resolveArtifactName(dirs, basename(candidate));
 	}
@@ -454,7 +464,7 @@ async function ensureSafeSpecDestination(projectPath: string, dirs: ArtifactDirs
 	const directory = dirname(resolve(path));
 	const place = artifactReadDirs(dirs).find((entry) => resolve(entry.path) === directory);
 	if (!place) {
-		throw new Error("Refusing a spec destination outside .chiche/specs, .sdd/specs, <git-common-dir>/chiche/specs and <git-common-dir>/sdd/specs");
+		throw new Error("Refusing a spec destination outside .chiche/specs, .sdd/specs, <git-common-dir>/chiche/specs, <git-common-dir>/sdd/specs and the folder declared in ## Publicacion");
 	}
 	await mkdir(directory, { recursive: true });
 	const directoryCanonical = await realpath(directory);
@@ -483,17 +493,45 @@ async function withTemporaryBody<T>(body: string, operation: (path: string) => P
 	}
 }
 
+async function runCommand(
+	pi: ExtensionAPI,
+	argv: string[],
+	cwd: string,
+	signal: AbortSignal | undefined,
+): Promise<string> {
+	const [command, ...args] = argv;
+	if (!command) throw new Error("Empty command");
+	const result = await pi.exec(command, args, { cwd, timeout: 30_000, signal });
+	if (result.code !== 0) {
+		throw new Error(result.stderr.trim() || result.stdout.trim() || `${command} exited with code ${result.code}`);
+	}
+	return result.stdout;
+}
+
 async function runGh(
 	pi: ExtensionAPI,
 	args: string[],
 	cwd: string,
 	signal: AbortSignal | undefined,
 ): Promise<string> {
-	const result = await pi.exec("gh", args, { cwd, timeout: 30_000, signal });
-	if (result.code !== 0) {
-		throw new Error(result.stderr.trim() || result.stdout.trim() || `gh exited with code ${result.code}`);
+	return runCommand(pi, ["gh", ...args], cwd, signal);
+}
+
+// La stop list se lee del contrato del branch default, como «Controles efectivos» (`git show origin/<default>:…`),
+// y si eso no resuelve, del contrato de la raíz operativa. Best-effort: sin contrato no hay filas.
+async function stopList(pi: ExtensionAPI, root: string, signal: AbortSignal | undefined): Promise<string[]> {
+	try {
+		const ref = (await pi.exec("git", ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], { cwd: root, timeout: 5_000, signal })).stdout.trim();
+		if (ref) {
+			for (const path of [".chiche/project.md", ".sdd/project.md"]) {
+				const shown = await pi.exec("git", ["show", `${ref}:${path}`], { cwd: root, timeout: 10_000, signal });
+				if (shown.code === 0) return stopListPatterns(shown.stdout);
+			}
+		}
+	} catch {
+		// sin branch default resoluble: el contrato de la raíz operativa
 	}
-	return result.stdout;
+	return stopListPatterns(await readProjectContract(root));
 }
 
 async function withLocalMutationQueues<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
@@ -867,7 +905,8 @@ async function readHandoffCandidates(
 	const sharing = new Map<string, { directories: string[]; roots: string[] }>();
 	for (const projectPath of roots) {
 		const dirs = dirsByRoot.get(projectPath)!;
-		for (const { path: file, directory } of await pairedHandoffFiles([dirs.tracked, dirs.legacyTracked])) {
+		// Review #139-1: la carpeta declarada en ## Publicacion viaja con el árbol y se inventaría con los trackeados.
+		for (const { path: file, directory } of await pairedHandoffFiles([...(dirs.declared ? [dirs.declared] : []), dirs.tracked, dirs.legacyTracked])) {
 			const candidate = await read(join(directory, file), projectPath);
 			const grill = candidate.markdown === undefined ? null : handoffIdentity(candidate.path, candidate.markdown, candidate.repository, projectPath).grill;
 			tracked.push({ candidate, grill, superseded: false });
@@ -1340,10 +1379,16 @@ export default function grillTools(pi: ExtensionAPI) {
 				? resolve(ctx.cwd, params.projectPath.trim())
 				: await projectRoot(pi, ctx.cwd);
 			const root = await projectRoot(pi, requestedRoot);
-			const repository = params.repository.trim();
-			const actualRepository = await projectRepository(pi, root);
-			if (repository.toLowerCase() !== actualRepository.toLowerCase()) {
-				throw new Error(`Repository identity mismatch: expected ${actualRepository}, got ${repository}`);
+			const requestedRepository = params.repository.trim();
+			// `repository` es el repo del codigo (el de origin): la base de un `#NN` relativo en el marker.
+			const repository = await projectRepository(pi, root);
+			// Issue #134, CA-20: los issues viven en el `repo` declarado en ## Publicacion, o en el de origin; el pedido
+			// puede nombrar cualquiera de los dos y se rechaza cualquier otro. La plantilla `crear issue` tambien sale de ahi.
+			const publication = await readPublicationSettings(root);
+			const issueRepository = publication.repo ?? repository;
+			const allowedRepositories = [...new Map([repository, issueRepository].map((candidate) => [candidate.toLowerCase(), candidate])).values()];
+			if (!allowedRepositories.some((candidate) => candidate.toLowerCase() === requestedRepository.toLowerCase())) {
+				throw new Error(`Repository identity mismatch: expected ${allowedRepositories.join(" or ")}, got ${requestedRepository}`);
 			}
 
 			const specDirs = await resolveArtifactDirs(root, "specs");
@@ -1361,10 +1406,10 @@ export default function grillTools(pi: ExtensionAPI) {
 					}
 					if (destination.kind === "issue") {
 						if (!destination.issueNumber) throw new Error(`issueNumber is required for ${document.id}`);
-						return { kind: "issue", issue: { repository, number: destination.issueNumber } };
+						return { kind: "issue", issue: { repository: issueRepository, number: destination.issueNumber } };
 					}
 					if (!destination.title?.trim()) throw new Error(`New issue title is required for ${document.id}`);
-					return { kind: "new-issue", repository, title: destination.title.trim() };
+					return { kind: "new-issue", repository: issueRepository, title: destination.title.trim() };
 				}));
 				return {
 					id: document.id,
@@ -1375,7 +1420,7 @@ export default function grillTools(pi: ExtensionAPI) {
 						repository,
 						issue: document.issueNumber === undefined
 							? null
-							: { repository, number: document.issueNumber },
+							: { repository: issueRepository, number: document.issueNumber },
 						grill: document.grill?.trim() || null,
 						...(document.role === "predecessor" ? { state: "superseded" as const } : {}),
 						supersededBy: document.role === "predecessor"
@@ -1390,7 +1435,7 @@ export default function grillTools(pi: ExtensionAPI) {
 				if (!allowedPaths.has(path)) throw new Error(`Unexpected local publication path: ${path}`);
 			}
 			function assertRepository(issue: IssueRef): void {
-				if (issue.repository.toLowerCase() !== repository.toLowerCase()) {
+				if (issue.repository.toLowerCase() !== issueRepository.toLowerCase()) {
 					throw new Error(`Unexpected issue repository: ${issue.repository}`);
 				}
 			}
@@ -1431,21 +1476,29 @@ export default function grillTools(pi: ExtensionAPI) {
 				async readIssue(issue) {
 					return readGithubIssue(issue);
 				},
-				async createIssue(issueRepository, title, stagingBody) {
-					if (issueRepository.toLowerCase() !== repository.toLowerCase()) {
-						throw new Error(`Unexpected issue repository: ${issueRepository}`);
+				async createIssue(targetRepository, title, stagingBody) {
+					if (targetRepository.toLowerCase() !== issueRepository.toLowerCase()) {
+						throw new Error(`Unexpected issue repository: ${targetRepository}`);
 					}
-					const output = await withTemporaryBody(stagingBody, (bodyPath) => runGh(
-						pi,
-						["issue", "create", "--repo", issueRepository, "--title", title, "--body-file", bodyPath],
-						root,
-						signal,
-					));
-					const number = Number(/\/issues\/(\d+)/.exec(output)?.[1]);
-					if (!Number.isSafeInteger(number) || number < 1) {
-						throw new Error(`Could not resolve the created issue identity from gh output: ${output.trim()}`);
+					// Issue #134, CA-15 y CA-20: corre la plantilla `crear issue` con los placeholders reemplazados (cada
+					// valor es un argumento, sin shell) y toma el numero de la URL impresa, cuyo repo tiene que ser el esperado.
+					const output = await withTemporaryBody(stagingBody, async (bodyPath) => {
+						const argv = issueCommandArgv(publication.template, { repo: targetRepository, title, body: bodyPath });
+						// Review #140-3: la stop list de ## Autonomy frena el comando armado antes de correrlo, como exige la doctrina.
+						const matched = stopListMatch(argv.join(" "), await stopList(pi, root, signal));
+						if (matched !== null) {
+							throw new Error(`The \`crear issue\` command matches the stop list of ## Autonomy (Pattern \`${matched}\`): not run; the human creates this issue`);
+						}
+						return runCommand(pi, argv, root, signal);
+					});
+					const created = issueUrlFromOutput(output);
+					if (!created) {
+						throw new Error(`Could not resolve the created issue identity: the \`crear issue\` output has no https://github.com/<owner>/<repo>/issues/<N> URL: ${output.trim()}`);
 					}
-					return { repository: issueRepository, number };
+					if (created.repository.toLowerCase() !== targetRepository.toLowerCase()) {
+						throw new Error(`The created issue belongs to another repository: ${created.url} is not in ${targetRepository} (URL huérfana)`);
+					}
+					return { repository: targetRepository, number: created.number };
 				},
 			};
 

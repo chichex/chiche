@@ -103,6 +103,13 @@ export type PersistSpecPublicationResult =
 		createdIssues: IssueRef[];
 	};
 
+// Issue #134, CA-16: un issue del repo de la spec va relativo (`#NN`); uno de otro repo, calificado (`owner/repo#NN`).
+function issueReferenceFor(issue: IssueRef, repository: string): IssueReference {
+	return issue.repository.toLowerCase() === repository.toLowerCase()
+		? (`#${issue.number}` as IssueReference)
+		: (`${issue.repository}#${issue.number}` as IssueReference);
+}
+
 function sameIssue(left: IssueRef | null, right: IssueRef | null): boolean {
 	if (left === null || right === null) return left === right;
 	return left.number === right.number && left.repository.toLowerCase() === right.repository.toLowerCase();
@@ -299,13 +306,13 @@ export async function persistSpecPublication(
 					destination: destinationReference(destination),
 				});
 			}
+			// Issue #134, CA-16 y CA-20: el issue nuevo puede vivir en otro repo que la spec (el `repo` declarado en
+			// ## Publicacion); el marker lo lleva calificado. Quien llama ya fijó ese repo: acá solo se exige un sucesor sin issue.
 			if (destination.kind === "new-issue"
-				&& (role !== "successor"
-					|| document.expectation.issue !== null
-					|| destination.repository.toLowerCase() !== document.expectation.repository.toLowerCase())) {
+				&& (role !== "successor" || document.expectation.issue !== null)) {
 				diagnostics.push({
 					code: "destination-identity-mismatch",
-					message: "New issue publication requires an issue-less successor in the resolved repository",
+					message: "New issue publication requires an issue-less successor",
 					documentId: document.id,
 					stage: "precheck",
 					destination: destinationReference(destination),
@@ -430,7 +437,7 @@ export async function persistSpecPublication(
 			}
 			const linked = upsertSddMetadata(markdown, {
 				...initial.metadata,
-				issue: `#${issue.number}` as IssueReference,
+				issue: issueReferenceFor(issue, expectation.repository),
 			});
 			if (!linked.ok) {
 				diagnostics.push(...operationDiagnostics(document.id, "prepare", linked.diagnostics, unresolvedReference));
@@ -564,10 +571,12 @@ export async function persistSpecPublication(
 }
 
 // `spec` de events-v1 (docs/sdd-events-v1.md): la referencia del issue si la
-// spec vive en uno (gana sobre la copia local) y si no su ruta lógica.
-function specEventReference(destinations: ResolvedSpecPublicationDestination[]): string | null {
+// spec vive en uno (gana sobre la copia local) y si no su ruta lógica. Un issue
+// de otro repo que el de la spec va calificado, como en el marker (review #140-6).
+function specEventReference(destinations: ResolvedSpecPublicationDestination[], markerIssue: IssueReference | null): string | null {
 	const issue = destinations.find((destination) => destination.kind === "issue");
-	if (issue?.kind === "issue") return `#${issue.issue.number}`;
+	// El marker ya lleva la forma correcta (`issueReferenceFor`): `#NN` en el repo de la spec, `owner/repo#NN` en otro.
+	if (issue?.kind === "issue") return markerIssue ?? `#${issue.issue.number}`;
 	const local = destinations.find((destination) => destination.kind === "local");
 	if (local?.kind !== "local") return null;
 	return `.sdd/specs/${local.path.split(/[\\/]/).at(-1) ?? ""}`;
@@ -593,6 +602,7 @@ export async function readPriorSpecPublication(
 	const successor = documents.find((document) => (document.role ?? "successor") === "successor");
 	const existing: ResolvedSpecPublicationDestination[] = [];
 	let approved = false;
+	let markerIssue: IssueReference | null = null;
 	for (const destination of successor?.destinations ?? []) {
 		if (destination.kind === "new-issue") continue;
 		let persisted: string;
@@ -606,9 +616,10 @@ export async function readPriorSpecPublication(
 		const parsed = parseSddArtifact(persisted);
 		if (parsed.kind !== "metadata" || parsed.format !== "canonical" || parsed.metadata.type !== "spec") continue;
 		existing.push(destination);
+		if (destination.kind === "issue") markerIssue = parsed.metadata.issue;
 		if (parsed.metadata.state === "approved") approved = true;
 	}
-	return { approved, spec: existing.length === 0 ? null : specEventReference(existing) };
+	return { approved, spec: existing.length === 0 ? null : specEventReference(existing, markerIssue) };
 }
 
 /**
@@ -625,7 +636,7 @@ export function specPublicationEvents(published: PublishedSpecDocument[], prior:
 	];
 	return ordered.flatMap((document): SddEventFields[] => {
 		const successor = document.role === "successor";
-		const spec = specEventReference(document.destinations);
+		const spec = specEventReference(document.destinations, document.metadata.issue);
 		const fields = (event: SddEventFields["event"], previous: string | null = null): SddEventFields => ({
 			event,
 			issue: document.metadata.issue,

@@ -77,7 +77,7 @@ Buscar la fuente funcional en este orden:
 1. body, título, discussion y metadata del PR;
 2. issues cerrados/referenciados por el PR;
 3. issue/spec mencionado en commits;
-4. `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia), `specs/`, `docs/`, `prd/` u otra ruta explícita del repo que coincida con el PR;
+4. `<carpeta>/specs/` si `## Publicacion` del contrato declara una `carpeta`, y después `.chiche/specs/`, `.sdd/specs/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/specs/` (en ese orden de precedencia), `specs/`, `docs/`, `prd/` u otra ruta explícita del repo que coincida con el PR;
 5. ruta que haya dado el usuario.
 
 El PR body por sí solo puede ser spec si declara comportamiento esperado. Si hay fuentes en conflicto, reportar el conflicto: no elegir silenciosamente. Si no hay spec, la sección Spec dice `No hay spec verificable disponible`; no inventar requisitos.
