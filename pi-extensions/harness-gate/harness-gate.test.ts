@@ -21,6 +21,7 @@ import { parseSddArtifact } from "../chiche-artifacts/index.ts";
 import type { Fence, Harness } from "./interaction.ts";
 import {
 	HARNESSES,
+	POSITIONAL_PARAMETER,
 	fencedBlocks,
 	firstDifference,
 	escapeRegExp,
@@ -2527,12 +2528,11 @@ test("#130 CA-19: fuera de los bloques autonomy-*, ningún chiche-run nombra un 
 // un comando copiado del texto cargado deja de ser el que está en el archivo. `${#var}` (largo de una variable) no es
 // un parámetro y no cuenta.
 
-const POSITIONAL_PARAMETER = /\$(?:[0-9]|\{[0-9]\}|@|\*|#|ARGUMENTS)/g;
-
 // Una línea por hallazgo, `<archivo>:<línea>: <lo que encontró>`, solo dentro de fences ```bash o ```sh. Los fences de
 // otro lenguaje y la prosa no cuentan; un fence dentro de otro de más backticks es texto del exterior.
 export function positionalParameterProblems(file: string, markdown: string): string[] {
 	const problems: string[] = [];
+	const everyHit = new RegExp(POSITIONAL_PARAMETER, "g");
 	let open: { char: string; length: number; shell: boolean } | null = null;
 	markdown.split("\n").forEach((line, index) => {
 		if (open === null) {
@@ -2546,13 +2546,13 @@ export function positionalParameterProblems(file: string, markdown: string): str
 			return;
 		}
 		if (!open.shell) return;
-		const hits = [...new Set(line.match(POSITIONAL_PARAMETER) ?? [])];
+		const hits = [...new Set(line.match(everyHit) ?? [])];
 		if (hits.length > 0) problems.push(`${file}:${index + 1}: ${hits.join(", ")}`);
 	});
 	return problems;
 }
 
-test("#136 CA-4: ningún fence bash ni sh de ningún SKILL.md trackeado de los cinco harnesses usa $0 a $9, ${0} a ${9}, $@, $*, $# ni $ARGUMENTS", async () => {
+test("#136 CA-4: ningún fence bash ni sh de ningún SKILL.md trackeado de los cinco harnesses usa $0 a $9, $@, $*, $# ni $ARGUMENTS, ni sus formas con llave, con o sin operador (${1}, ${1:-x}, ${@:2}, ${#})", async () => {
 	const listing = spawnSync("git", ["ls-files", "--", ...HARNESSES], { cwd: fileURLToPath(repoFile("")), encoding: "utf8" });
 	assert.equal(listing.status, 0, listing.stderr);
 	const files = listing.stdout.split("\n").filter((path) => /(^|\/)SKILL\.md$/.test(path));
@@ -2570,6 +2570,7 @@ test("autotest (#136 CA-4): el chequeo de posicionales marca cada forma prohibid
 		'enc() { [ "$1" = none ] && s=$1; }',
 		"echo ${0} $9 \"$@\" $* $#",
 		"echo $ARGUMENTS",
+		"s=${1:-x}; set -- ${@:2} ${*} ${#} ${10} ${#1}",
 		"```",
 		"```text",
 		"echo $1",
@@ -2587,8 +2588,9 @@ test("autotest (#136 CA-4): el chequeo de posicionales marca cada forma prohibid
 		"claude/x/SKILL.md:4: $1",
 		"claude/x/SKILL.md:5: ${0}, $9, $@, $*, $#",
 		"claude/x/SKILL.md:6: $ARGUMENTS",
-		"claude/x/SKILL.md:12: $2",
+		"claude/x/SKILL.md:7: ${1:-x}, ${@:2}, ${*}, ${#}, ${10}, ${#1}",
+		"claude/x/SKILL.md:13: $2",
 	]);
-	const compliant = ["```bash", '[ ${#line} -lt 1024 ] && v=$spec; echo "${#v} $(v=$spec; enc)"', "```"].join("\n");
+	const compliant = ["```bash", '[ ${#line} -lt 1024 ] && v=$spec; echo "${#v} ${v:-none} ${HOME} $(v=$spec; enc)"', "```"].join("\n");
 	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", compliant), []);
 });

@@ -26,6 +26,7 @@ import { readSddEvents, serializeSddEvent, type SddEvent } from "../chiche-artif
 import type { Harness } from "../harness-gate/interaction.ts";
 import {
 	HARNESSES,
+	POSITIONAL_PARAMETER,
 	escapeRegExp,
 	fencedBlocks,
 	firstDifference,
@@ -169,7 +170,7 @@ test("el bloque no usa parámetros posicionales ni $ARGUMENTS: el harness los su
 	const { blocks, problems } = await migrateBlocks();
 	assert.equal(blocks.size + problems.length, 5);
 	for (const [path, block] of blocks) {
-		const hit = block.match(/\$(?:[0-9]|ARGUMENTS|@|\*)/);
+		const hit = block.match(POSITIONAL_PARAMETER);
 		if (hit) problems.push(`${path}: contiene ${hit[0]}`);
 	}
 	assert.deepEqual(problems, []);

@@ -24,7 +24,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
 import type { Harness } from "../harness-gate/interaction.ts";
-import { HARNESSES, escapeRegExp, fencedBlocks, firstDifference, normalizeInvocations, parseInteractionTable } from "../harness-gate/interaction.ts";
+import { HARNESSES, POSITIONAL_PARAMETER, escapeRegExp, fencedBlocks, firstDifference, normalizeInvocations, parseInteractionTable } from "../harness-gate/interaction.ts";
 
 const SKILLS = ["grill", "issue-triage", "chiche-init", "chiche-spec", "chiche-run", "chiche-land", "design-system"] as const;
 type Skill = (typeof SKILLS)[number];
@@ -160,7 +160,7 @@ test("CA-4: ningún bloque autonomy-* contiene parámetros posicionales ni $ARGU
 			for (const name of AUTONOMY_BLOCKS) {
 				const block = delimitedBlock(markdown, name);
 				if (block === null) continue;
-				const hit = block.match(/\$(?:[0-9]|ARGUMENTS|@|\*)/);
+				const hit = block.match(POSITIONAL_PARAMETER);
 				if (hit) problems.push(`${harness}/${skill} bloque ${name}: contiene ${hit[0]}`);
 			}
 		}

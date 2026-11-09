@@ -109,6 +109,13 @@ export function fencedBlocks(markdown: string): Fence[] {
 	return fences;
 }
 
+// Parametros que un harness sustituye en el texto de un skill al cargarlo con argumentos: `$0` a `$9`, `$@`, `$*`, `$#`,
+// `$ARGUMENTS` y sus formas con llave, con o sin operador o modificador (`${1}`, `${1:-x}`, `${10}`, `${@:2}`, `${*}`,
+// `${#}`, `${#1}`). `${#var}`, el largo de una variable, no es un parametro y no coincide. Sin el flag `g`: quien necesite
+// todas las coincidencias de una linea arma `new RegExp(POSITIONAL_PARAMETER, "g")`. Es la unica definicion de la regla:
+// la usan `harness-gate`, `autonomy-gate` y `chiche-migrate-gate`.
+export const POSITIONAL_PARAMETER = /[$](?:[0-9@*#]|[{](?:#?[0-9@*][^}]*}?|#})|ARGUMENTS)/;
+
 export function firstDifference(a: string, b: string): string {
 	const aLines = a.split("\n");
 	const bLines = b.split("\n");
