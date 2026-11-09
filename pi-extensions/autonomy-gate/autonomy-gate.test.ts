@@ -982,7 +982,7 @@ test("#130 CA-27: los README describen los tres controles sin nombres de nivel y
 		/^\| \*\*`chiche-spec`\*\* \|[^\n]*Con `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` no exige nada/m,
 		/^\| \*\*`chiche-run`\*\* \|[^\n]*Con `--mode`[^\n]*`ask` pregunta ante choques[^\n]*`pr` corre hasta el PR[^\n]*`pr-reviewed` además corrige el feedback del PR solo, hasta 2 rondas/m,
 		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*solo con confianza 100[^\n]*`--until pr`/m,
-		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(encadena con `--until pr`\) o `Confirmar` a secas/m,
+		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(agrega `--until pr`[^\n]*o `Confirmar <ruta>` \(encadena solo esa etapa\)/m,
 	]), []);
 	assert.deepEqual(missing(en, [
 		/the confidence of `grill` and `chiche-spec` \(0 to 100: what it asks you\), the run position \(`ask`, `pr` or `pr-reviewed`: where it stops\) and the chain \(`--until pr`: whether it stops between stages\)/,
@@ -990,7 +990,7 @@ test("#130 CA-27: los README describen los tres controles sin nombres de nivel y
 		/^\| \*\*`chiche-spec`\*\* \|[^\n]*With `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` requires nothing/m,
 		/^\| \*\*`chiche-run`\*\* \|[^\n]*With `--mode`[^\n]*`pr-reviewed` also resolves the PR feedback on its own, up to 2 rounds/m,
 		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*only with confidence 100[^\n]*`--until pr`/m,
-		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(chains with `--until pr`\) or plain `Confirmar`/m,
+		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(adds `--until pr`[^\n]*or `Confirmar <ruta>` \(chains only that stage\)/m,
 	]), []);
 	assert.equal(es.split("\n").filter((line) => /se retiraron en 6\.0\.0/.test(line)).length, 1, "README.md: una sola nota de retiro");
 	assert.equal(en.split("\n").filter((line) => /were retired in 6\.0\.0/.test(line)).length, 1, "README.en.md: una sola nota de retiro");
