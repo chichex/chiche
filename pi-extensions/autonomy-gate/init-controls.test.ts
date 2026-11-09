@@ -168,6 +168,83 @@ test("#130 CA-22: --defaults reemplaza al modo sin preguntas en los cinco chiche
 	assert.deepEqual(problems, []);
 });
 
+// ---------------------------------------------------------------------------
+// CA-21: las tres preguntas de la Fase 3
+
+const CONFIDENCE_QUESTION = [
+	"**Confianza por etapa.** Después de los gaps, preguntar la confianza con `«tool-preguntas»`, una pregunta por etapa (`grill` y `spec`) — «¿Qué te pregunta el agente en <stage>?» —, con estas opciones, la recomendada primera, y la respuesta libre (Other) para otro entero de 0 a 100:",
+	"",
+	"1. `80 (Recomendado)` — pregunta solo lo dudoso.",
+	"2. `100` — pregunta todo y confirma cada paso.",
+	"3. `60` — pregunta menos, asume más.",
+	"4. `0` — no pregunta nada.",
+	"",
+	"Por encima de ese número el agente asume una decisión y la muestra; en ese número o por debajo, la pregunta.",
+].join("\n");
+
+const RUN_QUESTION = [
+	"**Posición del run.** Después de la confianza, preguntar la posición con `«tool-preguntas»`, una sola vez — «¿Dónde frena el run?» —, con estas opciones, la recomendada primera:",
+	"",
+	"1. `pr (Recomendado)` — abre el PR, lanza el review y termina.",
+	"2. `ask` — frena ante dudas y ofrece el menú tras el PR.",
+	"3. `pr-reviewed` — como `pr`, y además corrige el feedback del review solo, hasta 2 rondas.",
+	"",
+	"Las tres respuestas van a la tabla `| Stage | Value | Since |` de `## Autonomy`, cada una en su fila (`grill`, `spec` y `run`) con `Since` de hoy. Con `--defaults` no se pregunta: escribe `80` en `grill`, `80` en `spec` y `ask` en `run`.",
+].join("\n");
+
+// En Pi la respuesta libre no viene sola: la pregunta la pide con `allowOther: true`. Es capa de
+// interacción (parámetro de la tool) y la única diferencia tolerada en la Fase 3.
+const PI_OTHER = "la respuesta libre (Other, con `allowOther: true`) para otro entero de 0 a 100";
+const OTHER = "la respuesta libre (Other) para otro entero de 0 a 100";
+
+function phase3(skill: InitSkill, harness: Harness): string {
+	const text = section(skill.doctrine, /^Fase 3 — /);
+	return harness === "pi" ? text.replace(PI_OTHER, OTHER) : text;
+}
+
+test("#130 CA-21: la Fase 3 de los cinco chiche-init pregunta la confianza de grill y de spec (80 recomendado, 100, 60, 0 y respuesta libre) y la posición del run (pr recomendado, ask, pr-reviewed con «hasta 2 rondas»), con la tool del harness y sin preguntas de nivel, umbral ni ensayo", async () => {
+	const problems: string[] = [];
+	for (const [harness, skill] of await initSkills()) {
+		const at = (problem: string) => `${skill.path}: ${problem}`;
+		const text = phase3(skill, harness);
+		if (!text.includes(`\n\n${CONFIDENCE_QUESTION}\n\n${RUN_QUESTION}\n\n`)) problems.push(at("la Fase 3 no trae la pregunta de confianza seguida de la de posición del run, con sus opciones literales"));
+
+		// La tool es la del harness, no un token genérico ni la de otro.
+		const raw = section(outsideSharedBlocks(skill.raw), /^Fase 3 — /);
+		for (const ask of ["preguntar la confianza con", "preguntar la posición con"]) {
+			if (!raw.includes(`${ask} \`${skill.it.tool}\``)) problems.push(at(`«${ask}» no nombra \`${skill.it.tool}\``));
+		}
+		if (harness === "pi" && !raw.includes(PI_OTHER)) problems.push(at("la pregunta de confianza no pide `allowOther: true` para la respuesta libre"));
+		if (harness !== "pi" && raw.includes("allowOther")) problems.push(at("`allowOther` es un parámetro de la tool de Pi"));
+
+		// Los párrafos titulados de la fase son exactamente estos tres, y las opciones numeradas, estas siete.
+		const titled = [...text.matchAll(/^\*\*([^*\n]+)\.\*\*/gm)].map((match) => match[1]);
+		if (titled.join(" | ") !== "Confianza por etapa | Posición del run | Stop list") problems.push(at(`párrafos titulados de la Fase 3: ${titled.join(" | ")}`));
+		const options = [...text.matchAll(/^\d+\. `([^`]+)`/gm)].map((match) => match[1]);
+		if (options.join(" | ") !== "80 (Recomendado) | 100 | 60 | 0 | pr (Recomendado) | ask | pr-reviewed") problems.push(at(`opciones numeradas de la Fase 3: ${options.join(" | ")}`));
+
+		// No quedan preguntas de nivel por fila, de umbral ni de ensayo, ni reglas que escriban otras filas.
+		for (const gone of [/¿Hasta dónde llega el agente solo/, /¿A partir de qué confianza asume/, /\bnivel(?:es)?\b/i, /umbral/i, /ensay/i, /una pregunta por fila/, /`review`/, /`land`/, /una por ambiente/, /`70`|`90`/]) {
+			if (gone.test(text)) problems.push(at(`la Fase 3 todavía dice ${gone}`));
+		}
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#130 CA-21: la doctrina de la Fase 3 es idéntica entre harnesses tras normalizar invocaciones y tool de preguntas (Pi suma solo `allowOther: true`)", async () => {
+	const skills = await initSkills();
+	const reference = skills.get("claude");
+	assert.ok(reference, "claude/chiche-init/SKILL.md");
+	const expected = phase3(reference, "claude");
+	assert.ok(expected.includes("«tool-preguntas»"), "la Fase 3 nombra la tool de preguntas del harness");
+	const problems: string[] = [];
+	for (const [harness, skill] of skills) {
+		const actual = phase3(skill, harness);
+		if (actual !== expected) problems.push(`claude vs ${harness}: ${firstDifference(expected, actual)}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
 test("#130 autotest: la guarda de vocabulario retirado distingue el texto de 5.x del de 6.0.0", () => {
 	const old = [
 		"- Con `--autonomy` ≥ A2 (o si el usuario no responde): assumption más conservadora.",
@@ -186,5 +263,3 @@ test("#130 autotest: la guarda de vocabulario retirado distingue el texto de 5.x
 	];
 	assert.deepEqual(retiredWords(current.join("\n")), [], "el texto nuevo, el umbral de coverage y el ensayo de la stop list no se marcan");
 });
-
-void firstDifference;

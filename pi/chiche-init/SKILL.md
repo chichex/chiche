@@ -200,9 +200,22 @@ Listar las preguntas que el código NO respondió. Típicas: ¿cuál ambiente us
 - Lo ya claro NO se pregunta: preguntar lo inferible erosiona la confianza en el skill.
 - Con `--defaults` (o si el usuario no responde): assumption más conservadora (ej. "solo local, nunca staging"), documentada en el doc con `[NEEDS-INPUT]`.
 
-**Nivel de autonomía por etapa.** Después de los gaps, preguntar el nivel con `ask_user_question`, una pregunta por fila — "¿Hasta dónde llega el agente solo en <stage>?", con `supervised (Recomendado)` primera y después `plan-approved` y `unattended` —: filas fijas `grill`, `spec`, `run`, `review` y `land`, más una por ambiente de `## Ambientes`. `land`, `review` y los ambientes solo aceptan `supervised` en esta versión: no se preguntan, se escriben. Cada respuesta va a la tabla de niveles de `## Autonomy` con `Since` de hoy; `Rehearsed` lleva `—` en toda fila: el ensayo de niveles se retiró en 5.7.0 y el nivel escrito rige desde que se escribe. Con `--autonomy` ≥ A2 no se pregunta: asume `supervised` en todas las filas y marca `[NEEDS-INPUT]`.
+**Confianza por etapa.** Después de los gaps, preguntar la confianza con `ask_user_question`, una pregunta por etapa (`grill` y `spec`) — «¿Qué te pregunta el agente en <stage>?» —, con estas opciones, la recomendada primera, y la respuesta libre (Other, con `allowOther: true`) para otro entero de 0 a 100:
 
-**Umbrales de confianza.** Después de los niveles, preguntar el umbral de `grill` y el de `spec` con `ask_user_question`, una pregunta por stage — «¿A partir de qué confianza asume el agente en <stage> en vez de preguntar?» —, con las opciones `80 (Recomendado)` / `70` / `90` y la respuesta libre (Other, con `allowOther: true`) para otro entero de 0 a 100. Es la probabilidad, en por ciento, de que la opción recomendada de una decisión sea la correcta: por encima del umbral el agente la asume y la muestra; en el umbral o por debajo, la pregunta. Cada respuesta va a la columna `Umbral` de su fila; `run`, `review`, `land` y los ambientes llevan `—`. Con `--autonomy` ≥ A2 no se pregunta: escribe 80 en `grill` y `spec`.
+1. `80 (Recomendado)` — pregunta solo lo dudoso.
+2. `100` — pregunta todo y confirma cada paso.
+3. `60` — pregunta menos, asume más.
+4. `0` — no pregunta nada.
+
+Por encima de ese número el agente asume una decisión y la muestra; en ese número o por debajo, la pregunta.
+
+**Posición del run.** Después de la confianza, preguntar la posición con `ask_user_question`, una sola vez — «¿Dónde frena el run?» —, con estas opciones, la recomendada primera:
+
+1. `pr (Recomendado)` — abre el PR, lanza el review y termina.
+2. `ask` — frena ante dudas y ofrece el menú tras el PR.
+3. `pr-reviewed` — como `pr`, y además corrige el feedback del review solo, hasta 2 rondas.
+
+Las tres respuestas van a la tabla `| Stage | Value | Since |` de `## Autonomy`, cada una en su fila (`grill`, `spec` y `run`) con `Since` de hoy. Con `--defaults` no se pregunta: escribe `80` en `grill`, `80` en `spec` y `ask` en `run`.
 
 **Stop list.** La pregunta de qué requiere confirmación humana además de los defaults se responde como filas de la stop list de `## Autonomy`: por cada respuesta, proponer la fila con `Action`, el `Pattern` inferido (regex POSIX extendida sobre el comando o la ruta, sin `|`) y `Reason`, y confirmarla con `ask_user_question`; una respuesta sin patrón honesto se ofrece como regla fechada para `## Decisiones humanas`, nunca como fila con `Pattern` vacío. Los defaults (deploy, migraciones sobre datos compartidos, push a `main`, force-push, merge de PRs y servicios pagos) se escriben sin preguntar, con el patrón que el repo sugiere. En `--update` sobre un contrato con límites en prosa, la fila `Stop list` de «Upgrade de contrato» propone una fila por bullet con este mismo mecanismo. Corre después de «Migración a .chiche/» y funciona igual sobre un repo que eligió `Mantener .sdd/`: lee y escribe el contrato donde esté.
 
