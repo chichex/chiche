@@ -1373,7 +1373,7 @@ function sddMentionProblems(path: string, lines: string[]): string[] {
 	return problems;
 }
 
-test("issue #103 CA-18 (issue #102 CA-20): los README se titulan # chiche, abren con el tagline, nombran los niveles y --autonomy, y el flujo chiche", async () => {
+test("issue #103 CA-18 (issue #130 CA-27): los README se titulan # chiche, abren con el tagline, nombran los tres controles del dial, y el flujo chiche", async () => {
 	const problems: string[] = [];
 	for (const readme of README_PITCH) {
 		const markdown = await readRepoFile(readme.path);
@@ -1384,8 +1384,8 @@ test("issue #103 CA-18 (issue #102 CA-20): los README se titulan # chiche, abren
 		if (!opening.toLowerCase().includes(readme.tagline)) problems.push(`${readme.path}: las primeras 8 líneas no dicen «${readme.tagline}»`);
 		// El tagline «anda un chiche» se retiró en 5.6.3 y no vuelve.
 		if (markdown.toLowerCase().includes("anda un chiche")) problems.push(`${readme.path}: dice «anda un chiche», el tagline retirado`);
-		// Issue #102 CA-20: las primeras 8 líneas nombran los tres niveles y el flag del dial.
-		for (const token of ["`supervised`", "`plan-approved`", "`unattended`", "`--autonomy`"]) {
+		// Issue #130 CA-27: las primeras 8 líneas nombran los tres controles del dial (confianza, posición del run y cadena).
+		for (const token of ["`grill`", "`chiche-spec`", "`ask`", "`pr`", "`pr-reviewed`", "`--until pr`"]) {
 			if (!opening.includes(token)) problems.push(`${readme.path}: las primeras 8 líneas no nombran ${token}`);
 		}
 

@@ -980,7 +980,7 @@ test("#130 CA-27: los README describen los tres controles sin nombres de nivel y
 		/la confianza de `grill` y `chiche-spec` \(de 0 a 100: qué te pregunta\), la posición del run \(`ask`, `pr` o `pr-reviewed`: dónde frena\) y la cadena \(`--until pr`: si para entre etapas\)/,
 		/^\| \*\*`chiche-init`\*\* \|[^\n]*Pregunta tres cosas de autonomía \(la confianza de `grill`, la de `chiche-spec` y la posición del run\)[^\n]*`--defaults` corre sin preguntar/m,
 		/^\| \*\*`chiche-spec`\*\* \|[^\n]*Con `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` no exige nada/m,
-		/^\| \*\*`chiche-run`\*\* \|[^\n]*Con `--mode`[^\n]*`ask` pregunta ante choques[^\n]*`pr` corre hasta el PR[^\n]*`pr-reviewed` además corrige el feedback del PR solo, hasta 2 rondas/m,
+		/^\| \*\*`chiche-run`\*\* \|[^\n]*Con `--mode`[^\n]*`ask` pregunta ante choques[^\n]*`pr` corre hasta el PR[^\n]*`pr-reviewed` delega el run completo[^\n]*corrige el feedback del review solo, hasta 2 rondas/m,
 		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*solo con confianza 100[^\n]*`--until pr`/m,
 		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(agrega `--until pr`[^\n]*o `Confirmar <ruta>` \(encadena solo esa etapa\)/m,
 	]), []);
@@ -988,7 +988,7 @@ test("#130 CA-27: los README describen los tres controles sin nombres de nivel y
 		/the confidence of `grill` and `chiche-spec` \(0 to 100: what it asks you\), the run position \(`ask`, `pr` or `pr-reviewed`: where it stops\) and the chain \(`--until pr`: whether it stops between stages\)/,
 		/^\| \*\*`chiche-init`\*\* \|[^\n]*It asks three autonomy questions[^\n]*`--defaults` runs without asking/m,
 		/^\| \*\*`chiche-spec`\*\* \|[^\n]*With `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` requires nothing/m,
-		/^\| \*\*`chiche-run`\*\* \|[^\n]*With `--mode`[^\n]*`pr-reviewed` also resolves the PR feedback on its own, up to 2 rounds/m,
+		/^\| \*\*`chiche-run`\*\* \|[^\n]*With `--mode`[^\n]*`pr-reviewed` delegates the whole run[^\n]*fixes the review feedback on its own, up to 2 rounds/m,
 		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*only with confidence 100[^\n]*`--until pr`/m,
 		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(adds `--until pr`[^\n]*or `Confirmar <ruta>` \(chains only that stage\)/m,
 	]), []);
