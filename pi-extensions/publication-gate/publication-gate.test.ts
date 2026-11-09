@@ -141,10 +141,11 @@ test("#134 CA-1: el template de la Fase 4 de los cinco chiche-init lleva ## Publ
 		const values = new Map(rows.map((row) => [row[0] ?? "", row[1] ?? ""]));
 		if (values.get("specs") !== "auto") problems.push(at(`specs del template: ${values.get("specs")}`));
 		if (values.get("carpeta") !== "<git-common-dir>/chiche/") problems.push(at(`carpeta del template: ${values.get("carpeta")}`));
-		if (values.get("repo") !== "owner/repo") problems.push(at(`repo del template: ${values.get("repo")}`));
+		// Review #138-1: el placeholder no puede pasar la validación como un repo real; `<…>` cae al default con aviso.
+		if (values.get("repo") !== "<owner/repo o none>") problems.push(at(`repo del template: ${values.get("repo")}`));
 		if (values.get("crear issue") !== DEFAULT_TEMPLATE) problems.push(at(`crear issue del template: ${values.get("crear issue")}`));
 		for (const key of KEYS) if (!new RegExp(`^${escapeRegExp(key)}: .+$`, "m").test(chunk)) problems.push(at(`falta la línea que explica \`${key}\``));
-		problems.push(...missing(chunk, [/auto/, /issue/, /local/, /<git-common-dir>\/chiche\//, /relativa a la raiz/, /origin/, /\{title\}/, /\{body\}/, /\{repo\}/]).map((problem) => at(`template: ${problem}`)));
+		problems.push(...missing(chunk, [/auto/, /issue/, /local/, /<git-common-dir>\/chiche\//, /relativa a la raiz/, /origin/, /o none sin repo de issues/, /\{title\}/, /\{body\}/, /\{repo\}/, /sin `\|`/]).map((problem) => at(`template: ${problem}`)));
 	}
 	assert.deepEqual(problems, []);
 });
@@ -153,7 +154,7 @@ test("#134 CA-1: el template de la Fase 4 de los cinco chiche-init lleva ## Publ
 // CA-2: las tres preguntas de la Fase 3, después de la posición del run
 
 const PUBLICATION_QUESTIONS = [
-	"**Publicación.** Después de la posición del run, preguntar dónde publican los skills con `«tool-preguntas»`, tres preguntas en este orden, cada una con la recomendada primera y la respuesta libre (Other):",
+	"**Publicación.** Después de la posición del run, preguntar dónde publican los skills con `«tool-preguntas»`, tres preguntas en este orden, cada una con la recomendada primera; las dos últimas aceptan respuesta libre (Other) y la primera no: una respuesta fuera de `auto`, `issue` o `local` se repregunta:",
 	"",
 	"«¿Adónde van las specs?»",
 	"",
@@ -171,7 +172,9 @@ const PUBLICATION_QUESTIONS = [
 	"1. `En <origin> con gh issue create (Recomendado)` — la plantilla default, `gh issue create --repo {repo} --title {title} --body-file {body}`, sobre el repo de `origin`.",
 	"2. `En otro repo` — pide `owner/repo` y usa la plantilla default con ese repo.",
 	"",
-	"Las respuestas van a la tabla `| Clave | Valor |` de `## Publicacion`: `specs`, `carpeta`, `repo` y `crear issue`. Con `--defaults` no se pregunta: un contrato nuevo lleva los cuatro defaults. En `--update` con la sección ya presente, preguntar `Mantener (Recomendado)` / `Revisar`: `Mantener` la preserva verbatim y `Revisar` repite las tres preguntas con los valores actuales como default.",
+	"Sin un `origin` de GitHub la tercera pregunta se saltea: `repo` queda `none` y la plantilla, la default (`specs` sigue valiendo: con `auto` la spec cae a local y con `issue` cae a local con aviso).",
+	"",
+	"Las respuestas van a la tabla `| Clave | Valor |` de `## Publicacion`: `specs`, `carpeta`, `repo` y `crear issue`. Con `--defaults` no se pregunta: un contrato nuevo lleva los cuatro defaults. En `--update` con la sección ya presente, preguntar `Mantener (Recomendado)` / `Revisar`: `Mantener` la preserva verbatim y `Revisar` repite las tres preguntas con los valores actuales como default; con `--defaults` no se pregunta y se preserva verbatim.",
 ].join("\n");
 
 test("#134 CA-2: la Fase 3 de los cinco chiche-init hace las tres preguntas de publicación, en orden, después de la posición del run y antes de la stop list, con la recomendada primera, respuesta libre y la tool del harness", async () => {
@@ -186,7 +189,7 @@ test("#134 CA-2: la Fase 3 de los cinco chiche-init hace las tres preguntas de p
 		const tool = await questionTool(harness);
 		const rawPhase3 = section(raw, /^Fase 3 — /);
 		if (!rawPhase3.includes(`preguntar dónde publican los skills con \`${tool}\``)) problems.push(at(`«preguntar dónde publican los skills» no nombra \`${tool}\``));
-		if (harness === "pi" && !rawPhase3.includes("tres preguntas en este orden, cada una con la recomendada primera y la respuesta libre (Other, con `allowOther: true`):")) problems.push(at("en Pi la respuesta libre pide `allowOther: true`"));
+		if (harness === "pi" && !rawPhase3.includes("las dos últimas aceptan respuesta libre (Other, con `allowOther: true`) y la primera no")) problems.push(at("en Pi la respuesta libre pide `allowOther: true` solo en las dos últimas"));
 	}
 	assert.deepEqual(problems, []);
 });
@@ -232,7 +235,12 @@ test("#134 CA-3: el bloque publication-resolve es idéntico byte a byte en los c
 		/^\*\*`## Publicacion`\.\*\*/m,
 		/`specs`[^\n]*`auto`[^\n]*`issue`[^\n]*`local`/,
 		/`carpeta`[^\n]*`<git-common-dir>\/chiche\/`[^\n]*relativa a la raíz del repo/,
-		/`repo`[^\n]*`owner\/repo`/,
+		/`repo`[^\n]*`owner\/repo`[^\n]*`none`/,
+		/`crear issue`[^\n]*sin `\|`/,
+		/host `github\.com` o `ssh\.github\.com`/,
+		/alias SSH[^\n]*`none`/,
+		/Un valor envuelto en backticks se lee sin ellos/,
+		/La fila `repo` acepta `none` como valor explícito/,
 		/`crear issue`[^\n]*`\{title\}` y `\{body\}` obligatorios y `\{repo\}` opcional/,
 		/^\*\*Publicación efectiva\.\*\*/m,
 		/raíz operativa \(`\.chiche\/project\.md`, con fallback a `\.sdd\/project\.md`\)/,
@@ -418,6 +426,25 @@ test("#134 CA-3: lee .sdd/project.md cuando no hay .chiche/project.md, corre des
 	const ssh = tempRepo("ssh", null, { origin: "git@github.com:acme/widgets.git" });
 	roots.push(ssh);
 	assert.match(sameAcrossShells(t, command, ssh, "ssh").stdout, /^repo: acme\/widgets \(default\)$/m);
+
+	// Review #138-1: `none` es un valor explícito válido, sin aviso y sin (default).
+	const explicitNone = tempRepo("none-explicito", publicationContract({ repo: "none" }));
+	roots.push(explicitNone);
+	const noneRun = sameAcrossShells(t, command, explicitNone, "none-explicito");
+	assert.equal(noneRun.stderr, "");
+	assert.match(noneRun.stdout, /^repo: none$/m);
+
+	// Review #138-6: el host va anclado: `mygithub.com` no es GitHub, `ssh.github.com:443` sí, y un alias SSH cae a none.
+	for (const [name, origin, expected] of [
+		["falso-github", "https://mygithub.com/acme/widgets.git", "none (default)"],
+		["ssh-443", "ssh://git@ssh.github.com:443/acme/widgets.git", "acme/widgets (default)"],
+		["alias-ssh", "git@github.com-work:acme/widgets.git", "none (default)"],
+		["https-user", "https://user@github.com/acme/widgets", "acme/widgets (default)"],
+	] as const) {
+		const root = tempRepo(name, null, { origin });
+		roots.push(root);
+		assert.match(sameAcrossShells(t, command, root, name).stdout, new RegExp(`^repo: ${escapeRegExp(expected)}$`, "m"), name);
+	}
 });
 
 test("#134 CA-4: cada valor inválido cae al default de su clave con el aviso literal por stderr y exit 0, sin tocar las otras claves, igual en bash, sh y zsh", async (t) => {
@@ -481,6 +508,15 @@ test("#134 CA-4: cada valor inválido cae al default de su clave con el aviso li
 		assert.equal(run.stderr, `${item.aviso(root)}\n`, item.name);
 		assert.equal(run.stdout, item.expect(root), item.name);
 	}
+	// Review #138-4: un valor envuelto en backticks (el estilo de este repo en ## Comandos) se lee sin ellos.
+	const ticked = tempRepo("backticks", publicationContract({ specs: "`local`", carpeta: "`docs/sdd/`", repo: "`acme/widgets`", "crear issue": `\`${DEFAULT_TEMPLATE}\`` }));
+	roots.push(ticked);
+	const tickedRun = sameAcrossShells(t, command, ticked, "backticks");
+	assert.equal(tickedRun.stderr, "");
+	assert.equal(tickedRun.stdout, expectedLines(ticked, { specs: "local", carpeta: join(ticked, "docs", "sdd"), repo: "acme/widgets", crear: DEFAULT_TEMPLATE }));
+	const tickedDefault = tempRepo("backticks-default", publicationContract({ carpeta: "`<git-common-dir>/chiche/`" }));
+	roots.push(tickedDefault);
+	assert.match(sameAcrossShells(t, command, tickedDefault, "backticks-default").stdout, new RegExp(`^carpeta: ${escapeRegExp(join(tickedDefault, ".git", "chiche"))}$`, "m"), "el literal default entre backticks es el default, sin (default) porque salió del contrato");
 	// Dos inválidos a la vez: un aviso por clave, en el orden de las claves, y los demás valores intactos.
 	const both = tempRepo("dos", publicationContract({ specs: "x", carpeta: "docs/sdd", repo: "nope", "crear issue": DEFAULT_TEMPLATE }));
 	roots.push(both);
@@ -503,12 +539,13 @@ test("#134 CA-5: los cinco chiche-init verifican ## Publicacion sin ejecutar la 
 		}
 		problems.push(...missing(paragraph, [
 			/no ejecuta la plantilla de `crear issue`: crearía un issue/,
-			/comando canónico de «Publicación efectiva»/,
+			// Review #138-3: el comando lee el archivo del disco, así que corre sobre el contrato ya escrito, como el ensayo de la stop list.
+			/Con el archivo escrito, correr el comando canónico de «Publicación efectiva» sobre el contrato ya escrito \(el comando lee el archivo, no recibe el borrador\)/,
 			/sin ningún aviso de valor inválido/,
-			/`gh repo view <repo> --json nameWithOwner`/,
+			/`gh repo view <repo> --json nameWithOwner` \(salvo con `repo` en `none`, que no se consulta\)/,
 			/stop list de `## Autonomy` contra la plantilla/,
 			/se anota en `## Gaps`/,
-			/en una corrida interactiva, se repregunta la clave que falló/,
+			/en una corrida interactiva, se repregunta la clave que falló y se reescribe su fila/,
 			/con `--defaults` queda solo en `## Gaps`/,
 		]).map((problem) => `${harness}/chiche-init: ${problem}`));
 	}
@@ -530,14 +567,15 @@ test("#134 CA-6: --defaults escribe ## Publicacion con los cuatro defaults en un
 		const defaults = args.split("\n").find((line) => line.startsWith("- `--defaults` — ")) ?? "";
 		problems.push(...missing(defaults, [
 			/`## Publicacion` con sus cuatro defaults/,
-			/sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible`/,
+			// Review #138-2: con --defaults una sección presente se preserva verbatim; sin la sección queda mejora disponible.
+			/sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible` \(con la sección presente se preserva verbatim\)/,
 		]).map((problem) => at(`--defaults: ${problem}`)));
 		const upgrade = section(markdown, /^Upgrade de contrato\b/);
 		if (!upgrade.split("\n").includes(PUBLICATION_UPGRADE_ROW)) problems.push(at("«Upgrade de contrato» no trae la fila Publicacion"));
 		const phase4 = section(markdown, /^Fase 4 — /);
-		if (!/En `--update`: regenerar todo salvo[^\n]*`## Publicacion` \(preservar verbatim si se eligió `Mantener` en la Fase 3\)/.test(phase4)) problems.push(at("la regla de --update de la Fase 4 no preserva ## Publicacion con Mantener"));
+		if (!/En `--update`: regenerar todo salvo[^\n]*; `## Publicacion` solo cambia si se eligió `Revisar` en la Fase 3 \(con `--defaults` se preserva verbatim\); y los `\[NEEDS-INPUT\]`/.test(phase4)) problems.push(at("la regla de --update de la Fase 4 no preserva ## Publicacion salvo Revisar"));
 		const mustDo = section(markdown, /^MUST DO$/);
-		if (!mustDo.split("\n").includes("- Preservar `## Publicacion` verbatim en `--update` cuando el usuario elige `Mantener`; con `Revisar`, repetir las tres preguntas de «Publicación» con los valores actuales como default.")) problems.push(at("MUST DO no preserva ## Publicacion"));
+		if (!mustDo.split("\n").includes("- Preservar `## Publicacion` verbatim en `--update` cuando el usuario elige `Mantener` o corre con `--defaults`; con `Revisar`, repetir las tres preguntas de «Publicación» con los valores actuales como default.")) problems.push(at("MUST DO no preserva ## Publicacion"));
 		const mustNot = section(markdown, /^MUST NOT DO$/);
 		if (!mustNot.split("\n").includes("- No ejecutar la plantilla de `crear issue` para verificarla: crearía un issue real. La verificación es `gh repo view` más el comando canónico y la stop list.")) problems.push(at("MUST NOT DO no prohíbe ejecutar la plantilla"));
 	}

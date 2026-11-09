@@ -107,7 +107,7 @@ async function initSkills(): Promise<Map<Harness, InitSkill>> {
 // CA-22: --defaults reemplaza al modo sin preguntas
 
 const DEFAULTS_FLAG =
-	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run` y `## Publicacion` con sus cuatro defaults, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa), sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible`, y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
+	"- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run` y `## Publicacion` con sus cuatro defaults, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa), sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible` (con la sección presente se preserva verbatim), y no se invoca `«skill:coding-policies»` ni `«skill:design-system»`. Ver «Controles de autonomía» y «Controles efectivos».";
 
 test("#130 CA-22: --defaults reemplaza al modo sin preguntas en los cinco chiche-init: firma, lanzador, lo que escribe (80, 80 y ask) y lo que no hace (políticas, migraciones, design-system, coding-policies)", async () => {
 	const problems: string[] = [];
