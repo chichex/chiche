@@ -38,41 +38,36 @@ test("#103 CA-9: los manifests y los marketplaces publican el plugin chiche y ab
 	assert.match(codexMarketplace.interface.displayName, /^chiche\b/);
 });
 
-// Cada description abre con la marca y el tagline del idioma del archivo. Hoy los cuatro archivos
-// estan en espanol; un manifest en ingles se suma aca con su propio prefijo.
-const DESCRIPTION_TAGLINES = {
-	es: "chiche: anda un chiche",
-	en: "chiche: you choose how much the agent decides",
-} as const;
+// Cada description abre con la marca. El tagline "anda un chiche" se retiro en 5.6.3 y no vuelve.
+const DESCRIPTION_PREFIX = "chiche: ";
+const DESCRIPTION_FILES = [
+	".claude-plugin/plugin.json",
+	".codex-plugin/plugin.json",
+	"package.json",
+	".claude-plugin/marketplace.json",
+];
 
-const DESCRIPTION_PREFIX_BY_FILE: Record<string, string> = {
-	".claude-plugin/plugin.json": DESCRIPTION_TAGLINES.es,
-	".codex-plugin/plugin.json": DESCRIPTION_TAGLINES.es,
-	"package.json": DESCRIPTION_TAGLINES.es,
-	".claude-plugin/marketplace.json": DESCRIPTION_TAGLINES.es,
-};
-
-test('issue #103 CA-19: las descriptions de los manifests empiezan por "chiche: " más el tagline y no dicen familia SDD', async () => {
-	const descriptions: Array<{ where: string; file: string; description: unknown }> = [];
-	for (const file of Object.keys(DESCRIPTION_PREFIX_BY_FILE)) {
+test('issue #103 CA-19: las descriptions de los manifests empiezan por "chiche: " y no dicen familia SDD ni el tagline retirado', async () => {
+	const descriptions: Array<{ where: string; description: unknown }> = [];
+	for (const file of DESCRIPTION_FILES) {
 		const json = await readJson<{ description?: unknown; plugins?: Array<{ description?: unknown }> }>(file);
-		descriptions.push({ where: file, file, description: json.description });
+		descriptions.push({ where: file, description: json.description });
 		if (file === ".claude-plugin/marketplace.json") {
 			json.plugins?.forEach((plugin, index) => {
-				descriptions.push({ where: `${file} plugins[${index}]`, file, description: plugin.description });
+				descriptions.push({ where: `${file} plugins[${index}]`, description: plugin.description });
 			});
 		}
 	}
 
 	const problems: string[] = [];
-	for (const { where, file, description } of descriptions) {
-		const prefix = DESCRIPTION_PREFIX_BY_FILE[file] as string;
+	for (const { where, description } of descriptions) {
 		if (typeof description !== "string") {
 			problems.push(`${where}: falta description`);
 			continue;
 		}
-		if (!description.startsWith(prefix)) problems.push(`${where}: debe empezar por "${prefix}" (empieza por "${description.slice(0, prefix.length)}")`);
+		if (!description.startsWith(DESCRIPTION_PREFIX)) problems.push(`${where}: debe empezar por "${DESCRIPTION_PREFIX}" (empieza por "${description.slice(0, DESCRIPTION_PREFIX.length)}")`);
 		if (/familia SDD/.test(description)) problems.push(`${where}: no debe decir "familia SDD"`);
+		if (/anda un chiche/i.test(description)) problems.push(`${where}: no debe decir "anda un chiche"`);
 	}
 	assert.deepEqual(problems, []);
 });
@@ -91,7 +86,7 @@ test("PR #110: marketplace.json conserva chichex-skills como alias de chiche par
 	assert.ok(chiche, "marketplace.json: plugin chiche");
 	assert.ok(alias, "marketplace.json: falta la entrada alias chichex-skills; sin ella las instalaciones viejas dejan de actualizar");
 	assert.equal(alias.source, chiche.source, "el alias publica el mismo directorio que chiche");
-	assert.match(alias.description, /^chiche: anda un chiche\. /, "el alias abre con la marca como las demas descriptions");
+	assert.match(alias.description, /^chiche: /, "el alias abre con la marca como las demas descriptions");
 	assert.match(alias.description, /`chiche@chichex`/, "el alias manda a migrar a chiche@chichex");
 });
 
