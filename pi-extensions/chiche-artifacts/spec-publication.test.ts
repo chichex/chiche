@@ -729,3 +729,40 @@ test("rejects an issue destination whose host identity differs from the validate
 	assert.equal(writes, 0);
 	if (!result.ok) assert.ok(result.diagnostics.some(({ code }) => code === "destination-identity-mismatch"));
 });
+
+// Issue #134, CA-16 y CA-20: un issue creado en otro repo que el de la spec queda en el marker como owner/repo#NN.
+test("#134 CA-16: a new issue created in a repository other than the spec's writes a fully qualified issue reference into the marker", async () => {
+	const initial = canonicalSpec({ issue: "none" });
+	const createdIssue = { repository: "acme/backlog", number: 5 };
+	let published = "";
+	const ports: SpecPublicationPorts = {
+		async writeLocal() { throw new Error("unexpected local write"); },
+		async readLocal() { throw new Error("unexpected local read"); },
+		async createIssue(repository, title) {
+			assert.equal(repository, "acme/backlog");
+			assert.equal(title, "Cross repo publication");
+			return createdIssue;
+		},
+		async writeIssue(issue, markdown) {
+			assert.deepEqual(issue, createdIssue);
+			published = markdown;
+		},
+		async readIssue(issue) {
+			assert.deepEqual(issue, createdIssue);
+			return published;
+		},
+	};
+	const result = await persistSpecPublication({
+		documents: [{
+			id: "successor",
+			markdown: initial,
+			expectation: { mode: "interactive", repository: "chichex/chiche", issue: null, grill: "session 33/á", supersededBy: null },
+			destinations: [{ kind: "new-issue", repository: "acme/backlog", title: "Cross repo publication" }],
+		}],
+	}, ports);
+	assert.equal(result.ok, true, result.ok ? "" : JSON.stringify(result.diagnostics));
+	assert.match(published, /^<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=acme\/backlog#5; grill=session%2033%2F%C3%A1; superseded-by=none -->$/m);
+	const parsed = parseSddArtifact(published);
+	assert.equal(parsed.kind === "metadata" && parsed.metadata.type === "spec" ? parsed.metadata.issue : undefined, "acme/backlog#5");
+	if (result.ok) assert.deepEqual(result.receipt.documents[0]?.destinations, ["issue:acme/backlog#5"]);
+});

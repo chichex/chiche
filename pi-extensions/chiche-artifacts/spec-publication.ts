@@ -103,6 +103,13 @@ export type PersistSpecPublicationResult =
 		createdIssues: IssueRef[];
 	};
 
+// Issue #134, CA-16: un issue del repo de la spec va relativo (`#NN`); uno de otro repo, calificado (`owner/repo#NN`).
+function issueReferenceFor(issue: IssueRef, repository: string): IssueReference {
+	return issue.repository.toLowerCase() === repository.toLowerCase()
+		? (`#${issue.number}` as IssueReference)
+		: (`${issue.repository}#${issue.number}` as IssueReference);
+}
+
 function sameIssue(left: IssueRef | null, right: IssueRef | null): boolean {
 	if (left === null || right === null) return left === right;
 	return left.number === right.number && left.repository.toLowerCase() === right.repository.toLowerCase();
@@ -299,13 +306,13 @@ export async function persistSpecPublication(
 					destination: destinationReference(destination),
 				});
 			}
+			// Issue #134, CA-16 y CA-20: el issue nuevo puede vivir en otro repo que la spec (el `repo` declarado en
+			// ## Publicacion); el marker lo lleva calificado. Quien llama ya fijó ese repo: acá solo se exige un sucesor sin issue.
 			if (destination.kind === "new-issue"
-				&& (role !== "successor"
-					|| document.expectation.issue !== null
-					|| destination.repository.toLowerCase() !== document.expectation.repository.toLowerCase())) {
+				&& (role !== "successor" || document.expectation.issue !== null)) {
 				diagnostics.push({
 					code: "destination-identity-mismatch",
-					message: "New issue publication requires an issue-less successor in the resolved repository",
+					message: "New issue publication requires an issue-less successor",
 					documentId: document.id,
 					stage: "precheck",
 					destination: destinationReference(destination),
@@ -430,7 +437,7 @@ export async function persistSpecPublication(
 			}
 			const linked = upsertSddMetadata(markdown, {
 				...initial.metadata,
-				issue: `#${issue.number}` as IssueReference,
+				issue: issueReferenceFor(issue, expectation.repository),
 			});
 			if (!linked.ok) {
 				diagnostics.push(...operationDiagnostics(document.id, "prepare", linked.diagnostics, unresolvedReference));

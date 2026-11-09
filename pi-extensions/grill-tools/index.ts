@@ -14,6 +14,7 @@ import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { parseConfidence, retiredAutonomyMessage, withFlag } from "../workflow-orchestrator/autonomy.ts";
 import { menuItems, selectMenu, type MenuItem } from "../lib/menu.ts";
+import { issueCommandArgv, issueUrlFromOutput, readPublicationSettings } from "../lib/publication.ts";
 import {
 	artifactReadDirs,
 	artifactWriteDir,
@@ -491,17 +492,28 @@ async function withTemporaryBody<T>(body: string, operation: (path: string) => P
 	}
 }
 
+async function runCommand(
+	pi: ExtensionAPI,
+	argv: string[],
+	cwd: string,
+	signal: AbortSignal | undefined,
+): Promise<string> {
+	const [command, ...args] = argv;
+	if (!command) throw new Error("Empty command");
+	const result = await pi.exec(command, args, { cwd, timeout: 30_000, signal });
+	if (result.code !== 0) {
+		throw new Error(result.stderr.trim() || result.stdout.trim() || `${command} exited with code ${result.code}`);
+	}
+	return result.stdout;
+}
+
 async function runGh(
 	pi: ExtensionAPI,
 	args: string[],
 	cwd: string,
 	signal: AbortSignal | undefined,
 ): Promise<string> {
-	const result = await pi.exec("gh", args, { cwd, timeout: 30_000, signal });
-	if (result.code !== 0) {
-		throw new Error(result.stderr.trim() || result.stdout.trim() || `gh exited with code ${result.code}`);
-	}
-	return result.stdout;
+	return runCommand(pi, ["gh", ...args], cwd, signal);
 }
 
 async function withLocalMutationQueues<T>(paths: string[], operation: () => Promise<T>): Promise<T> {
@@ -1349,10 +1361,16 @@ export default function grillTools(pi: ExtensionAPI) {
 				? resolve(ctx.cwd, params.projectPath.trim())
 				: await projectRoot(pi, ctx.cwd);
 			const root = await projectRoot(pi, requestedRoot);
-			const repository = params.repository.trim();
-			const actualRepository = await projectRepository(pi, root);
-			if (repository.toLowerCase() !== actualRepository.toLowerCase()) {
-				throw new Error(`Repository identity mismatch: expected ${actualRepository}, got ${repository}`);
+			const requestedRepository = params.repository.trim();
+			// `repository` es el repo del codigo (el de origin): la base de un `#NN` relativo en el marker.
+			const repository = await projectRepository(pi, root);
+			// Issue #134, CA-20: los issues viven en el `repo` declarado en ## Publicacion, o en el de origin; el pedido
+			// puede nombrar cualquiera de los dos y se rechaza cualquier otro. La plantilla `crear issue` tambien sale de ahi.
+			const publication = await readPublicationSettings(root);
+			const issueRepository = publication.repo ?? repository;
+			const allowedRepositories = [...new Map([repository, issueRepository].map((candidate) => [candidate.toLowerCase(), candidate])).values()];
+			if (!allowedRepositories.some((candidate) => candidate.toLowerCase() === requestedRepository.toLowerCase())) {
+				throw new Error(`Repository identity mismatch: expected ${allowedRepositories.join(" or ")}, got ${requestedRepository}`);
 			}
 
 			const specDirs = await resolveArtifactDirs(root, "specs");
@@ -1370,10 +1388,10 @@ export default function grillTools(pi: ExtensionAPI) {
 					}
 					if (destination.kind === "issue") {
 						if (!destination.issueNumber) throw new Error(`issueNumber is required for ${document.id}`);
-						return { kind: "issue", issue: { repository, number: destination.issueNumber } };
+						return { kind: "issue", issue: { repository: issueRepository, number: destination.issueNumber } };
 					}
 					if (!destination.title?.trim()) throw new Error(`New issue title is required for ${document.id}`);
-					return { kind: "new-issue", repository, title: destination.title.trim() };
+					return { kind: "new-issue", repository: issueRepository, title: destination.title.trim() };
 				}));
 				return {
 					id: document.id,
@@ -1384,7 +1402,7 @@ export default function grillTools(pi: ExtensionAPI) {
 						repository,
 						issue: document.issueNumber === undefined
 							? null
-							: { repository, number: document.issueNumber },
+							: { repository: issueRepository, number: document.issueNumber },
 						grill: document.grill?.trim() || null,
 						...(document.role === "predecessor" ? { state: "superseded" as const } : {}),
 						supersededBy: document.role === "predecessor"
@@ -1399,7 +1417,7 @@ export default function grillTools(pi: ExtensionAPI) {
 				if (!allowedPaths.has(path)) throw new Error(`Unexpected local publication path: ${path}`);
 			}
 			function assertRepository(issue: IssueRef): void {
-				if (issue.repository.toLowerCase() !== repository.toLowerCase()) {
+				if (issue.repository.toLowerCase() !== issueRepository.toLowerCase()) {
 					throw new Error(`Unexpected issue repository: ${issue.repository}`);
 				}
 			}
@@ -1440,21 +1458,26 @@ export default function grillTools(pi: ExtensionAPI) {
 				async readIssue(issue) {
 					return readGithubIssue(issue);
 				},
-				async createIssue(issueRepository, title, stagingBody) {
-					if (issueRepository.toLowerCase() !== repository.toLowerCase()) {
-						throw new Error(`Unexpected issue repository: ${issueRepository}`);
+				async createIssue(targetRepository, title, stagingBody) {
+					if (targetRepository.toLowerCase() !== issueRepository.toLowerCase()) {
+						throw new Error(`Unexpected issue repository: ${targetRepository}`);
 					}
-					const output = await withTemporaryBody(stagingBody, (bodyPath) => runGh(
+					// Issue #134, CA-15 y CA-20: corre la plantilla `crear issue` con los placeholders reemplazados (cada
+					// valor es un argumento, sin shell) y toma el numero de la URL impresa, cuyo repo tiene que ser el esperado.
+					const output = await withTemporaryBody(stagingBody, (bodyPath) => runCommand(
 						pi,
-						["issue", "create", "--repo", issueRepository, "--title", title, "--body-file", bodyPath],
+						issueCommandArgv(publication.template, { repo: targetRepository, title, body: bodyPath }),
 						root,
 						signal,
 					));
-					const number = Number(/\/issues\/(\d+)/.exec(output)?.[1]);
-					if (!Number.isSafeInteger(number) || number < 1) {
-						throw new Error(`Could not resolve the created issue identity from gh output: ${output.trim()}`);
+					const created = issueUrlFromOutput(output);
+					if (!created) {
+						throw new Error(`Could not resolve the created issue identity: the \`crear issue\` output has no https://github.com/<owner>/<repo>/issues/<N> URL: ${output.trim()}`);
 					}
-					return { repository: issueRepository, number };
+					if (created.repository.toLowerCase() !== targetRepository.toLowerCase()) {
+						throw new Error(`The created issue belongs to another repository: ${created.url} is not in ${targetRepository} (URL huérfana)`);
+					}
+					return { repository: targetRepository, number: created.number };
 				},
 			};
 

@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import { publicationSettings } from "../lib/publication.ts";
 import { artifactReadDirs, declaredArtifactDir, localArtifactDir, readProjectContract, resolveArtifactName, resolveGitCommonDir, trackedArtifactDirs } from "../lib/chiche-paths.ts";
 import { parseSddArtifact } from "../chiche-artifacts/index.ts";
 import { inspectMarkdownArtifact } from "../workflow-resolution/index.ts";
@@ -170,6 +171,25 @@ export type ResolveIssueProjectResult =
 	| { ok: true; root: string; repository: string; number: number }
 	| DirectTargetResolutionFailure;
 
+// Issue #134, CA-16 y CA-17 (desviación fechada de la capa 3, prevista en la spec): el `repo` declarado en
+// `## Publicacion` del proyecto actual es el repo de issues. Un `#NN` suelto apunta ahí, y `<repo>#NN` corre
+// en este proyecto sin buscar un checkout de un repo que solo tiene issues. Se lee del contrato de la raíz
+// operativa, con el mismo fallback que `hasCanonicalContract`; un contrato ilegible no declara nada.
+export async function declaredIssueRepository(
+	root: string,
+	readFile: (path: string, encoding: "utf8") => Promise<string>,
+): Promise<string | null> {
+	for (const directory of [".chiche", ".sdd"]) {
+		try {
+			return canonicalRepository(publicationSettings(await readFile(join(root, directory, "project.md"), "utf8")).repo ?? "");
+		} catch (error) {
+			// Solo un contrato ausente (ENOENT) cae al siguiente lugar; uno ilegible no declara nada, como en hasCanonicalContract.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+		}
+	}
+	return null;
+}
+
 export async function resolveIssueProject(
 	parsed: ParsedIssueTarget,
 	originRoot: string,
@@ -179,6 +199,7 @@ export async function resolveIssueProject(
 	const repositoryRootPort = dependencies.resolveRepositoryRoot ?? resolveKnownRepositoryRoot;
 	const gitRootPort = dependencies.resolveGitRoot ?? defaultGitRoot;
 	const realpathPort = dependencies.realpath ?? realpathDefault;
+	const readPort = dependencies.readFile ?? readFileDefault;
 
 	let originRepository: string | null = null;
 	try {
@@ -186,13 +207,16 @@ export async function resolveIssueProject(
 	} catch {
 		originRepository = null;
 	}
-	const repository = parsed.repository ?? originRepository;
+	const declaredRepository = await declaredIssueRepository(originRoot, readPort);
+	const repository = parsed.repository ?? declaredRepository ?? originRepository;
 	if (!repository) {
 		return resolverFailure("unresolved-repository", "Resolve the current GitHub repository or use owner/repo#NN before retrying");
 	}
 
 	let root = originRoot;
-	if (!originRepository || !sameRepository(originRepository, repository)) {
+	const isOriginRepository = originRepository !== null && sameRepository(originRepository, repository);
+	const isDeclaredRepository = declaredRepository !== null && sameRepository(declaredRepository, repository);
+	if (!isOriginRepository && !isDeclaredRepository) {
 		const rootResolution = await repositoryRootPort(originRoot, repository);
 		if (!rootResolution.ok) {
 			const detail = rootResolution.code === "ambiguous-project"
@@ -320,6 +344,14 @@ export async function resolveDirectRunRequest(
 		const issueResolution = await resolveIssueDocument(issueProject, dependencies);
 		if (!issueResolution.ok) return issueResolution;
 		const issueDocument = issueResolution.issue;
+		// Issue #134, CA-16: un `#NN` relativo en el marker apunta al repo del código (el de `origin`); un issue de
+		// otro repo viene calificado. La base de la normalización es el repo del proyecto, no el del issue.
+		let baseRepository = repo;
+		try {
+			baseRepository = canonicalRepository(await repositoryPort(issueRoot)) ?? repo;
+		} catch {
+			baseRepository = repo;
+		}
 		const inspected = inspectMarkdownArtifact({
 			kind: "markdown",
 			id: issueDocument.url,
@@ -328,7 +360,7 @@ export async function resolveDirectRunRequest(
 			path: issueDocument.url,
 			markdown: issueDocument.body,
 			hostIssue: { repository: repo, number },
-		}, { repository: repo, projectRoot: issueRoot });
+		}, { repository: baseRepository, projectRoot: issueRoot });
 		if (inspected.type !== "spec"
 			|| inspected.format !== "canonical"
 			|| inspected.provenance !== "canonical"
