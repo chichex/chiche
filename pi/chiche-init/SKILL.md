@@ -32,23 +32,36 @@ Un repo inicializado antes del renombre guarda el contrato en `.sdd/project.md` 
 - `--no-import` — no tocar `AGENTS.md` ni `CLAUDE.md`.
 - `--autonomy <level>` — nivel de autonomía de esta corrida (este skill no tiene fila en `## Autonomy`: flag o `supervised`). Con `plan-approved` o `unattended` corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, los niveles del contrato quedan `supervised` y la stop list en prosa no se migra. Ver «Niveles de autonomía» y «Nivel efectivo».
 
-<!-- autonomy-levels:start -->
-**Niveles de autonomía.** La escala es `manual (A0)`, `supervised (A1)`, `plan-approved (A2)`, `unattended (A3)`, `auto-land (A4)` y `auto-deploy (A5)`. `--autonomy <level>` acepta el código o la palabra, sin distinguir mayúsculas (`A2`, `a2` y `plan-approved` son el mismo nivel). Esta versión honra A1 a A3: con A0, A4 o A5 el skill aborta antes de cualquier mutación con el diagnóstico literal `--autonomy <nivel>: no soportado todavía (v1 honra A1–A3)`, y cualquier otro token aborta listando los valores válidos. `--autonomy` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. Sin flag rige lo que resuelve «Nivel efectivo»; el default es `supervised (A1)`.
-<!-- autonomy-levels:end -->
+<!-- autonomy-controls:start -->
+**Controles de autonomía.** Son tres y cada uno hace una sola cosa. **Confianza** (`grill` y `chiche-spec`, flag `--confidence <n>`): un entero de 0 a 100 que dice qué se pregunta: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y confirma cada paso. **Posición del run** (`chiche-run`, flag `--mode <posición>`): dónde frena el run: `ask` frena ante dudas y ofrece el menú tras el PR; `pr` abre el PR, lanza el review y termina; `pr-reviewed` además corrige el feedback del review solo, hasta 2 rondas. **Cadena** (`grill` y `chiche-spec`, flag `--until pr`): con el flag, grill llama a la spec y la spec al run; sin el flag, cada etapa termina en lo suyo. Ningún control cambia a otro: la cadena no toca la confianza ni la posición. Sin flag rige lo que resuelve «Controles efectivos». `--confidence` o `--mode` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. `--autonomy` y los niveles con nombre se retiraron en 6.0.0: recibir `--autonomy` aborta antes de cualquier mutación con el diagnóstico literal `--autonomy se retiró en 6.0.0: <equivalente>`.
+<!-- autonomy-controls:end -->
 
 <!-- autonomy-resolve:start -->
-**Nivel efectivo.** El nivel efectivo es el del flag `--autonomy` si vino; si no, la fila del `Stage` en `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` lee la fila `grill`, `chiche-spec` la fila `spec`, `chiche-run` la fila `run` y `chiche-land` la fila `land` (que solo acepta `supervised`: otro nivel en esa fila cae a `supervised (A1)` con el aviso `fila land solo acepta supervised`); `chiche-init`, `issue-triage` y `design-system` no tienen fila: flag o `supervised (A1)`. La lectura valida el flag primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rige `supervised (A1)`, también con `--autonomy`, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `nivel leído del working tree: sin remote`. Si el contrato no tiene `## Autonomy`, rige `supervised (A1)` con aviso. La columna `Rehearsed` ya no se lee: el nivel escrito en la fila rige (el ensayo de niveles se retiró en 5.7.0). Si el contrato no tiene `## Autonomy` pero sí `## Limites`, esa prosa sigue rigiendo como restricción, el nivel es `supervised (A1)` y el aviso es literal: `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente y frena en todo nivel (la única excepción es la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y el nivel que sale del contrato cae a `supervised (A1)`; con `--autonomy` el flag sigue mandando y solo se avisa. La traza imprime `nivel efectivo: <nombre> (<código>), leído de <fuente>` y, después de `nivel efectivo:`, dos líneas con los umbrales de confianza: `umbral grill: <n>` y `umbral spec: <n>`, la columna `Umbral` de las filas `grill` y `spec` de la tabla de niveles, leída de la misma fuente que el nivel (también con `--autonomy`), un entero de 0 a 100; sin la columna, con `—`, sin la fila, sin `## Autonomy` o sin contrato imprime `80 (default)`; un valor que no es un entero de 0 a 100 imprime `80 (default)` y avisa por stderr `umbral <stage> inválido (<valor>): rige 80`, con `<stage>` la fila (`grill` o `spec`). `grill` lee `umbral grill`, `chiche-spec` lee `umbral spec` e `issue-triage` los dos; los demás skills las imprimen y no las usan. Lo imprime este comando, con `<stage>` y `<flag>` reemplazados (`<flag>` vacío sin el flag; `<stage>` es `none` en los skills sin fila), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (`<flag>` se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
+**Controles efectivos.** El valor de cada control es el del flag de la corrida si vino; si no, el de la tabla de `## Autonomy` del contrato leído del branch default, nunca del branch de trabajo: un PR no puede subirse la autonomía a sí mismo. `grill` usa `confianza grill`, `chiche-spec` usa `confianza spec`, `chiche-run` usa `run` e `issue-triage` lee las dos confianzas; los demás skills imprimen los tres valores y no los usan. La lectura valida los flags primero y, si existe el remote `origin`, hace `git fetch` best-effort, resuelve el branch default (`git symbolic-ref refs/remotes/origin/HEAD`, descartado si apunta a una ref que ya no existe, y si falla o quedó colgado, `git ls-remote --symref origin HEAD`) y lee `git show origin/<default>:.chiche/project.md`, con fallback a `.sdd/project.md` para un repo que mantuvo `.sdd/`; con `origin` y un default que no se resuelve rigen confianza 100 y run `ask`, también con flag, con el aviso `origin sin branch default resoluble`, sin leer el working tree; solo sin `origin` lee el working tree en ese mismo orden y avisa `contrato leído del working tree: sin remote`. La tabla nueva es `| Stage | Value | Since |` con las filas `grill`, `spec` y `run`. Sin contrato, o sin la fila, rigen los defaults: confianza `80` y run `ask`, impresos como `80 (default)` y `ask (default)`; un valor inválido cae al default de su fila con el aviso `valor <stage> inválido (<valor>): rige <default>`. Un contrato con el formato viejo (la tabla de niveles tiene la columna `Level`, o no hay `## Autonomy`) rige en modo conservador, confianza 100 y run `ask`, con el aviso literal `contrato con formato viejo de autonomía: rige confianza 100 y run ask; corré chiche-init --update`; si además tiene `## Limites`, esa prosa sigue rigiendo como restricción y se suma el aviso literal `contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update`. El flag de la corrida manda también sobre un contrato viejo. La stop list (segunda tabla de `## Autonomy`, con el header `| Action | Pattern | Reason |` y hasta la primera línea que no empieza con `|`) se lee de la misma fuente, también en un contrato viejo, y frena siempre (la única excepción es la de merge de `chiche-land`, que la invocación y el plan confirmado autorizan): antes de correr un comando o tocar una ruta que matchee un `Pattern`, el skill frena y lo reporta citando la fila. Un `## Autonomy` sin stop list legible (sin ese header o con 0 filas) avisa `## Autonomy sin stop list legible` y los valores que salen del contrato caen a confianza 100 y run `ask`; el flag sigue mandando y solo se avisa. La traza imprime cuatro líneas, en este orden: `confianza grill: <n>`, `confianza spec: <n>`, `run: <posición>` y `leído de <fuente>`; con flag, la cuarta dice `leído de --confidence` o `leído de --mode`, que es la fuente del valor de esta etapa (los otros valores y la stop list siguen saliendo del contrato). `--autonomy` se retiró en 6.0.0: si vino, el comando no lee nada y termina con el diagnóstico `--autonomy se retiró en 6.0.0: <equivalente>`, donde el equivalente depende del skill y del valor viejo: en `grill` y `chiche-spec`, `supervised` o `A1` → `usá --confidence 100`, `plan-approved` o `A2` → `sacá el flag o usá --confidence <n>`, `unattended` o `A3` → `usá --confidence 0`; en `chiche-run`, `usá --mode ask`, `usá --mode pr` y `usá --mode pr-reviewed`; en `chiche-init`, `usá --defaults`; en los demás, `ya no hace falta`. Lo imprime este comando, con `<stage>`, `<confidence>`, `<mode>` y `<legacy>` reemplazados (`<stage>` es `grill`, `spec`, `run`, `init` en `chiche-init` o `none` en los demás; `<confidence>` y `<mode>` van vacíos sin su flag; `<legacy>` es el valor de `--autonomy` si vino, `-` si vino sin valor y vacío si no vino), sin parámetros posicionales ni variables de argumentos del harness, que se sustituyen al cargar el skill con argumentos (cada valor se sustituye solo si cumple `^[A-Za-z0-9-]+$`; si no, el skill aborta como valor inválido sin correr el comando):
 
 ```bash
 (
-  stage='<stage>' flag='<flag>'
+  stage='<stage>' confidence='<confidence>' mode='<mode>' legacy='<legacy>'
   export LC_ALL=C
-  pick=$(printf %s "$flag" | tr A-Z a-z); aviso=''; stop=''; contract=''; legible=1; ug='80 (default)'; us='80 (default)'
-  case $pick in
-    ''|a1|supervised|a2|plan-approved|a3|unattended) ;;
-    a0|manual|a4|auto-land|a5|auto-deploy) echo "--autonomy $flag: no soportado todavía (v1 honra A1–A3)" >&2; exit 2 ;;
-    *) echo "--autonomy $flag: valor inválido; válidos: supervised (A1), plan-approved (A2), unattended (A3)" >&2; exit 2 ;;
-  esac
+  aviso=''; stop=''; contract=''; cg='80 (default)'; cs='80 (default)'; run='ask (default)'; viejo=0; legible=1
+  if [ -n "$legacy" ]; then
+    old=$(printf %s "$legacy" | tr A-Z a-z)
+    case $stage in
+      grill|spec) case $old in a1|supervised) eq='usá --confidence 100' ;; a2|plan-approved) eq='sacá el flag o usá --confidence <n>' ;; a3|unattended) eq='usá --confidence 0' ;; *) eq='usá --confidence <n>, un entero de 0 a 100' ;; esac ;;
+      run) case $old in a1|supervised) eq='usá --mode ask' ;; a2|plan-approved) eq='usá --mode pr' ;; a3|unattended) eq='usá --mode pr-reviewed' ;; *) eq='usá --mode ask, pr o pr-reviewed' ;; esac ;;
+      init) eq='usá --defaults' ;;
+      *) eq='ya no hace falta' ;;
+    esac
+    echo "--autonomy se retiró en 6.0.0: $eq" >&2; exit 2
+  fi
+  if [ -n "$confidence" ]; then
+    case $stage in grill|spec) ;; *) echo "--confidence: este skill no lo acepta; válido en grill y chiche-spec" >&2; exit 2 ;; esac
+    if ! printf '%s\n' "$confidence" | grep -Eqx '0|[1-9][0-9]?|100'; then echo "--confidence $confidence: valor inválido; válidos: un entero de 0 a 100" >&2; exit 2; fi
+  fi
+  if [ -n "$mode" ]; then
+    if [ "$stage" != run ]; then echo "--mode: este skill no lo acepta; válido en chiche-run" >&2; exit 2; fi
+    case $mode in ask|pr|pr-reviewed) ;; *) echo "--mode $mode: valor inválido; válidos: ask, pr, pr-reviewed" >&2; exit 2 ;; esac
+  fi
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=.
   if git remote get-url origin >/dev/null 2>&1; then
     git fetch -q origin >/dev/null 2>&1 || aviso="$aviso aviso: fetch de origin falló, se usa la ref local;"
@@ -62,53 +75,49 @@ Un repo inicializado antes del renombre guarda el contrato en `.sdd/project.md` 
       contract=$(git show "$ref:.chiche/project.md" 2>/dev/null) || contract=$(git show "$ref:.sdd/project.md" 2>/dev/null) || contract=''
       fuente=$ref
     else
-      fuente='origin (default sin resolver)'; aviso="$aviso aviso: origin sin branch default resoluble: rige supervised (A1) y no se lee el working tree;"
+      fuente='origin (default sin resolver)'; aviso="$aviso aviso: origin sin branch default resoluble: rigen confianza 100 y run ask y no se lee el working tree;"
     fi
   else
     contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
-    fuente='working tree'; aviso="$aviso aviso: nivel leído del working tree: sin remote;"
+    fuente='working tree'; aviso="$aviso aviso: contrato leído del working tree: sin remote;"
   fi
   contract=$(printf '%s\n' "$contract" | tr -d '\r')
   section=$(printf '%s\n' "$contract" | sed -n '/^## Autonomy$/,$p' | sed -n '2,${/^## /q;p;}')
-  if [ -z "$section" ]; then
-    if printf '%s\n' "$contract" | grep -q '^## Limites$'; then aviso="$aviso aviso: contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update;"
-    elif [ -z "$contract" ] && [ -n "$flag" ] && [ "$fuente" != 'origin (default sin resolver)' ]; then aviso="$aviso aviso: sin contrato: rige --autonomy, sin stop list;"
-    elif [ -z "$contract" ]; then aviso="$aviso aviso: sin contrato: rige supervised (A1);"
-    else aviso="$aviso aviso: contrato sin ## Autonomy: rige supervised (A1); corré chiche-init --update;"; fi
-    [ -n "$pick" ] || pick=a1
+  if [ "$fuente" = 'origin (default sin resolver)' ]; then cg=100; cs=100; run=ask
+  elif [ -z "$contract" ]; then aviso="$aviso aviso: sin contrato: rigen los defaults, confianza 80 y run ask;"
+  elif [ -z "$section" ]; then
+    viejo=1
+    if printf '%s\n' "$contract" | grep -q '^## Limites$'; then aviso="$aviso aviso: contrato sin ## Autonomy: rigen sus ## Limites; corré chiche-init --update;"; fi
   else
+    header=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*Stage[[:space:]]*\|' | head -n 1)
+    case $header in *Level*) viejo=1 ;; esac
     stop=$(printf '%s\n' "$section" | sed -n '/^| *Action *| *Pattern *| *Reason *|/,$p' | sed -n '3,$p' | sed -n '/^|/!q;p')
     if [ -z "$stop" ]; then legible=0; aviso="$aviso aviso: ## Autonomy sin stop list legible (sin el header | Action | Pattern | Reason | o sin filas);"; fi
-    for th in grill spec; do
-      tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f6 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-      case $tval in
-        ''|—) tval='80 (default)' ;;
-        *) if ! printf '%s\n' "$tval" | grep -Eq '^(0|[1-9][0-9]?|100)$'; then aviso="$aviso aviso: umbral ${th} inválido (${tval}): rige 80;"; tval='80 (default)'; fi ;;
-      esac
-      if [ "$th" = grill ]; then ug=$tval; else us=$tval; fi
-    done
-    if [ -z "$pick" ] && [ "$stage" = none ]; then pick=a1
-    elif [ -z "$pick" ]; then
-      row=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${stage}[[:space:]]*\|" | head -n 1)
-      if [ -z "$row" ]; then pick=a1; aviso="$aviso aviso: ## Autonomy sin fila $stage: rige supervised (A1);"
-      else
-        pick=$(printf '%s\n' "$row" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]].*$//' | tr A-Z a-z)
-        case $pick in a1|supervised) pick=a1 ;; a2|plan-approved|a3|unattended) ;; *) aviso="$aviso aviso: fila $stage con nivel desconocido ($pick): rige supervised (A1);"; pick=a1 ;; esac
-      fi
-      if [ "$stage" = land ] && [ "$pick" != a1 ]; then aviso="$aviso aviso: fila land solo acepta supervised: rige supervised (A1);"; pick=a1; fi
-      if [ "$legible" -eq 0 ] && [ "$pick" != a1 ]; then aviso="$aviso aviso: sin stop list legible el nivel del contrato cae a supervised (A1);"; pick=a1; fi
+    if [ "$viejo" -eq 0 ]; then
+      for th in grill spec; do
+        tval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*${th}[[:space:]]*\|" | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        if [ -n "$tval" ]; then
+          if printf '%s\n' "$tval" | grep -Eqx '0|[1-9][0-9]?|100'; then
+            if [ "$th" = grill ]; then cg=$tval; else cs=$tval; fi
+          else aviso="$aviso aviso: valor ${th} inválido (${tval}): rige 80;"; fi
+        fi
+      done
+      rval=$(printf '%s\n' "$section" | grep -E "^\|[[:space:]]*run[[:space:]]*\|" | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+      case $rval in '') ;; ask|pr|pr-reviewed) run=$rval ;; *) aviso="$aviso aviso: valor run inválido (${rval}): rige ask;" ;; esac
     fi
   fi
-  if [ "$fuente" = 'origin (default sin resolver)' ]; then pick=a1; src=$fuente; elif [ -n "$flag" ]; then src='--autonomy'; else src=$fuente; fi
-  case $pick in
-    a1|supervised) nivel='supervised (A1)' ;;
-    a2|plan-approved) nivel='plan-approved (A2)' ;;
-    a3|unattended) nivel='unattended (A3)' ;;
-  esac
+  if [ "$viejo" -eq 1 ]; then cg=100; cs=100; run=ask; aviso="$aviso aviso: contrato con formato viejo de autonomía: rige confianza 100 y run ask; corré chiche-init --update;"; fi
+  if [ "$legible" -eq 0 ] && [ "$viejo" -eq 0 ]; then cg=100; cs=100; run=ask; aviso="$aviso aviso: sin stop list legible los valores del contrato caen a confianza 100 y run ask;"; fi
+  src=$fuente
+  if [ "$fuente" != 'origin (default sin resolver)' ]; then
+    if [ -n "$confidence" ]; then src='--confidence'; if [ "$stage" = grill ]; then cg=$confidence; else cs=$confidence; fi; fi
+    if [ -n "$mode" ]; then src='--mode'; run=$mode; fi
+  fi
   [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
-  echo "nivel efectivo: $nivel, leído de $src"
-  printf 'umbral grill: %s\n' "$ug"
-  printf 'umbral spec: %s\n' "$us"
+  printf 'confianza grill: %s\n' "$cg"
+  printf 'confianza spec: %s\n' "$cs"
+  printf 'run: %s\n' "$run"
+  printf 'leído de %s\n' "$src"
   [ -z "$stop" ] || printf '%s\n' "$stop" | while IFS= read -r fila; do
     pat=$(printf '%s\n' "$fila" | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     if [ -z "$pat" ]; then printf 'aviso: fila de la stop list sin Pattern, ignorada: %s\n' "$fila" >&2; else printf 'parada: %s\n' "$fila"; fi
@@ -116,7 +125,7 @@ Un repo inicializado antes del renombre guarda el contrato en `.sdd/project.md` 
 )
 ```
 
-El comando termina con exit 2 ante un nivel no soportado o inválido, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime la traza, las dos líneas de umbral y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
+El comando termina con exit 2 ante un flag inválido, uno que el skill no acepta o `--autonomy`, antes de tocar la red, y el skill aborta ahí; con exit 0 imprime las cuatro líneas y una línea `parada:` por cada fila de la stop list, e ignora con aviso una fila sin `Pattern`.
 <!-- autonomy-resolve:end -->
 
 
@@ -358,20 +367,17 @@ en commit local". /skill:chiche-run lee estas lineas antes de ramificar o pushea
 cada escalon. Y explicitamente que NO se puede verificar sin humano, con el motivo.>
 
 ## Autonomy
-<nivel por etapa y paradas obligatorias (Fase 3; la forma exacta, abajo en "## Autonomy"). Niveles:
-supervised (A1), plan-approved (A2), unattended (A3); land, review y ambientes solo supervised.
-Rehearsed: — en toda fila; la columna ya no se lee (el ensayo de niveles se retiro en 5.7.0).
-Umbral: entero de 0 a 100 en grill y spec (80 recomendado), — en las demas; ausente o — vale 80.
-| Stage | Level | Since | Rehearsed | Umbral |
-|---|---|---|---|---|
-| grill | supervised | 2026-07-02 | — | 80 |
-| spec | plan-approved | 2026-07-02 | — | 80 |
-| run | supervised | 2026-07-02 | — | — |
-| review | supervised | 2026-07-02 | — | — |
-| land | supervised | 2026-07-02 | — | — |
-| staging | supervised | 2026-07-02 | — | — |
+<cuanto decide el agente solo y paradas obligatorias (Fase 3; la forma exacta, abajo en "## Autonomy").
+Confianza (grill y spec): 0 no pregunta nada · 80 pregunta solo lo dudoso · 100 pregunta todo y confirma cada paso.
+Run: ask frena ante dudas y ofrece el menu tras el PR · pr abre el PR, lanza el review y termina ·
+pr-reviewed ademas corrige el feedback del review solo, hasta 2 rondas.
+| Stage | Value | Since |
+|---|---|---|
+| grill | 80 | 2026-07-02 |
+| spec | 80 | 2026-07-02 |
+| run | pr | 2026-07-02 |
 
-Stop list: lo que el agente nunca hace solo, en ningun nivel. Pattern es una regex POSIX extendida
+Stop list: lo que el agente nunca hace solo, con cualquier valor de los controles. Pattern es una regex POSIX extendida
 (grep -E) sobre el comando completo o la ruta tocada, una por fila y sin "|". Defaults siempre
 presentes: deploy, migraciones sobre datos compartidos, push a main, force-push, merge y servicios
 pagos. Mas lo que sumo el usuario.
@@ -407,10 +413,10 @@ con /skill:chiche-init --update." Formato tabla, cada fila con su gate concreto:
 La línea `Chiche-Tracking` es el marker canónico de tracking (contrato `docs/chiche-tracking-v2.md`): `version` y `type` son fijos, y `generated-at` lleva la fecha de ESTA corrida en `YYYY-MM-DD`. Mantenerlo como upsert idempotente: exactamente un marker por contrato — en `--update` se actualiza la fecha en la línea existente (o se inserta si el contrato viejo no la tenía), nunca se duplica ni se mueve. El marker de un artefacto existente es `SDD-Tracking: version=1` o `Chiche-Tracking: version=2`: al reescribirlo se reemplaza en su lugar por `Chiche-Tracking: version=2` conservando los demás campos, y nunca se agrega otro al lado. El H1 y los headers de sección quedan intactos.
 
 <!-- autonomy-contract:start -->
-**`## Autonomy`.** Reemplaza a `## Limites`: dice hasta dónde llega el agente solo en cada etapa y qué no hace nunca. Dos tablas:
+**`## Autonomy`.** Dice cuánto decide el agente solo y qué no hace nunca. Dos tablas:
 
-1. **Niveles**, `| Stage | Level | Since | Rehearsed | Umbral |`: filas fijas `grill`, `spec`, `run`, `review` y `land`, más una por ambiente de `## Ambientes` (con `Stage` el nombre del ambiente). `Level` es `supervised`, `plan-approved` o `unattended`; `land`, `review` y los ambientes solo aceptan `supervised` en esta versión, y ningún skill lee `review` hasta que exista esa etapa. `Since` es la fecha `YYYY-MM-DD` en que se fijó el nivel. `Rehearsed` lleva `—` en toda fila: la columna queda en el formato pero ya no se escribe ni se lee, porque el ensayo de niveles se retiró en 5.7.0; un valor viejo (`rehearsed <YYYY-MM-DD>`, `unrehearsed` o `FAILED (<motivo>)`) se conserva y no cambia el nivel que rige. `Umbral` es un entero de 0 a 100 en las filas `grill` y `spec`: la confianza, en por ciento, a partir de la cual `grill` y `chiche-spec` asumen una decisión en vez de preguntarla (se asume con confianza `> umbral`; en el umbral o por debajo se pregunta), y `—` en las demás; una columna ausente o un `—` en `grill` o `spec` equivale a 80.
-2. **Stop list**, `| Action | Pattern | Reason |`: lo que el agente nunca hace solo, en ningún nivel. `Action` es un comando representativo de lo prohibido (`git push origin main`, `pnpm run deploy`): es el rótulo de la fila y el comando de prueba de su ensayo. `Pattern` es una regex POSIX extendida (`grep -E`) sobre el comando completo o la ruta tocada, una por fila y sin `|` (una alternativa por fila, porque `|` es el separador de la tabla). Una fila con `Pattern` vacío es inválida: este skill la rechaza y la ofrece como regla fechada para `## Decisiones humanas`; los skills la ignoran con aviso. Defaults siempre presentes: deploy, migraciones sobre datos compartidos, push a `main`, force-push, merge de PRs (que solo `chiche-land` pisa al confirmar su plan) y servicios pagos; más lo que sume el usuario.
+1. **Controles**, `| Stage | Value | Since |`, con exactamente tres filas. `grill` y `spec` llevan la confianza: un entero de 0 a 100; por encima de ese número el agente asume una decisión y la muestra, y en ese número o por debajo la pregunta (`0` no pregunta nada, `80` pregunta solo lo dudoso, `100` pregunta todo y confirma cada paso). `run` lleva la posición: `ask` (frena ante dudas y ofrece el menú tras el PR), `pr` (abre el PR, lanza el review y termina) o `pr-reviewed` (además corrige el feedback del review solo, hasta 2 rondas). `Since` es la fecha `YYYY-MM-DD` en que se fijó el valor. Una fila ausente vale el default (`80` en `grill` y `spec`, `ask` en `run`) y un valor inválido cae al default con aviso. No hay filas de `review`, `land` ni ambientes: `chiche-land` y `design-system` piden confirmación humana siempre, y un deploy lo frena la stop list. Un contrato con el formato viejo (la tabla con la columna `Level`) se sigue leyendo en modo conservador (confianza 100 y run `ask`) hasta que la fila `Autonomy` de «Upgrade de contrato» lo migre.
+2. **Stop list**, `| Action | Pattern | Reason |`: lo que el agente nunca hace solo, con cualquier valor de los controles. `Action` es un comando representativo de lo prohibido (`git push origin main`, `pnpm run deploy`): es el rótulo de la fila y el comando de prueba de su ensayo. `Pattern` es una regex POSIX extendida (`grep -E`) sobre el comando completo o la ruta tocada, una por fila y sin `|` (una alternativa por fila, porque `|` es el separador de la tabla). Una fila con `Pattern` vacío es inválida: este skill la rechaza y la ofrece como regla fechada para `## Decisiones humanas`; los skills la ignoran con aviso. Defaults siempre presentes: deploy, migraciones sobre datos compartidos, push a `main`, force-push, merge de PRs (que solo `chiche-land` pisa al confirmar su plan) y servicios pagos; más lo que sume el usuario.
 
 **Ensayo de la stop list.** No necesita agente: cada `Pattern` se corre contra su propio `Action` (tiene que matchear) y contra el comando neutro `echo ok` (no tiene que matchear). Un patrón vacío, escrito entre backticks (grep lo probaría con los acentos y el comando real no los lleva), inválido, que no matchea su acción o que matchea el neutro deja la fila `FAILED`; una stop list ausente (sin el header `| Action | Pattern | Reason |`) o sin filas es `FAILED: stop list (sin filas)`, porque los defaults tienen que estar siempre; las filas se leen hasta la primera línea que no empieza con `|`. Este comando lo hace sobre el contrato que se le indica, sin parámetros posicionales: imprime `ok: <Action>` o `FAILED: <Action> (<motivo>)` por fila y termina con exit 1 si alguna falló.
 
