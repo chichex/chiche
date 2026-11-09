@@ -485,7 +485,8 @@ test("Pi grill assumes low-risk reversible defaults and only asks material decis
 	assert.match(skill, /Nunca escribe ni propone `CONTEXT\.md`, glosarios ni ADRs/);
 	assert.match(skill, /interviewMode[^\n]*sin[^\n]*pregunta/i);
 	assert.match(skill, /cero decisiones materiales[^\n]*cierre/i);
-	assert.match(skill, /confirmaci[oó]n final[^\n]*\[ASSUMED\]/i);
+	// Issue #130, CA-16: por debajo de 100 no hay confirmación final que apruebe los supuestos; el handoff los congela marcados.
+	assert.match(skill, /no hay confirmaci[oó]n final: el handoff se congela con cada `\[ASSUMED NN %\]` marcado `— asumida NN %`, nunca como respondido por el usuario/i);
 });
 
 test("Pi grill makes exhaustive mode override every assumption-pruning procedure", async () => {
