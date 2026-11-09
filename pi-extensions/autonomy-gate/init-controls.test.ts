@@ -321,7 +321,7 @@ test("#130 autotest: la guarda de vocabulario retirado distingue el texto de 5.x
 		"- Con `--defaults` (o si el usuario no responde): assumption más conservadora.",
 		"**Confianza por etapa.** Después de los gaps, preguntar la confianza.",
 		"| Coverage mínimo | umbral anclado al baseline actual |",
-		"la stop list del branch default y la del working tree; el nivel sigue saliendo del default.",
+		"la stop list del branch default y la del working tree; los controles siguen saliendo del default.",
 		"**Ensayo de la stop list.** Con el archivo escrito, correr el comando canónico.",
 	];
 	assert.deepEqual(retiredWords(current.join("\n")), [], "el texto nuevo, el umbral de coverage y el ensayo de la stop list no se marcan");

@@ -912,7 +912,8 @@ test("#130 CA-26: el contrato de este repo lleva la tabla nueva con grill 80, sp
 });
 
 // Issue #130, CA-14: el vocabulario del modelo viejo. Los códigos A0 a A5 cuentan solo como niveles.
-const OLD_VOCABULARY = /\b(?:supervised|plan-approved|unattended|unrehearsed)\b|\bRehearsed\b|umbral (?:grill|spec)|\bA[0-5]\b/;
+// `(?<!%)`: un byte percent-encodeado como `%A1` (docs de tracking y de eventos) no es un nivel.
+const OLD_VOCABULARY = /\b(?:supervised|plan-approved|unattended|unrehearsed)\b|\bRehearsed\b|umbral (?:grill|spec)|(?<!%)\bA[0-5]\b/;
 const VOCABULARY_DIRS = ["claude", "codex", "opencode", "pi", "antigravity", "agents", "evals", "docs", ".claude", "README.md", "README.en.md"] as const;
 const RETIREMENT_NOTES = [/se retiraron en 6\.0\.0/, /were retired in 6\.0\.0/];
 
@@ -940,6 +941,7 @@ test("#130 CA-14: fuera del mapa de equivalentes de autonomy-resolve y de la not
 	assert.equal(oldVocabulary("claude/x/SKILL.md", "<!-- autonomy-resolve:start -->\n`supervised` o `A1` → `usá --confidence 100`\n<!-- autonomy-resolve:end -->\nresto").length, 0);
 	assert.equal(oldVocabulary("README.md", "Los niveles `supervised`, `plan-approved` y `unattended` se retiraron en 6.0.0.").length, 0);
 	assert.equal(oldVocabulary("docs/x.md", "Los niveles `supervised` se retiraron en 6.0.0.").length, 1, "la nota de retiro solo vale en los README");
+	assert.equal(oldVocabulary("docs/x.md", "grill=session%209%2F%C3%A1").length, 0, "un byte percent-encodeado no es un nivel");
 });
 
 test("#130 CA-13: ninguna firma de los siete skills lleva --autonomy; grill y chiche-spec declaran --confidence y --until pr, chiche-run --mode e --inline, chiche-init --defaults, y los demás ningún flag de autonomía", async () => {
@@ -979,17 +981,17 @@ test("#130 CA-27: los README describen los tres controles sin nombres de nivel y
 	assert.deepEqual(missing(es, [
 		/la confianza de `grill` y `chiche-spec` \(de 0 a 100: qué te pregunta\), la posición del run \(`ask`, `pr` o `pr-reviewed`: dónde frena\) y la cadena \(`--until pr`: si para entre etapas\)/,
 		/^\| \*\*`chiche-init`\*\* \|[^\n]*Pregunta tres cosas de autonomía \(la confianza de `grill`, la de `chiche-spec` y la posición del run\)[^\n]*`--defaults` corre sin preguntar/m,
-		/^\| \*\*`chiche-spec`\*\* \|[^\n]*Con `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` no exige nada/m,
+		/^\| \*\*`chiche-spec`\*\* \|[^\n]*Con `--confidence`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` no exige nada/m,
 		/^\| \*\*`chiche-run`\*\* \|[^\n]*Con `--mode`[^\n]*`ask` pregunta ante choques[^\n]*`pr` corre hasta el PR[^\n]*`pr-reviewed` delega el run completo[^\n]*corrige el feedback del review solo, hasta 2 rondas/m,
-		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*solo con confianza 100[^\n]*`--until pr`/m,
+		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence`[^\n]*solo con confianza 100[^\n]*`--until pr`/m,
 		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(agrega `--until pr`[^\n]*o `Confirmar <ruta>` \(encadena solo esa etapa\)/m,
 	]), []);
 	assert.deepEqual(missing(en, [
 		/the confidence of `grill` and `chiche-spec` \(0 to 100: what it asks you\), the run position \(`ask`, `pr` or `pr-reviewed`: where it stops\) and the chain \(`--until pr`: whether it stops between stages\)/,
 		/^\| \*\*`chiche-init`\*\* \|[^\n]*It asks three autonomy questions[^\n]*`--defaults` runs without asking/m,
-		/^\| \*\*`chiche-spec`\*\* \|[^\n]*With `--confidence <n>`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` requires nothing/m,
+		/^\| \*\*`chiche-spec`\*\* \|[^\n]*With `--confidence`[^\n]*`chiche-run --mode pr-reviewed`[^\n]*`--until pr` requires nothing/m,
 		/^\| \*\*`chiche-run`\*\* \|[^\n]*With `--mode`[^\n]*`pr-reviewed` delegates the whole run[^\n]*fixes the review feedback on its own, up to 2 rounds/m,
-		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence <n>`[^\n]*only with confidence 100[^\n]*`--until pr`/m,
+		/^\| \*\*`grill`\*\* \|[^\n]*`--confidence`[^\n]*only with confidence 100[^\n]*`--until pr`/m,
 		/^\| \*\*`issue-triage`\*\* \|[^\n]*`Confirmar → hasta el PR` \(adds `--until pr`[^\n]*or `Confirmar <ruta>` \(chains only that stage\)/m,
 	]), []);
 	assert.equal(es.split("\n").filter((line) => /se retiraron en 6\.0\.0/.test(line)).length, 1, "README.md: una sola nota de retiro");
@@ -1294,12 +1296,12 @@ test("review #115-20: la fila de evals del contrato dice qué alcanza el grant d
 	assert.match(row, /la calibracion de 1\.15 USD[^|]*ya no vale/);
 });
 
-test("review #113-8: la aptitud del cierre toma la unión de la stop list del branch default y la del working tree, y el nivel sigue saliendo del default", async () => {
+test("review #113-8: la aptitud del cierre toma la unión de la stop list del branch default y la del working tree, y los controles siguen saliendo del default", async () => {
 	const problems: string[] = [];
 	for (const skill of ["chiche-init", "coding-policies", "design-system"] as const) {
 		for (const harness of HARNESSES) {
 			const close = delimitedBlock(await skillFile(harness, skill), "commit-pr-close") ?? "";
-			if (!/ninguna fila de la stop list matchea `git push -u origin <branch>`[^\n]*la unión de la stop list del branch default y la del working tree[^\n]*el nivel sigue saliendo del default/.test(close)) problems.push(`${harness}/${skill}: la aptitud no une las dos stop lists`);
+			if (!/ninguna fila de la stop list matchea `git push -u origin <branch>`[^\n]*la unión de la stop list del branch default y la del working tree[^\n]*los controles siguen saliendo del default/.test(close)) problems.push(`${harness}/${skill}: la aptitud no une las dos stop lists`);
 		}
 	}
 	assert.deepEqual(problems, []);
