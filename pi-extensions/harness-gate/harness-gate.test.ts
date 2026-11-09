@@ -2533,22 +2533,13 @@ test("#130 CA-19: fuera de los bloques autonomy-*, ningún chiche-run nombra un 
 export function positionalParameterProblems(file: string, markdown: string): string[] {
 	const problems: string[] = [];
 	const everyHit = new RegExp(POSITIONAL_PARAMETER, "g");
-	let open: { char: string; length: number; shell: boolean } | null = null;
-	markdown.split("\n").forEach((line, index) => {
-		if (open === null) {
-			const opening = line.match(/^\s*(`{3,}|~{3,})\s*(\S*)/);
-			if (opening) open = { char: opening[1]?.[0] ?? "`", length: opening[1]?.length ?? 3, shell: opening[2] === "bash" || opening[2] === "sh" };
-			return;
-		}
-		const closing = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-		if (closing && closing[1]?.[0] === open.char && (closing[1]?.length ?? 0) >= open.length) {
-			open = null;
-			return;
-		}
-		if (!open.shell) return;
-		const hits = [...new Set(line.match(everyHit) ?? [])];
-		if (hits.length > 0) problems.push(`${file}:${index + 1}: ${hits.join(", ")}`);
-	});
+	for (const fence of fencedBlocks(markdown, { includeUnclosed: true })) {
+		if (fence.info !== "bash" && fence.info !== "sh") continue;
+		fence.content.split("\n").forEach((line, index) => {
+			const hits = [...new Set(line.match(everyHit) ?? [])];
+			if (hits.length > 0) problems.push(`${file}:${fence.line + index + 1}: ${hits.join(", ")}`);
+		});
+	}
 	return problems;
 }
 
@@ -2593,4 +2584,18 @@ test("autotest (#136 CA-4): el chequeo de posicionales marca cada forma prohibid
 	]);
 	const compliant = ["```bash", '[ ${#line} -lt 1024 ] && v=$spec; echo "${#v} ${v:-none} ${HOME} $(v=$spec; enc)"', "```"].join("\n");
 	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", compliant), []);
+});
+
+// Hay un solo parser de fences (`fencedBlocks`) y el chequeo de posicionales lo recorre filtrando por `info`. Un fence
+// sin cerrar llega hasta el final del documento (así lo lee CommonMark y así lo ve el harness al sustituir): el parser lo
+// descarta por defecto, que es lo que esperan los demás gates, y lo devuelve con `includeUnclosed`, que es lo que usa este
+// chequeo para no dejar pasar un comando `bash` mal cerrado.
+test("autotest (#136 hallazgo 2): fencedBlocks expone el info string y descarta un fence sin cerrar salvo con includeUnclosed; el chequeo de posicionales mira también el fence bash sin cerrar", () => {
+	const markdown = ["```bash", "echo uno", "```", "~~~sh title=x", "echo dos", "~~~", "```", "sin info", "```", "```bash", "echo $1", "echo ${@:2}"].join("\n");
+	assert.deepEqual(fencedBlocks(markdown).map((fence) => [fence.info, fence.line]), [["bash", 1], ["sh", 4], ["", 7]]);
+	const withUnclosed = fencedBlocks(markdown, { includeUnclosed: true });
+	assert.deepEqual(withUnclosed.map((fence) => [fence.info, fence.line]), [["bash", 1], ["sh", 4], ["", 7], ["bash", 10]]);
+	assert.equal(withUnclosed.at(-1)?.content, "echo $1\necho ${@:2}");
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", markdown), ["claude/x/SKILL.md:11: $1", "claude/x/SKILL.md:12: ${@:2}"]);
+	assert.deepEqual(positionalParameterProblems("claude/x/SKILL.md", ["```text", "echo $1"].join("\n")), []);
 });

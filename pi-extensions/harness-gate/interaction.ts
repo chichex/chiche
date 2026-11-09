@@ -83,29 +83,34 @@ export function normalizeInvocations(text: string, prefix: string): string {
 export interface Fence {
 	content: string;
 	line: number;
+	// Primer token tras los delimitadores de apertura (`bash`, `sh`, `text`); vacio si el fence no lo trae.
+	info: string;
 }
 
-export function fencedBlocks(markdown: string): Fence[] {
-	const lines = markdown.split("\n");
+// Un fence sin cerrar no es un fence: se descarta, que es lo que esperan los gates de plantillas y bloques. Con
+// `includeUnclosed` se devuelve hasta el final del documento, como lo lee CommonMark y como lo ve el harness: es lo que
+// usan los chequeos que no pueden dejar pasar un comando mal cerrado.
+export function fencedBlocks(markdown: string, options: { includeUnclosed?: boolean } = {}): Fence[] {
 	const fences: Fence[] = [];
-	let open: { char: string; length: number; start: number; inner: string[] } | null = null;
-	lines.forEach((line, index) => {
+	let open: { char: string; length: number; start: number; info: string; inner: string[] } | null = null;
+	for (const [index, line] of markdown.split("\n").entries()) {
 		if (open === null) {
-			const opening = line.match(/^\s*(`{3,}|~{3,})/);
+			const opening = line.match(/^\s*(`{3,}|~{3,})\s*(\S*)/);
 			if (opening) {
 				const delimiter = opening[1] ?? "";
-				open = { char: delimiter[0] ?? "`", length: delimiter.length, start: index + 1, inner: [] };
+				open = { char: delimiter[0] ?? "`", length: delimiter.length, start: index + 1, info: opening[2] ?? "", inner: [] };
 			}
-			return;
+			continue;
 		}
 		const closing = line.match(/^\s*(`{3,}|~{3,})\s*$/);
 		if (closing && (closing[1] ?? "")[0] === open.char && (closing[1] ?? "").length >= open.length) {
-			fences.push({ content: open.inner.join("\n"), line: open.start });
+			fences.push({ content: open.inner.join("\n"), line: open.start, info: open.info });
 			open = null;
-			return;
+			continue;
 		}
 		open.inner.push(line);
-	});
+	}
+	if (open !== null && options.includeUnclosed) fences.push({ content: open.inner.join("\n"), line: open.start, info: open.info });
 	return fences;
 }
 
