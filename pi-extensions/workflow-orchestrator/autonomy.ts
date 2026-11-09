@@ -61,32 +61,3 @@ export function withFlag(args: string, flag: string, value: string | number | un
 	if (value === undefined) return args;
 	return args === "" ? `${flag} ${value}` : `${args} ${flag} ${value}`;
 }
-
-// --- Gramática de niveles retirada (issue #102): se borra cuando su último consumidor migra. ---
-export type AutonomyCode = "A1" | "A2" | "A3";
-export type AutonomyName = "supervised" | "plan-approved" | "unattended";
-
-export type ParsedAutonomy =
-	| { ok: true; code: AutonomyCode; name: AutonomyName }
-	| { ok: false; message: string };
-
-const SUPPORTED: Array<{ code: AutonomyCode; name: AutonomyName }> = [
-	{ code: "A1", name: "supervised" },
-	{ code: "A2", name: "plan-approved" },
-	{ code: "A3", name: "unattended" },
-];
-const UNSUPPORTED = new Set(["a0", "manual", "a4", "auto-land", "a5", "auto-deploy"]);
-export const VALID_LEVELS = "válidos: supervised (A1), plan-approved (A2), unattended (A3)";
-
-export function parseAutonomyLevel(token: string): ParsedAutonomy {
-	const lower = token.trim().toLowerCase();
-	const level = SUPPORTED.find((candidate) => candidate.code.toLowerCase() === lower || candidate.name === lower);
-	if (level) return { ok: true, code: level.code, name: level.name };
-	if (UNSUPPORTED.has(lower)) return { ok: false, message: `--autonomy ${token}: no soportado todavía (v1 honra A1–A3)` };
-	return { ok: false, message: `--autonomy ${token}: valor inválido; ${VALID_LEVELS}` };
-}
-
-export function withAutonomy(args: string, level: AutonomyCode | undefined): string {
-	if (level === undefined) return args;
-	return args === "" ? `--autonomy ${level}` : `${args} --autonomy ${level}`;
-}

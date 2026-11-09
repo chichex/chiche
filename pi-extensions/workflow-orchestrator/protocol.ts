@@ -316,7 +316,7 @@ function verdictItems(value: unknown, path: string, diagnostics: WorkflowResolut
 
 // Issue #119, CA-17: `verdict` es null en stop, error y toda ruta artifact-aware; en una ruta nueva
 // (grill, spec, join-grill, join-spec) con outcome start es el veredicto del triage. Un `confidence`
-// o un umbral fuera de 0–100 y un `until` distinto de "pr" son `invalid-value`; el campo ausente es
+// o una confianza de etapa (`thresholds`) fuera de 0–100 y un `until` distinto de "pr" son `invalid-value`; el campo ausente es
 // `missing-field` como los demás (lo exige `exactWorkflowObject`).
 function verdictValue(
 	value: unknown,

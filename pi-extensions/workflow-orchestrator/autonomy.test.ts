@@ -3,9 +3,16 @@
 // (`mode`), la confianza (`confidence`) y la cadena (`--until pr`). `/issues` no
 // lleva ningún flag y rechaza `--autonomy` con el diagnóstico de retiro.
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import * as grammar from "./autonomy.ts";
+
+const execFileAsync = promisify(execFile);
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 const { parseConfidence, parseIssuesCommandArgs, parseRunMode, withFlag } = grammar;
 
@@ -68,4 +75,28 @@ test("#130 CA-25: withFlag agrega el flag con su valor al final de los args, dej
 	assert.equal(withFlag("--from-grill \"id\"", "--until", "pr"), "--from-grill \"id\" --until pr");
 	assert.equal(withFlag("--from-grill \"id\"", "--confidence", 0), "--from-grill \"id\" --confidence 0");
 	assert.equal(withFlag(withFlag("--from-grill \"id\"", "--until", "pr"), "--confidence", 100), "--from-grill \"id\" --until pr --confidence 100");
+});
+
+// El modelo de niveles no sobrevive en el código de producción de Pi: ni sus tipos, ni sus helpers, ni sus nombres.
+// El flag retirado solo se nombra para dar el diagnóstico de retiro.
+test("#130 CA-25: el código de producción de pi-extensions no conserva los tipos, los helpers ni los nombres de los niveles retirados", async () => {
+	assert.deepEqual(
+		Object.keys(grammar).filter((name) => /autonomy(level|code|name)|withAutonomy|VALID_LEVELS/i.test(name)),
+		[],
+		"autonomy.ts no exporta la gramática de niveles",
+	);
+	const { stdout } = await execFileAsync("git", ["ls-files", "-z", "--", "pi-extensions"], { cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024 });
+	const production = stdout.split("\0").filter((path) => path.endsWith(".ts") && !path.endsWith(".test.ts"));
+	assert.ok(production.includes("pi-extensions/workflow-orchestrator/autonomy.ts"), "el censo lee archivos trackeados");
+	const retired = /\bAutonomy(?:Code|Name)\b|\bparseAutonomyLevel\b|\bwithAutonomy\b|\bsupervised\b|\bplan-approved\b|\bunattended\b|\bA[0-5]\b|--autonomy(?! se retiró en 6\.0\.0)/;
+	const problems: string[] = [];
+	for (const path of production) {
+		const lines = (await readFile(`${REPO_ROOT}${path}`, "utf8")).split("\n");
+		lines.forEach((line, index) => {
+			// Reconocer el flag retirado para rechazarlo es la única mención permitida.
+			const recognizer = path === "pi-extensions/workflow-orchestrator/autonomy.ts" && /RETIRED_AUTONOMY_FLAG/.test(line);
+			if (retired.test(line) && !recognizer) problems.push(`${path}:${index + 1}: ${line.trim().slice(0, 160)}`);
+		});
+	}
+	assert.deepEqual(problems, []);
 });

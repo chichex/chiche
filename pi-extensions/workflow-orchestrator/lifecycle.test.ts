@@ -229,7 +229,7 @@ test("starts a fresh linked same-project session and sends only materialized ski
 			},
 		};
 		const result = await startFreshStage(
-			{ resolution: handoff, skill: { name: "chiche-spec", args: "  --autonomy A3  " } },
+			{ resolution: handoff, skill: { name: "chiche-spec", args: "  --confidence 0  " } },
 			context as never,
 			{
 				commands: [{
@@ -298,7 +298,7 @@ test("starts a fresh linked same-project session and sends only materialized ski
 			"# SDD spec",
 			"</skill>",
 			"",
-			"--autonomy A3",
+			"--confidence 0",
 		].join("\n"));
 		assert.deepEqual(JSON.parse(envelope[2]!), handoff);
 	} finally {
