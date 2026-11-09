@@ -2108,3 +2108,256 @@ test("#93 CA-6: con el append roto, persist_sdd_spec devuelve el mismo resultado
 	assert.equal(gitStatus(main), "", "checkout principal limpio");
 	assert.equal(gitStatus(linked), "", "worktree linkeado limpio");
 });
+
+// ---------------------------------------------------------------------------
+// Issue #134, CA-13: la carpeta declarada en ## Publicacion recibe las specs locales y los handoffs.
+
+function contractWithFolder(folder: string): string {
+	return ["# Contrato de autonomia — demo", "<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->", "", "## Comandos", "| Accion | Comando | cwd | Estado | Duracion | Notas |", "|---|---|---|---|---|---|", "", "## Publicacion", "| Clave | Valor |", "|---|---|", "| specs | auto |", `| carpeta | ${folder} |`, "", "## Verificacion autonoma", "1. node --test", ""].join("\n");
+}
+
+function commitContractWithFolder(main: string, folder: string): void {
+	mkdirSync(join(main, ".chiche"), { recursive: true });
+	writeFileSync(join(main, ".chiche", "project.md"), contractWithFolder(folder));
+	git(main, "add", ".chiche/project.md");
+	git(main, "commit", "-q", "-m", "contrato con carpeta");
+}
+
+test("#134 CA-13: con una carpeta declarada, persist_sdd_spec escribe la spec local en <carpeta>/specs, acepta un .md directo bajo ella y una ruta lógica nueva también va ahí", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const { base, main, common } = repoWithLinkedWorktree("declared-spec");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	const persist = (path: string, slug: string) => tool.execute(
+		`persist-declared-${slug}`,
+		{
+			mode: "interactive",
+			repository: "local/repo",
+			projectPath: main,
+			documents: [{ id: "successor", role: "successor", markdown: canonicalSpec(`Spec ${slug}`), destinations: [{ kind: "local", path }] }],
+		},
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const direct = await persist("docs/sdd/specs/directa.md", "directa");
+	assert.equal(direct.details.ok, true, JSON.stringify(direct.details.diagnostics));
+	assert.equal(readFileSync(join(main, "docs", "sdd", "specs", "directa.md"), "utf8"), canonicalSpec("Spec directa"));
+	const logical = await persist(".chiche/specs/logica.md", "logica");
+	assert.equal(logical.details.ok, true, JSON.stringify(logical.details.diagnostics));
+	assert.equal(readFileSync(join(main, "docs", "sdd", "specs", "logica.md"), "utf8"), canonicalSpec("Spec logica"), "lo nuevo va a la carpeta declarada");
+	assert.equal(existsSync(join(common, "chiche", "specs", "logica.md")), false, "nada nuevo en <git-common-dir>/chiche/specs");
+	await assert.rejects(persist("docs/otra/specs/x.md", "otra"), /Local spec destination must be one Markdown file directly under/, "una carpeta no declarada se rechaza");
+	assert.match(gitStatus(main), /\?\? docs\/sdd\/specs\/directa\.md/, "la carpeta declarada está en el árbol: git status la muestra, a elección del usuario");
+});
+
+test("#134 CA-13: con una carpeta declarada, grill_session pause escribe el handoff en <carpeta>/grills", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const tool = tools.get("grill_session");
+	assert.ok(tool);
+	const { base, main, common } = repoWithLinkedWorktree("declared-grill");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	const created = await tool.execute(
+		"create-declared-handoff",
+		{ action: "create", topic: "Carpeta declarada", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const id = created.details.snapshot.id;
+	t.after(() => removeStoredSnapshot(id));
+	await tool.execute("configure-declared-handoff", { action: "configure", sessionId: id, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
+	const paused = await tool.execute("pause-declared-handoff", { action: "pause", sessionId: id, summary: "Pausa" }, undefined, undefined, { cwd: main });
+	assert.equal(dirname(paused.details.repoHandoffPath), join(main, "docs", "sdd", "grills"));
+	assert.match(readFileSync(paused.details.repoHandoffPath, "utf8"), /state=paused/);
+	assert.equal(existsSync(join(common, "chiche", "grills")), false, "nada en <git-common-dir>/chiche/grills");
+});
+
+// Review #139-1: el inventario de Pi (/grills, select_grill_session) también lee la carpeta declarada.
+test("#139-1: un handoff que vive solo en <carpeta>/grills/ aparece en el inventario del proyecto (clon nuevo, sin snapshot)", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const { base, main } = repoWithLinkedWorktree("declared-inventory");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	mkdirSync(join(main, "docs", "sdd", "grills"), { recursive: true });
+	writeFileSync(join(main, "docs", "sdd", "grills", "solo-carpeta.md"), canonicalHandoff("carpeta-declarada-sola", "finalized", "Handoff solo en la carpeta declarada", main));
+	const labels = await selectLabels(main, { status: "all", scope: "current-project", query: "carpeta-declarada" });
+	assert.equal(labels.filter((label) => label.includes("Handoff solo en la carpeta declarada")).length, 1, `el handoff de la carpeta declarada aparece una vez: ${JSON.stringify(labels)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #134, CA-20: persist_sdd_spec acepta el repo declarado en ## Publicacion y crea el issue con la plantilla.
+
+function contractWithIssueRepo(repo: string, template?: string): string {
+	return ["# Contrato de autonomia — demo", "<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->", "", "## Comandos", "", "## Publicacion", "| Clave | Valor |", "|---|---|", "| specs | auto |", `| repo | ${repo} |`, ...(template ? [`| crear issue | ${template} |`] : []), "", "## Verificacion autonoma", "1. node --test", ""].join("\n");
+}
+
+function declaredRepoProject(name: string, contract: string): string {
+	const projectPath = join(sandbox, name);
+	mkdirSync(join(projectPath, ".chiche"), { recursive: true });
+	writeFileSync(join(projectPath, ".chiche", "project.md"), contract);
+	return projectPath;
+}
+
+type Exec = { command: string; args: string[] };
+
+function githubExec(projectPath: string, issueRepo: string, createStdout: string, seen: Exec[], bodies: { created?: string; published?: string }) {
+	return async (command: string, args: string[], options: { cwd?: string }) => {
+		if (command === "git" && args[0] === "rev-parse") return { code: 0, stdout: `${projectPath}\n`, stderr: "" };
+		if (command === "git" && args[0] === "config") return { code: 0, stdout: "https://github.com/chichex/chiche.git\n", stderr: "" };
+		if (command === "gh" && args[0] === "issue" && args[1] === "create") {
+			seen.push({ command, args: [...args] });
+			bodies.created = readFileSync(args[args.indexOf("--body-file") + 1]!, "utf8");
+			return { code: 0, stdout: createStdout, stderr: "" };
+		}
+		if (command === "gh" && args[0] === "issue" && args[1] === "edit") {
+			seen.push({ command, args: [...args] });
+			bodies.published = readFileSync(args[args.indexOf("--body-file") + 1]!, "utf8");
+			return { code: 0, stdout: "", stderr: "" };
+		}
+		if (command === "gh" && args[0] === "issue" && args[1] === "view") {
+			seen.push({ command, args: [...args] });
+			assert.equal(args[args.indexOf("--repo") + 1], issueRepo, "la lectura va al repo del issue");
+			return { code: 0, stdout: JSON.stringify({ body: bodies.published ?? "" }), stderr: "" };
+		}
+		throw new Error(`unexpected command in ${options.cwd}: ${command} ${args.join(" ")}`);
+	};
+}
+
+async function persistNewIssue(tool: NonNullable<ReturnType<typeof tools.get>>, projectPath: string, repository: string) {
+	return tool.execute(
+		"persist-declared-repo",
+		{
+			mode: "interactive",
+			repository,
+			projectPath,
+			documents: [{ id: "successor", role: "successor", markdown: canonicalSpec("Declared repo publication"), destinations: [{ kind: "new-issue", title: "Declared repo publication" }] }],
+		},
+		undefined,
+		undefined,
+		{ cwd: projectPath },
+	);
+}
+
+test("#134 CA-20: con repo y plantilla declarados, persist_sdd_spec corre la plantilla con sus flags extra, lee y edita el issue en ese repo y escribe issue=owner/repo#NN en el marker", { skip: !PI_PACKAGE_ROOT }, async () => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const projectPath = declaredRepoProject("declared-repo-template", contractWithIssueRepo("acme/backlog", "gh issue create --repo {repo} --label spec --title {title} --body-file {body}"));
+	const seen: Exec[] = [];
+	const bodies: { created?: string; published?: string } = {};
+	execHandler = githubExec(projectPath, "acme/backlog", "https://github.com/acme/backlog/issues/5\n", seen, bodies);
+	try {
+		const result = await persistNewIssue(tool, projectPath, "chichex/chiche");
+		assert.equal(result.details.ok, true, JSON.stringify(result.details.diagnostics));
+		const create = seen.find((entry) => entry.args[1] === "create");
+		assert.ok(create);
+		assert.deepEqual(create.args.slice(0, 6), ["issue", "create", "--repo", "acme/backlog", "--label", "spec"], "la plantilla manda, con sus flags extra");
+		assert.equal(create.args[create.args.indexOf("--title") + 1], "Declared repo publication");
+		assert.doesNotMatch(bodies.created ?? "", /(?:Chiche|SDD)-Tracking/, "el staging sigue siendo no-SDD");
+		assert.match(bodies.published ?? "", /^<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=acme\/backlog#5; grill=none; superseded-by=none -->$/m, "el marker lleva owner/repo#NN porque el repo no es el de origin");
+		const edit = seen.find((entry) => entry.args[1] === "edit");
+		assert.deepEqual(edit?.args.slice(0, 5), ["issue", "edit", "5", "--repo", "acme/backlog"]);
+		assert.deepEqual(result.details.receipt.documents[0].destinations, ["issue:acme/backlog#5"]);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+});
+
+test("#134 CA-20: una URL de otro repo o una salida sin URL cuentan como creación fallida y no publican nada", { skip: !PI_PACKAGE_ROOT }, async () => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const projectPath = declaredRepoProject("declared-repo-badurl", contractWithIssueRepo("acme/backlog"));
+	for (const [label, stdout, pattern] of [
+		["otro repo", "https://github.com/otro/repo/issues/9\n", /otro\/repo|another repository|otro repo/i],
+		["sin URL", "issue created\n", /URL/i],
+	] as const) {
+		const seen: Exec[] = [];
+		const bodies: { created?: string; published?: string } = {};
+		execHandler = githubExec(projectPath, "acme/backlog", stdout, seen, bodies);
+		try {
+			const result = await persistNewIssue(tool, projectPath, "chichex/chiche");
+			assert.equal(result.details.ok, false, `${label}: no hay receipt`);
+			assert.ok(result.details.diagnostics.some((d: { code: string; message: string }) => d.code === "issue-creation-failed" && pattern.test(d.message)), `${label}: ${JSON.stringify(result.details.diagnostics)}`);
+			assert.equal(seen.some((entry) => entry.args[1] === "edit"), false, `${label}: nada se publica`);
+			assert.deepEqual(result.details.createdIssues, [], `${label}: sin issue resuelto no hay staging que reintentar`);
+		} finally {
+			execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+		}
+	}
+});
+
+test("#134 CA-20: el repositorio del pedido puede ser el de origin o el repo declarado, y cualquier otro se rechaza; sin fila repo rige el de origin", { skip: !PI_PACKAGE_ROOT }, async () => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const projectPath = declaredRepoProject("declared-repo-identity", contractWithIssueRepo("acme/backlog"));
+	const seen: Exec[] = [];
+	execHandler = githubExec(projectPath, "acme/backlog", "https://github.com/acme/backlog/issues/6\n", seen, {});
+	try {
+		const declared = await persistNewIssue(tool, projectPath, "acme/backlog");
+		assert.equal(declared.details.ok, true, JSON.stringify(declared.details.diagnostics));
+		await assert.rejects(persistNewIssue(tool, projectPath, "tercero/repo"), /Repository identity mismatch: expected chichex\/chiche or acme\/backlog, got tercero\/repo/);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+	// Sin la fila `repo`, el único repositorio válido sigue siendo el de origin y la plantilla default corre contra él.
+	const plain = declaredRepoProject("declared-repo-absent", ["# Contrato", "<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->", ""].join("\n"));
+	const plainSeen: Exec[] = [];
+	execHandler = githubExec(plain, "chichex/chiche", "https://github.com/chichex/chiche/issues/8\n", plainSeen, {});
+	try {
+		await assert.rejects(persistNewIssue(tool, plain, "acme/backlog"), /Repository identity mismatch: expected chichex\/chiche, got acme\/backlog/);
+		const result = await persistNewIssue(tool, plain, "chichex/chiche");
+		assert.equal(result.details.ok, true, JSON.stringify(result.details.diagnostics));
+		assert.deepEqual(plainSeen.find((entry) => entry.args[1] === "create")?.args, ["issue", "create", "--repo", "chichex/chiche", "--title", "Declared repo publication", "--body-file", plainSeen.find((entry) => entry.args[1] === "create")?.args[7]]);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+});
+
+// Review #140-3: en Pi la plantilla `crear issue` se compara contra la stop list de ## Autonomy antes de correrla.
+test("#140-3: persist_sdd_spec no corre la plantilla si una fila de la stop list matchea el comando armado, y la creación falla citando la fila", { skip: !PI_PACKAGE_ROOT }, async () => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const contract = [
+		contractWithIssueRepo("acme/backlog", "gh issue create --repo {repo} --label spec --title {title} --body-file {body}").trimEnd(),
+		"",
+		"## Autonomy",
+		"| Stage | Value | Since |",
+		"|---|---|---|",
+		"| run | ask | 2026-11-09 |",
+		"",
+		"| Action | Pattern | Reason |",
+		"|---|---|---|",
+		"| git push origin main | git push .*[ :/]main([^-[:alnum:]_/.].*)?$ | push a main solo via PR |",
+		"| gh issue create --label spec | gh issue create .*--label spec | los issues con label spec los crea el humano |",
+		"",
+	].join("\n");
+	const projectPath = declaredRepoProject("declared-repo-stoplist", contract);
+	const seen: Exec[] = [];
+	execHandler = githubExec(projectPath, "acme/backlog", "https://github.com/acme/backlog/issues/9\n", seen, {});
+	try {
+		const result = await persistNewIssue(tool, projectPath, "chichex/chiche");
+		assert.equal(result.details.ok, false, "la stop list frena la creación");
+		const diagnostic = result.details.diagnostics.find((d: { code: string }) => d.code === "issue-creation-failed");
+		assert.ok(diagnostic, JSON.stringify(result.details.diagnostics));
+		assert.match(diagnostic.message, /stop list/);
+		assert.match(diagnostic.message, /gh issue create \.\*--label spec/, "cita el Pattern de la fila");
+		assert.equal(seen.some((entry) => entry.command === "gh" && entry.args[1] === "create"), false, "la plantilla no se corrió");
+		assert.deepEqual(result.details.createdIssues, []);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+	// Una fila que no matchea (la de main) no frena nada: la creación sigue.
+	const plain = declaredRepoProject("declared-repo-stoplist-ok", [
+		contractWithIssueRepo("acme/backlog").trimEnd(), "", "## Autonomy", "| Stage | Value | Since |", "|---|---|---|", "| run | ask | 2026-11-09 |", "",
+		"| Action | Pattern | Reason |", "|---|---|---|", "| git push origin main | git push .*[ :/]main([^-[:alnum:]_/.].*)?$ | push a main solo via PR |", "",
+	].join("\n"));
+	const plainSeen: Exec[] = [];
+	execHandler = githubExec(plain, "acme/backlog", "https://github.com/acme/backlog/issues/10\n", plainSeen, {});
+	try {
+		const result = await persistNewIssue(tool, plain, "chichex/chiche");
+		assert.equal(result.details.ok, true, JSON.stringify(result.details.diagnostics));
+		assert.equal(plainSeen.some((entry) => entry.args[1] === "create"), true);
+	} finally {
+		execHandler = async (..._args: any[]) => ({ code: 0, stdout: "", stderr: "" });
+	}
+});

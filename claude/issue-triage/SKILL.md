@@ -153,7 +153,7 @@ La selección múltiple es **todo-o-nada**. No propongas ni ejecutes grupos parc
 
 ### Identidad, copias y metadata defectuosa
 
-- Normalizá `#11` y `owner/repo#11` contra el repo actual. Una identidad canónica válida es autoritativa. `Fuente`/`Source` y el nombre `issue-N-*` sólo recuperan identidad legacy o ausente y dejan provenance/diagnóstico.
+- Normalizá `#11` y `owner/repo#11` contra el `repo` de «Publicación efectiva» (el de `origin` sin la fila). Una identidad canónica válida es autoritativa. `Fuente`/`Source` y el nombre `issue-N-*` sólo recuperan identidad legacy o ausente y dejan provenance/diagnóstico.
 - Tipo incompatible, issue contradictorio, `ParseResult.kind=conflict`, markers divergentes o identidad canónica conflictiva producen `artifact-conflict`; nunca reasignes ni hagas fallback silencioso.
 - Un único artefacto con forma/ubicación de spec y estado legacy desconocido, metadata ausente o canonical inválida toma `audit-existing-spec` sólo si puede asociarse de forma segura. Conservá siempre format, provenance y diagnósticos.
 - Una copia local y otra en GitHub son una sola spec lógica únicamente si comparten identidad y contenido normativo después de: normalizar `CRLF`/`LF` y un único newline final; normalizar la forma relativa/fully-qualified del issue dentro del marker; y quitar de la copia GitHub sólo un bloque terminal `<details><summary>Body original</summary>…</details>`. Toda otra diferencia —estado, headings, criterios, resultados, prose o metadata— produce `artifact-conflict`. Si son equivalentes, la local es `primary`.
@@ -165,8 +165,57 @@ La selección múltiple es **todo-o-nada**. No propongas ni ejecutes grupos parc
 - La vigencia es exactamente `fresh|stale|unknown`. El adapter separa eventos materiales (`title`, `body`, `comments`) de administrativos (`labels`, `assignees`, `milestone`). Baseline local = revisión/mtime del archivo; baseline en issue = revisión del body que aloja la spec.
 - Un evento material demostrablemente posterior da `stale`; historia completa sin eventos posteriores da `fresh`; timestamps faltantes/incomparables o historia insuficiente dan `unknown`. El core no usa la hora actual y `unknown` nunca habilita run.
 
+<!-- publication-resolve:start -->
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues, o `none` cuando no hay repo de issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, sin `|` (es una celda de tabla), que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Un valor envuelto en backticks se lee sin ellos. La fila `repo` acepta `none` como valor explícito (sin repo de issues). Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (host `github.com` o `ssh.github.com`, con usuario y puerto opcionales; un alias SSH como `github.com-work` o cualquier otro host cuenta como remote que no es de GitHub y da `none`, igual que sin `origin`) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no es `none` ni cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+
+```bash
+(
+  export LC_ALL=C
+  aviso=''
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$(pwd -P)
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=''
+  if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
+  defrepo=none
+  url=$(git remote get-url origin 2>/dev/null) || url=''
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
+  [ -z "$cand" ] || defrepo=$cand
+  defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
+  contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
+  contract=$(printf '%s\n' "$contract" | tr -d '\r')
+  section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  specs='auto (default)'
+  case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
+  carpeta="$defcarpeta (default)"
+  case $vcarpeta in
+    '') ;;
+    '<git-common-dir>/chiche/'|'<git-common-dir>/chiche') carpeta=$defcarpeta ;;
+    /*|'<'*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+    *) case "/$vcarpeta/" in
+         */../*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+         *) rel=${vcarpeta#./}; rel=${rel%/}; if [ -z "$rel" ] || [ "$rel" = . ]; then carpeta=$root; else carpeta="$root/$rel"; fi ;;
+       esac ;;
+  esac
+  repo="$defrepo (default)"
+  case $vrepo in '') ;; none) repo=none ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  crear="$defcrear (default)"
+  case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
+  [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
+  printf 'specs: %s\n' "$specs"
+  printf 'carpeta: %s\n' "$carpeta"
+  printf 'repo: %s\n' "$repo"
+  printf 'crear issue: %s\n' "$crear"
+)
+```
+<!-- publication-resolve:end -->
+
 <!-- issue-triage-drafts:start -->
-- Los artefactos locales viven en dos pares de lugares: los trackeados `.chiche/grills/`, `.chiche/specs/`, `.sdd/grills/` y `.sdd/specs/` del árbol, con lo que un PR ya commiteó, y los locales `<git-common-dir>/chiche/grills/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/grills/` y `<git-common-dir>/sdd/specs/`, los borradores fuera del working tree (`<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`). El inventario y el linaje se resuelven en los cuatro lugares de cada tipo (`grills` o `specs`), en este orden: `.chiche/<tipo>/`, `.sdd/<tipo>/`, `<git-common-dir>/chiche/<tipo>/` y `<git-common-dir>/sdd/<tipo>/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Un `superseded-by=.chiche/specs/<x>.md` o `superseded-by=.sdd/specs/<x>.md` se busca por nombre en ese mismo orden, y los cuatro cuentan como dentro del proyecto.
+- Los artefactos locales viven en dos pares de lugares: los trackeados `.chiche/grills/`, `.chiche/specs/`, `.sdd/grills/` y `.sdd/specs/` del árbol, con lo que un PR ya commiteó, y los locales `<git-common-dir>/chiche/grills/`, `<git-common-dir>/chiche/specs/`, `<git-common-dir>/sdd/grills/` y `<git-common-dir>/sdd/specs/`, los borradores fuera del working tree (`<git-common-dir>` es la salida de `git rev-parse --path-format=absolute --git-common-dir`). El inventario y el linaje se resuelven en los cuatro lugares de cada tipo (`grills` o `specs`), en este orden: `.chiche/<tipo>/`, `.sdd/<tipo>/`, `<git-common-dir>/chiche/<tipo>/` y `<git-common-dir>/sdd/<tipo>/`; ante el mismo nombre gana el trackeado sobre el local y `chiche` sobre `sdd`. Un `superseded-by=.chiche/specs/<x>.md` o `superseded-by=.sdd/specs/<x>.md` se busca por nombre en ese mismo orden, y los cuatro cuentan como dentro del proyecto. Si `## Publicacion` del contrato declara una `carpeta` distinta del default (ver «Publicación efectiva»), `<carpeta>/grills/` y `<carpeta>/specs/` se inventarían primero, antes de los cuatro lugares; con la carpeta default la lista es la de arriba.
 <!-- issue-triage-drafts:end -->
 
 ### Grills
@@ -235,11 +284,11 @@ El análisis termina después de confirmar, serializar y emitir el resultado. Es
 ## Fase 1 — Resolver raíz y fuentes
 
 1. Resolvé la raíz con `git rev-parse --show-toplevel` y trabajá siempre desde allí.
-2. Resolvé `owner/repo` con `gh repo view --json nameWithOwner`.
+2. Resolvé `owner/repo` con `gh repo view --json nameWithOwner` y, encima, el `repo` de «Publicación efectiva» (el de `origin` sin la fila): es el repo de las fuentes y del combinado.
 3. Cargá cada fuente con:
 
 ```bash
-gh issue view <N> --json number,title,body,url,state,updatedAt,author,labels,assignees,milestone,comments
+gh issue view <N> --repo <repo> --json number,title,body,url,state,updatedAt,author,labels,assignees,milestone,comments
 ```
 
 4. Exigí que todos existan y estén abiertos. Si alguno está cerrado, mostralo y frená: el usuario debe corregir la selección.
@@ -366,13 +415,13 @@ Esta fase ocurre únicamente tras una autorización preliminar específica para 
 
 ### 5.1 Marker idempotente
 
-Ordená las fuentes y construí:
+Ordená las fuentes y construí, con `repo` igual al `repo` de «Publicación efectiva» (el de `origin` sin la fila):
 
 ```html
 <!-- Issue-Triage: repo=owner/repo; sources=12,13 -->
 ```
 
-Antes de crear nada, buscá ese marker en todos los issues mediante `gh api --paginate` (no dependas sólo de los primeros 100). Si ya existe un issue combinado con el marker exacto, reutilizalo y no crees otro. Informá que se recuperó una canonicalización previa.
+Antes de crear nada, buscá ese marker en todos los issues mediante `gh api --paginate repos/<repo>/issues?state=all` (no dependas sólo de los primeros 100). Si ya existe un issue combinado con el marker exacto, reutilizalo y no crees otro. Informá que se recuperó una canonicalización previa.
 
 ### 5.2 Contenido combinado
 
@@ -404,15 +453,15 @@ Sintetizá un issue nuevo con:
 
 No concatentes bodies ni copies comentarios. El `Objetivo` debe conservar la síntesis entendible del diagnóstico, sin jerga de triage. Conservá labels comunes y agregá otras sólo cuando sean inequívocamente aplicables al alcance combinado.
 
-Creá el issue con `gh issue create` usando un archivo temporal para el body y eliminá ese temporal al terminar.
+Creá el issue corriendo la plantilla `crear issue` de «Publicación efectiva» con `{repo}`, `{title}` y `{body}` reemplazados (`{body}` es la ruta de un archivo temporal con el body, que eliminás al terminar; cada valor va entre comillas simples con escape), después de compararla contra la stop list de `## Autonomy`. El número sale de la URL `https://github.com/<owner>/<repo>/issues/<N>` impresa y su `<owner>/<repo>` tiene que ser `repo`: si la URL falta o es de otro repo, la creación falló, no toques las fuentes y el reporte nombra la URL huérfana si la hubo.
 
 ### 5.3 Reemplazar fuentes
 
 Sólo después de obtener y verificar el número nuevo:
 
 1. En cada original, buscá el marker `<!-- Issue-Triage-Replaced-By: #NEW -->`.
-2. Si falta, comentá que fue reemplazado por `#NEW`, incluyendo el marker.
-3. Si sigue abierto, cerralo con `gh issue close <N> --reason "not planned"`.
+2. Si falta, comentá (`gh issue comment <N> --repo <repo>`) que fue reemplazado por `#NEW`, incluyendo el marker.
+3. Si sigue abierto, cerralo con `gh issue close <N> --repo <repo> --reason "not planned"`.
 4. Nunca elimines los originales.
 5. Procesá best-effort y reportá éxitos/fallos por issue.
 

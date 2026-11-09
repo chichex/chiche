@@ -882,3 +882,112 @@ test("ronda 2 (#116-22) y #130 CA-25: un pedido de grill con autonomy o con mode
 		if (!withMode.ok) assert.deepEqual(withMode.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.mode", "extra-field"]]);
 	}
 });
+
+// Review #139-4: la ruta lógica `.chiche/specs/<x>.md` resuelve a la carpeta declarada, como en persist_sdd_spec.
+test("#139-4: /chiche-run resuelve la ruta lógica .chiche/specs/<x>.md en la carpeta declarada en ## Publicacion cuando no existe en los cuatro lugares", async () => {
+	const temporary = await mkdtemp(join(tmpdir(), "direct-chiche-run-declared-"));
+	try {
+		const project = await realpath(temporary);
+		await mkdir(join(project, ".chiche"), { recursive: true });
+		await mkdir(join(project, "docs", "sdd", "specs"), { recursive: true });
+		await writeFile(join(project, ".chiche", "project.md"), [
+			"# Contract",
+			"<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->",
+			"",
+			"## Publicacion",
+			"| Clave | Valor |",
+			"|---|---|",
+			"| carpeta | docs/sdd/ |",
+			"",
+		].join("\n"), "utf8");
+		await writeFile(join(project, "docs", "sdd", "specs", "declarada.md"), [
+			"# Spec — Declarada",
+			"<!-- Generada. Estado: aprobada -->",
+			"<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=none; grill=none; superseded-by=none -->",
+			"",
+		].join("\n"), "utf8");
+		const dependencies = {
+			resolveGitRoot: async () => project,
+			resolveRepository: async () => "chichex/chiche",
+			resolveGitCommonDir: async () => join(project, ".git"),
+		};
+		const resolved = await orchestrator.resolveDirectRunRequest(".chiche/specs/declarada.md", project, dependencies);
+		assert.equal(resolved.ok, true, resolved.ok ? "" : `${resolved.code}: ${resolved.message}`);
+		if (resolved.ok && resolved.request.target.type === "spec") {
+			assert.equal(resolved.request.target.canonicalReference, "chichex/chiche:docs/sdd/specs/declarada.md");
+		} else if (resolved.ok) {
+			assert.fail(`target inesperado: ${JSON.stringify(resolved.request.target)}`);
+		}
+	} finally {
+		await rm(temporary, { recursive: true, force: true });
+	}
+});
+
+// Issue #134, CA-16 y CA-17 (desviación fechada de la capa 3, prevista en la spec): con un `repo` declarado en
+// `## Publicacion`, `#NN` y `<repo>#NN` apuntan al repo declarado pero el run corre en el proyecto actual:
+// no se busca un checkout de un repo que solo tiene issues. Otro owner/repo#NN sigue buscando su checkout.
+test("#134 CA-16/CA-17: launch_sdd_run resuelve #NN y <repo>#NN contra el repo declarado en ## Publicacion dentro del proyecto actual, sin buscar un checkout; otro owner/repo#NN sigue buscándolo", async () => {
+	const root = "/virtual/origin";
+	const contract = [
+		"# Contract",
+		"<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->",
+		"",
+		"## Publicacion",
+		"| Clave | Valor |",
+		"|---|---|",
+		"| repo | acme/backlog |",
+		"",
+	].join("\n");
+	const crossIssueSpec = (number: number) => [
+		`# Spec — Issue ${number}`,
+		"<!-- Generada. Estado: aprobada -->",
+		`<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=acme/backlog#${number}; grill=none; superseded-by=none -->`,
+		"",
+	].join("\n");
+	const rootLookups: string[] = [];
+	const issueLookups: Array<{ root: string; repo: string; number: number }> = [];
+	const dependencies = {
+		resolveGitRoot: async () => root,
+		realpath: async (path: string) => path,
+		resolveRepository: async () => "chichex/chiche",
+		async resolveRepositoryRoot(_originRoot: string, repository: string) {
+			rootLookups.push(repository);
+			return { ok: false as const, code: "project-not-found", roots: [] };
+		},
+		async resolveIssue(issueRoot: string, repo: string, number: number) {
+			issueLookups.push({ root: issueRoot, repo, number });
+			return { number, url: `https://github.com/${repo}/issues/${number}`, state: "OPEN", body: crossIssueSpec(number) };
+		},
+		readFile: async (path: string) => {
+			if (path === join(root, ".chiche", "project.md")) return contract;
+			throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+		},
+	};
+	for (const target of [{ number: 14 }, { number: 14, repository: "acme/backlog" }]) {
+		const project = await orchestrator.resolveIssueProject(target, root, dependencies, { declaredRepository: "acme/backlog" });
+		assert.deepEqual(project, { ok: true, root, repository: "acme/backlog", number: 14 }, JSON.stringify(target));
+	}
+	assert.deepEqual(rootLookups, [], "el repo declarado no busca un checkout propio");
+	// Review #140-8: sin la opción, un `#NN` suelto sigue siendo el de origin. Es lo que usa /grill: `resolveDirectGrillRequest` no lee ## Publicacion.
+	assert.deepEqual(await orchestrator.resolveIssueProject({ number: 14 }, root, dependencies), { ok: true, root, repository: "chichex/chiche", number: 14 });
+	const grill = await orchestrator.resolveDirectGrillRequest("#14", root, { ...dependencies, resolveIssue: async (_root: string, repo: string, number: number) => ({ number, url: `https://github.com/${repo}/issues/${number}`, state: "OPEN", body: "# Idea\n" }) });
+	assert.equal(grill.ok, true, grill.ok ? "" : `${grill.code}: ${grill.message}`);
+	if (grill.ok) assert.equal(grill.request.target.canonicalReference, "chichex/chiche#14", "/grill #NN sigue leyendo el issue de origin");
+	const resolved = await orchestrator.resolveDirectRunRequest("#14", root, dependencies);
+	assert.equal(resolved.ok, true, resolved.ok ? "" : `${resolved.code}: ${resolved.message}`);
+	if (resolved.ok) {
+		assert.equal(resolved.request.target.type, "issue");
+		assert.equal(resolved.request.target.type === "issue" ? resolved.request.target.canonicalReference : "", "acme/backlog#14");
+	}
+	assert.deepEqual(issueLookups.at(-1), { root, repo: "acme/backlog", number: 14 }, "el issue se lee del repo declarado desde el proyecto actual");
+	const other = await orchestrator.resolveIssueProject({ number: 3, repository: "tercero/repo" }, root, dependencies);
+	assert.equal(other.ok, false);
+	if (!other.ok) assert.equal(other.code, "unresolved-project");
+	assert.deepEqual(rootLookups, ["tercero/repo"], "otro repo sigue buscando su checkout conocido");
+	// Sin la fila `repo`, `#NN` sigue siendo el repo de origin, como siempre.
+	const plain = { ...dependencies, readFile: async (path: string) => {
+		if (path === join(root, ".chiche", "project.md")) return "# Contract\n<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->\n";
+		throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+	} };
+	assert.deepEqual(await orchestrator.resolveIssueProject({ number: 14 }, root, plain), { ok: true, root, repository: "chichex/chiche", number: 14 });
+});

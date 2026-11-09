@@ -32,7 +32,7 @@ $chiche-init [pistas libres] [--no-verify] [--update] [--no-import] [--defaults]
 - `--no-verify` — no ejecutar comandos: documenta lo detectado como `no probado`. Útil en repos con builds carísimos.
 - `--update` — refresco de un `.chiche/project.md` existente: re-explora, re-verifica, pero PRESERVA la sección `## Decisiones humanas` y las respuestas previas. Además ofrece las capacidades que el skill ganó desde que el contrato se generó (ver "## Upgrade de contrato").
 - `--no-import` — no tocar `AGENTS.md` ni `CLAUDE.md`.
-- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run`, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa) y no se invoca `$coding-policies` ni `$design-system`. Ver «Controles de autonomía» y «Controles efectivos».
+- `--defaults` — corre sin preguntar: cada duda se asume conservadora y queda `[NEEDS-INPUT]`, en un contrato nuevo `## Autonomy` se escribe con `80` en `grill`, `80` en `spec` y `ask` en `run` y `## Publicacion` con sus cuatro defaults, ninguna política se activa, nada se migra (ni `.sdd/` a `.chiche/`, ni el formato de `## Autonomy`, ni la stop list en prosa), sobre un contrato existente sin `## Publicacion`, la sección queda como `mejora disponible` (con la sección presente se preserva verbatim), y no se invoca `$coding-policies` ni `$design-system`. Ver «Controles de autonomía» y «Controles efectivos».
 
 <!-- autonomy-controls:start -->
 **Controles de autonomía.** Son tres y cada uno hace una sola cosa. **Confianza** (`grill` y `chiche-spec`, flag `--confidence <n>`): un entero de 0 a 100 que dice qué se pregunta: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y confirma cada paso. **Posición del run** (`chiche-run`, flag `--mode <posición>`): dónde frena el run: `ask` frena ante dudas y ofrece el menú tras el PR; `pr` abre el PR, lanza el review y termina; `pr-reviewed` además corrige el feedback del review solo, hasta 2 rondas. **Cadena** (`grill` y `chiche-spec`, flag `--until pr`): con el flag, grill llama a la spec y la spec al run; sin el flag, cada etapa termina en lo suyo. Ningún control cambia a otro: la cadena no toca la confianza ni la posición. Sin flag rige lo que resuelve «Controles efectivos». `--confidence` o `--mode` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. `--autonomy` y los niveles con nombre se retiraron en 6.0.0: recibir `--autonomy` aborta antes de cualquier mutación con el diagnóstico literal `--autonomy se retiró en 6.0.0: <equivalente>`.
@@ -219,6 +219,28 @@ Por encima de ese número el agente asume una decisión y la muestra; en ese nú
 
 Las tres respuestas van a la tabla `| Stage | Value | Since |` de `## Autonomy`, cada una en su fila (`grill`, `spec` y `run`) con `Since` de hoy. Con `--defaults` no se pregunta: escribe `80` en `grill`, `80` en `spec` y `ask` en `run`.
 
+**Publicación.** Después de la posición del run, preguntar dónde publican los skills con `request_user_input`, tres preguntas en este orden, cada una con la recomendada primera; las dos últimas aceptan respuesta libre (Other) y la primera no: una respuesta fuera de `auto`, `issue` o `local` se repregunta:
+
+«¿Adónde van las specs?»
+
+1. `auto (Recomendado)` — issue si el repo ya usa issues como specs; si no, un `.md` local.
+2. `issue` — siempre un issue.
+3. `local` — siempre un `.md` local.
+
+«¿En qué carpeta van los .md de specs y grills?» — la respuesta libre es una ruta relativa a la raíz del repo (ej. `docs/sdd/`, que da `docs/sdd/specs/` y `docs/sdd/grills/`):
+
+1. `<git-common-dir>/chiche/ (Recomendado)` — fuera del árbol: no aparece en `git status` ni viaja con un clone.
+2. `.chiche/` — en el árbol: los borradores quedan visibles en `git status`.
+
+«¿Dónde y con qué comando se crean los issues?» — la respuesta libre se toma como plantilla, con `{title}` y `{body}` obligatorios y `{repo}` opcional; su repo se pide si no se deduce de `--repo`:
+
+1. `En <origin> con gh issue create (Recomendado)` — la plantilla default, `gh issue create --repo {repo} --title {title} --body-file {body}`, sobre el repo de `origin`.
+2. `En otro repo` — pide `owner/repo` y usa la plantilla default con ese repo.
+
+Sin un `origin` de GitHub la tercera pregunta se saltea: `repo` queda `none` y la plantilla, la default (`specs` sigue valiendo: con `auto` la spec cae a local y con `issue` cae a local con aviso).
+
+Las respuestas van a la tabla `| Clave | Valor |` de `## Publicacion`: `specs`, `carpeta`, `repo` y `crear issue`. Con `--defaults` no se pregunta: un contrato nuevo lleva los cuatro defaults. En `--update` con la sección ya presente, preguntar `Mantener (Recomendado)` / `Revisar`: `Mantener` la preserva verbatim y `Revisar` repite las tres preguntas con los valores actuales como default; con `--defaults` no se pregunta y se preserva verbatim.
+
 **Stop list.** La pregunta de qué requiere confirmación humana además de los defaults se responde como filas de la stop list de `## Autonomy`: por cada respuesta, proponer la fila con `Action`, el `Pattern` inferido (regex POSIX extendida sobre el comando o la ruta, sin `|`) y `Reason`, y confirmarla con `request_user_input`; una respuesta sin patrón honesto se ofrece como regla fechada para `## Decisiones humanas`, nunca como fila con `Pattern` vacío. Los defaults (deploy, migraciones sobre datos compartidos, push a `main`, force-push, merge de PRs y servicios pagos) se escriben sin preguntar, con el patrón que el repo sugiere. En `--update` sobre un contrato con límites en prosa, la fila `Stop list` de «Upgrade de contrato» propone una fila por bullet con este mismo mecanismo. Corre después de «Migración a .chiche/» y funciona igual sobre un repo que eligió `Mantener .sdd/`: lee y escribe el contrato donde esté.
 
 ## Fase 3.5 — Políticas de generación
@@ -271,6 +293,7 @@ El skill evoluciona; los contratos generados por versiones anteriores no. En TOD
 | Directorio .chiche/ | existe .sdd/project.md, trackeado o no — no entra al menú: lo ofrece la pregunta propia de "## Migración a .chiche/", antes que todo lo demás |
 | Autonomy | no existe la sección `## Autonomy`, o su tabla de controles tiene el formato viejo (la columna `Level`) — la Fase 3 hace sus tres preguntas (la confianza de `grill`, la de `spec` y la posición del run) y la Fase 4 escribe la tabla de controles; sobre un formato viejo reescribe solo esa tabla, con las líneas de explicación y las tres filas del template de la Fase 4, conserva la stop list verbatim (su párrafo y su tabla) y anota la migración en `## Decisiones humanas` con la fecha y los tres valores elegidos; con un `## Limites` presente, `## Autonomy` se escribe solo junto con la migración de `Stop list` (elegir `Autonomy` arrastra `Stop list`); con `--defaults` no se escribe ni se migra y queda `mejora disponible` |
 | Stop list | existe `## Limites` en prosa — `--update` propone una fila de la stop list por bullet, con el `Pattern` inferido, y pide confirmación fila por fila; lo que no tiene un patrón honesto se ofrece como regla fechada para `## Decisiones humanas`; `## Limites` se preserva verbatim hasta que se migre, y al escribir `## Autonomy` esa prosa se retira; con `--defaults` no migra y queda `mejora disponible` |
+| Publicacion | no existe la sección `## Publicacion` — al elegirse, la Fase 3 hace sus tres preguntas («Publicación») y la Fase 4 escribe la sección entre `## Ambientes` y `## Verificacion autonoma`; con `--defaults` no se escribe y queda `mejora disponible` |
 
 Con faltantes: listarlos como texto visible (una línea por capacidad, con qué aporta) y preguntar en texto plano "El contrato es de una versión anterior del skill; ¿qué mejoras le agrego? Indicá todas las que quieras o respondé `ninguna`". SOLO lo elegido se releva, pregunta y escribe, cada capacidad con el mecanismo de su fase (ej. elegir `Politicas de generacion` se resuelve con el menú de la Fase 3.5); lo no elegido no se anota como gap — es una elección, no una deuda. Con `--defaults`: no se agrega ninguna (varias exigen elección humana); quedan en el reporte como `mejoras disponibles`.
 
@@ -378,6 +401,19 @@ Git: branch default del repo (main/master/otro) — $chiche-run ramifica desde a
 Capacidad de PR: remote configurado + gh autenticado, o "sin remote — $chiche-run termina
 en commit local". $chiche-run lee estas lineas antes de ramificar o pushear.>
 
+## Publicacion
+<donde publican los skills (Fase 3, "Publicacion"). Sin la seccion todo funciona como antes: estos cuatro defaults.
+specs: auto (issue si el repo ya usa issues como specs, si no un .md local) · issue (siempre un issue) · local (siempre un .md).
+carpeta: donde van los .md de specs y grills: el literal <git-common-dir>/chiche/ (fuera del arbol) o una ruta relativa a la raiz del repo (docs/sdd/ da docs/sdd/specs/ y docs/sdd/grills/).
+repo: owner/repo de GitHub donde se crean y se leen los issues (default: el de origin), o none sin repo de issues.
+crear issue: plantilla del comando que crea un issue e imprime su URL; {title} y {body} obligatorios, {repo} opcional, sin `|`.
+| Clave | Valor |
+|---|---|
+| specs | auto |
+| carpeta | <git-common-dir>/chiche/ |
+| repo | <owner/repo o none> |
+| crear issue | gh issue create --repo {repo} --title {title} --body-file {body} |>
+
 ## Verificacion autonoma
 <la escalera para ESTE repo, en orden de confianza creciente, con el como concreto de
 cada escalon. Y explicitamente que NO se puede verificar sin humano, con el motivo.>
@@ -464,7 +500,58 @@ La línea `Chiche-Tracking` es el marker canónico de tracking (contrato `docs/c
 
 **Ensayo de la stop list.** Con el archivo escrito, correr el comando canónico de «`## Autonomy`» (arriba, «Ensayo de la stop list») sobre el archivo ya escrito; una fila `FAILED` conserva su `Pattern`, recibe el prefijo `FAILED (<motivo>): ` al frente de su `Reason` (idempotente: si ya lo tiene, se reemplaza y no se duplica) y se lista en `## Gaps` para que el humano la corrija. Ese prefijo es, junto con la migración de formato de la fila `Autonomy`, la excepción al verbatim de `## Autonomy` en `--update`.
 
-En `--update`: regenerar todo salvo `## Decisiones humanas`, `## Politicas de generacion` (las políticas solo cambian si el usuario eligió `Revisar` en Fase 3.5), `## Autonomy` (preservar verbatim, salvo el prefijo `FAILED` del ensayo de la stop list y la migración de formato que hace la fila `Autonomy`) y un `## Limites` sin migrar, que se preserva verbatim hasta que la fila `Stop list` lo migre; y los `[NEEDS-INPUT]` aún sin respuesta (mantenerlos, no duplicarlos).
+<!-- publication-resolve:start -->
+**`## Publicacion`.** Dice dónde publican los skills. Una tabla `| Clave | Valor |` con cuatro filas: `specs` es el destino de una spec nueva (`auto`: issue si el repo ya usa issues como specs, si no un `.md` local; `issue`: siempre un issue; `local`: siempre un `.md`); `carpeta` es dónde van los `.md` de specs y grills: el literal `<git-common-dir>/chiche/` (fuera del árbol) o una ruta relativa a la raíz del repo sin segmentos `..` (`docs/sdd/` da `docs/sdd/specs/` y `docs/sdd/grills/`); `repo` es el `owner/repo` de GitHub donde se crean y se leen los issues, o `none` cuando no hay repo de issues; `crear issue` es la plantilla del comando que crea un issue, con `{title}` y `{body}` obligatorios y `{repo}` opcional, sin `|` (es una celda de tabla), que tiene que imprimir la URL del issue creado. Sin la sección rigen los defaults, `auto`, `<git-common-dir>/chiche/`, el repo de `origin` y `gh issue create --repo {repo} --title {title} --body-file {body}`, y todo funciona como antes de que existiera la sección.
+
+**Publicación efectiva.** La sección se lee del contrato de la raíz operativa (`.chiche/project.md`, con fallback a `.sdd/project.md`), como `## Comandos`, no del branch default: la stop list de `## Autonomy` sigue frenando lo que matchee. Este comando imprime cuatro líneas, en este orden: `specs: <valor>`, `carpeta: <ruta absoluta>`, `repo: <owner/repo|none>` y `crear issue: <plantilla>`, con ` (default)` al final de cada valor que no salió del contrato. Un valor envuelto en backticks se lee sin ellos. La fila `repo` acepta `none` como valor explícito (sin repo de issues). Sin contrato o sin la sección imprime los defaults: `auto`, `<git-common-dir>/chiche` resuelto a ruta absoluta (fuera de un repo git, `.chiche` del directorio actual), el repo de GitHub de `origin` (host `github.com` o `ssh.github.com`, con usuario y puerto opcionales; un alias SSH como `github.com-work` o cualquier otro host cuenta como remote que no es de GitHub y da `none`, igual que sin `origin`) y la plantilla default. Un valor inválido cae al default de su clave con el aviso `valor <clave> inválido (<valor>): rige <default>` por stderr y exit 0: `specs` fuera de `auto`, `issue` o `local`; `carpeta` absoluta distinta del literal, o con un segmento `..`; `repo` que no es `none` ni cumple `^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`; `crear issue` sin `{title}` o sin `{body}`. Corre igual con `bash`, `sh` y `zsh`, sin parámetros posicionales ni variables de argumentos del harness:
+
+```bash
+(
+  export LC_ALL=C
+  aviso=''
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$(pwd -P)
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=''
+  if [ -n "$common" ]; then defcarpeta="$common/chiche"; else defcarpeta="$root/.chiche"; fi
+  defrepo=none
+  url=$(git remote get-url origin 2>/dev/null) || url=''
+  cand=$(printf '%s\n' "$url" | sed -E 's#/+$##; s#\.git$##' | sed -n -E 's#^(https?://([^/@]+@)?|ssh://([^/@]+@)?|[^/@:]+@)(ssh\.)?github\.com(:[0-9]+)?[/:]([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)$#\6#p')
+  [ -z "$cand" ] || defrepo=$cand
+  defcrear='gh issue create --repo {repo} --title {title} --body-file {body}'
+  contract=$(cat "$root/.chiche/project.md" 2>/dev/null) || contract=$(cat "$root/.sdd/project.md" 2>/dev/null) || contract=''
+  contract=$(printf '%s\n' "$contract" | tr -d '\r')
+  section=$(printf '%s\n' "$contract" | sed -n '/^## Publicacion$/,$p' | sed -n '2,${/^## /q;p;}')
+  vspecs=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*specs[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcarpeta=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*carpeta[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vrepo=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*repo[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  vcrear=$(printf '%s\n' "$section" | grep -E '^\|[[:space:]]*crear issue[[:space:]]*\|' | head -n 1 | cut -d'|' -f3 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sed -E 's/^`(.*)`$/\1/')
+  specs='auto (default)'
+  case $vspecs in '') ;; auto|issue|local) specs=$vspecs ;; *) aviso="$aviso aviso: valor specs inválido ($vspecs): rige auto;" ;; esac
+  carpeta="$defcarpeta (default)"
+  case $vcarpeta in
+    '') ;;
+    '<git-common-dir>/chiche/'|'<git-common-dir>/chiche') carpeta=$defcarpeta ;;
+    /*|'<'*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+    *) case "/$vcarpeta/" in
+         */../*) aviso="$aviso aviso: valor carpeta inválido ($vcarpeta): rige $defcarpeta;" ;;
+         *) rel=${vcarpeta#./}; rel=${rel%/}; if [ -z "$rel" ] || [ "$rel" = . ]; then carpeta=$root; else carpeta="$root/$rel"; fi ;;
+       esac ;;
+  esac
+  repo="$defrepo (default)"
+  case $vrepo in '') ;; none) repo=none ;; *) if printf '%s\n' "$vrepo" | grep -Eqx '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+'; then repo=$vrepo; else aviso="$aviso aviso: valor repo inválido ($vrepo): rige $defrepo;"; fi ;; esac
+  crear="$defcrear (default)"
+  case $vcrear in '') ;; *'{title}'*'{body}'*|*'{body}'*'{title}'*) crear=$vcrear ;; *) aviso="$aviso aviso: valor crear issue inválido ($vcrear): rige $defcrear;" ;; esac
+  [ -n "$aviso" ] && printf '%s\n' "${aviso# }" | sed 's/;$//' >&2
+  printf 'specs: %s\n' "$specs"
+  printf 'carpeta: %s\n' "$carpeta"
+  printf 'repo: %s\n' "$repo"
+  printf 'crear issue: %s\n' "$crear"
+)
+```
+<!-- publication-resolve:end -->
+
+**Verificación de `## Publicacion`.** `chiche-init` no ejecuta la plantilla de `crear issue`: crearía un issue. Con el archivo escrito, correr el comando canónico de «Publicación efectiva» sobre el contrato ya escrito (el comando lee el archivo, no recibe el borrador) y exigir las cuatro líneas sin ningún aviso de valor inválido; después `gh repo view <repo> --json nameWithOwner` (salvo con `repo` en `none`, que no se consulta) y la stop list de `## Autonomy` contra la plantilla con sus placeholders reemplazados por valores de prueba (ninguna fila puede matchear el comando que los skills van a correr). Una falla de cualquiera de los tres se anota en `## Gaps` con el chequeo y su salida y, en una corrida interactiva, se repregunta la clave que falló y se reescribe su fila; con `--defaults` queda solo en `## Gaps`.
+
+En `--update`: regenerar todo salvo `## Decisiones humanas`, `## Politicas de generacion` (las políticas solo cambian si el usuario eligió `Revisar` en Fase 3.5), `## Autonomy` (preservar verbatim, salvo el prefijo `FAILED` del ensayo de la stop list y la migración de formato que hace la fila `Autonomy`) y un `## Limites` sin migrar, que se preserva verbatim hasta que la fila `Stop list` lo migre; `## Publicacion` solo cambia si se eligió `Revisar` en la Fase 3 (con `--defaults` se preserva verbatim); y los `[NEEDS-INPUT]` aún sin respuesta (mantenerlos, no duplicarlos).
 
 ## Fase 5 — Referencia en AGENTS.md y CLAUDE.md (saltear con `--no-import`)
 
@@ -489,6 +576,7 @@ Contrato de autonomia listo: .chiche/project.md
 - comandos: <N> documentados (<K> verificados, <F> fallan, <P> no probados)
 - escalera de verificacion: llega hasta <escalon mas alto>
 - politicas de generacion: <lista con valores | ninguna activa>
+- publicacion: specs <v> · carpeta <v> · issues en <repo>
 - preguntas hechas: <K> · gaps abiertos: <G>
 - coding-policies: <referenciado|generado|no existe (ofrecido)|--defaults: no ofrecido>
 - design-system: <referenciado|generado|no existe (ofrecido)|con sistema (no ofrecido)|--defaults: no ofrecido|sin superficies UI>
@@ -525,6 +613,7 @@ La pregunta del cierre `Commit + PR` tiene dos opciones y usa `request_user_inpu
 - Ofrecer como gate SOLO lo que tiene gate medible en este repo, y escribir cada política activa con su gate concreto; una preferencia sin gate medible entra únicamente como `guia` explícita. El umbral de coverage se elige siempre contra el baseline medido, nunca en el aire.
 - En corridas sobre un contrato existente, cruzarlo contra la checklist de "## Upgrade de contrato" y OFRECER los faltantes — nunca agregarlos sin preguntar, nunca callarlos.
 - Preservar `## Decisiones humanas`, `## Politicas de generacion`, `## Autonomy` (salvo el prefijo `FAILED` del ensayo de la stop list y la migración de formato que hace la fila `Autonomy`) y un `## Limites` sin migrar en `--update`.
+- Preservar `## Publicacion` verbatim en `--update` cuando el usuario elige `Mantener` o corre con `--defaults`; con `Revisar`, repetir las tres preguntas de «Publicación» con los valores actuales como default.
 - Ser idempotente: re-correr sobre un repo ya inicializado actualiza, no duplica (ni el doc ni las referencias de AGENTS.md/CLAUDE.md).
 
 ## MUST NOT DO
@@ -532,6 +621,7 @@ La pregunta del cierre `Commit + PR` tiene dos opciones y usa `request_user_inpu
 - No correr NADA que mute estado externo o compartido: deploy, publish, migraciones contra DBs remotas, git push. La verificación es local y read-only hacia afuera. Las dos excepciones son el `Commit + PR` del cierre, cuando el usuario lo elige (pushea solo `chore/chiche-init-<YYYY-MM-DD>` y abre su PR), y la receta `deploy <ambiente>` de la Fase 2 cuando el humano la confirma con `request_user_input`, con `No ejecutar (Recomendado)` primera; con `--defaults` nunca se ejecuta.
 - No documentar comandos adivinados por el nombre del script sin leer qué hacen.
 - No preguntar lo que la exploración ya respondió.
+- No ejecutar la plantilla de `crear issue` para verificarla: crearía un issue real. La verificación es `gh repo view` más el comando canónico y la stop list.
 - No escribir secrets ni valores de env vars en el contrato — solo el NOMBRE de la var y de dónde sale.
 - No inferir ni asumir políticas de generación: si el usuario no las eligió (o corrió con `--defaults`), la sección queda vacía. Y no activar una cuyo gate no se pueda medir hoy (coverage sin comando verificado va a Gaps, no al contrato). Una preferencia sin gate medible jamás se disfraza de gate: o es `guia` explícita o no entra.
 - No pisar un `.chiche/project.md` editado a mano sin preservar `## Decisiones humanas`.
