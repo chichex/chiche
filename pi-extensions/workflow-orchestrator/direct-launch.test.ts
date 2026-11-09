@@ -785,32 +785,100 @@ test("review #86: startFreshStage rechaza un borrador que no está en el common-
 	assert.ok(ownChiche.ok || ownChiche.code !== "invalid-direct-request", JSON.stringify(ownChiche));
 });
 
-// Review #114-7 (issue #102): launch_sdd_run acepta `autonomy` opcional y el protocolo directo lo lleva a los args.
-test("review #114-7: DirectRunRequestV1 acepta autonomy opcional validado (A1–A3), lo rechaza fuera de la escala y describeDirectRun lo agrega a los args", () => {
+// Issue #130, CA-25 (antes review #114-7): launch_sdd_run y el protocolo directo llevan la posición del run en `mode`.
+test("#130 CA-25: DirectRunRequestV1 lleva mode opcional (ask, pr, pr-reviewed), lo rechaza fuera de la lista, rechaza autonomy con extra-field y describeDirectRun agrega --mode", () => {
 	const base = draftRequest("/workspace/skills", "/workspace/skills/.git/chiche/specs/borrador.md", "chichex/chiche:.chiche/specs/borrador.md");
 	const plain = orchestrator.validateDirectRunRequest(base);
 	assert.equal(plain.ok, true, JSON.stringify(plain));
+	if (plain.ok) assert.equal(Object.hasOwn(plain.value, "mode"), false, "sin mode el pedido no inventa una posición");
 	assert.equal(orchestrator.describeDirectRun(base as never).skill.args, "/workspace/skills/.git/chiche/specs/borrador.md");
-	for (const [token, code] of [["A2", "A2"], ["unattended", "A3"], ["a1", "A1"]] as const) {
-		const validation = orchestrator.validateDirectRunRequest({ ...base, autonomy: token });
-		assert.equal(validation.ok, true, `${token}: ${JSON.stringify(validation)}`);
+	for (const mode of ["ask", "pr", "pr-reviewed"] as const) {
+		const validation = orchestrator.validateDirectRunRequest({ ...base, mode });
+		assert.equal(validation.ok, true, `${mode}: ${JSON.stringify(validation)}`);
 		if (validation.ok) {
-			assert.equal(validation.value.autonomy, code);
-			assert.equal(orchestrator.describeDirectRun(validation.value).skill.args, `/workspace/skills/.git/chiche/specs/borrador.md --autonomy ${code}`);
+			assert.equal(validation.value.mode, mode);
+			assert.equal(validation.value.version, 1);
+			assert.equal(validation.value.kind, "sdd-run");
+			assert.equal(orchestrator.describeDirectRun(validation.value).skill.args, `/workspace/skills/.git/chiche/specs/borrador.md --mode ${mode}`);
 		}
 	}
-	for (const token of ["A4", "auto-deploy", "extreme", 3]) {
+	for (const token of ["PR", "review", "pr-review", "A3", "unattended", ""]) {
+		const validation = orchestrator.validateDirectRunRequest({ ...base, mode: token });
+		assert.equal(validation.ok, false, token);
+		if (!validation.ok) {
+			assert.deepEqual(validation.diagnostics, [{ path: "$.mode", code: "invalid-value", message: `--mode ${token}: valor inválido; válidos: ask, pr, pr-reviewed` }]);
+		}
+	}
+	for (const token of [3, null, true, ["pr"]]) {
+		const validation = orchestrator.validateDirectRunRequest({ ...base, mode: token });
+		assert.equal(validation.ok, false, JSON.stringify(token));
+		if (!validation.ok) assert.deepEqual(validation.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.mode", "invalid-type"]]);
+	}
+	// El campo del dial por niveles se retiró: un pedido que lo trae se rechaza, no se ignora ni se traduce.
+	for (const token of ["A2", "unattended", "a1", "A4", "pr", 3]) {
 		const validation = orchestrator.validateDirectRunRequest({ ...base, autonomy: token });
 		assert.equal(validation.ok, false, String(token));
-		if (!validation.ok) assert.ok(validation.diagnostics.some((diagnostic) => diagnostic.path === "$.autonomy"), JSON.stringify(validation.diagnostics));
+		if (!validation.ok) assert.deepEqual(validation.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.autonomy", "extra-field"]], JSON.stringify(validation.diagnostics));
+	}
+	const both = orchestrator.validateDirectRunRequest({ ...base, mode: "pr", autonomy: "A2" });
+	assert.equal(both.ok, false);
+	if (!both.ok) assert.deepEqual(both.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.autonomy", "extra-field"]]);
+});
+
+test("#130 CA-25: resolveDirectRunRequest lleva el mode recibido al pedido de un issue y de una spec local, y sin mode no agrega el campo", async () => {
+	const temporary = await mkdtemp(join(tmpdir(), "direct-chiche-run-mode-"));
+	try {
+		const project = await realpath(temporary);
+		await mkdir(join(project, ".chiche", "specs"), { recursive: true });
+		await writeFile(join(project, ".chiche", "project.md"), ["# Contract", "<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->", ""].join("\n"), "utf8");
+		const localSpec = join(project, ".chiche", "specs", "local.md");
+		await writeFile(localSpec, [
+			"# Spec — Local",
+			"<!-- Generada. Estado: aprobada -->",
+			"<!-- Chiche-Tracking: version=2; type=spec; state=approved; issue=none; grill=none; superseded-by=none -->",
+			"",
+		].join("\n"), "utf8");
+		const dependencies = {
+			resolveGitRoot: async () => project,
+			resolveRepository: async () => "chichex/chiche",
+			resolveIssue: async (_root: string, repo: string, number: number) => ({ number, url: `https://github.com/${repo}/issues/${number}`, state: "OPEN", body: canonicalIssueSpec(number) }),
+		};
+		const issue = await orchestrator.resolveDirectRunRequest("#14", project, dependencies, { mode: "pr" });
+		assert.equal(issue.ok, true, JSON.stringify(issue));
+		if (issue.ok) {
+			assert.equal(issue.request.mode, "pr");
+			assert.equal(orchestrator.describeDirectRun(issue.request).skill.args, "#14 --mode pr");
+		}
+		const spec = await orchestrator.resolveDirectRunRequest(localSpec, project, dependencies, { mode: "pr-reviewed" });
+		assert.equal(spec.ok, true, JSON.stringify(spec));
+		if (spec.ok) {
+			assert.equal(spec.request.mode, "pr-reviewed");
+			assert.equal(orchestrator.describeDirectRun(spec.request).skill.args, `${localSpec} --mode pr-reviewed`);
+		}
+		for (const target of ["#14", localSpec]) {
+			const plain = await orchestrator.resolveDirectRunRequest(target, project, dependencies);
+			assert.equal(plain.ok, true, JSON.stringify(plain));
+			if (plain.ok) {
+				assert.equal(Object.hasOwn(plain.request, "mode"), false, `${target}: sin mode no hay campo`);
+				assert.equal(orchestrator.describeDirectRun(plain.request).skill.args, target);
+			}
+		}
+	} finally {
+		await rm(temporary, { recursive: true, force: true });
 	}
 });
 
-test("ronda 2 (#116-22): un pedido de grill con autonomy se rechaza con extra-field, no se ignora", () => {
+test("ronda 2 (#116-22) y #130 CA-25: un pedido de grill con autonomy o con mode se rechaza con extra-field, no se ignora", () => {
 	const issue = { repository: "chichex/chiche", number: 14 };
 	const base = { version: 1, kind: "grill", repo: "chichex/chiche", cwd: "/workspace/skills", target: { type: "issue", canonicalReference: "chichex/chiche#14", issue }, summary: "Grill #14", evidence: [{ kind: "issue", reference: "#14", detail: "x" }] };
 	assert.equal(orchestrator.validateDirectGrillRequest(base).ok, true);
 	const rejected = orchestrator.validateDirectGrillRequest({ ...base, autonomy: "A3" });
 	assert.equal(rejected.ok, false, "autonomy no es un campo de grill");
 	if (!rejected.ok) assert.deepEqual(rejected.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.autonomy", "extra-field"]]);
+	// La posición es del run: un grill no la lleva, ni siquiera con un valor válido.
+	for (const mode of ["ask", "pr", "pr-reviewed"]) {
+		const withMode = orchestrator.validateDirectGrillRequest({ ...base, mode });
+		assert.equal(withMode.ok, false, `mode ${mode} no es un campo de grill`);
+		if (!withMode.ok) assert.deepEqual(withMode.diagnostics.map((diagnostic) => [diagnostic.path, diagnostic.code]), [["$.mode", "extra-field"]]);
+	}
 });

@@ -20,7 +20,7 @@ import {
 } from "./direct-launch.ts";
 import type { DirectGrillRequestV1, DirectRunRequestV1 } from "./direct-protocol.ts";
 import { resolveWorkflowDispatchForCwd } from "./dispatch.ts";
-import { type AutonomyCode, parseAutonomyLevel } from "./autonomy.ts";
+import { parseRunMode, retiredAutonomyMessage, RUN_MODES, type RunMode } from "./autonomy.ts";
 import {
 	startFreshStage as startFreshStageDefault,
 	type StartFreshStageRequest,
@@ -315,11 +315,11 @@ export function createWorkflowController(
 	pi.registerTool({
 		name: LAUNCH_SDD_RUN_TOOL,
 		label: "Launch SDD run",
-		description: "Validate an SDD spec target, ask for explicit execution authorization, and launch it in a fresh session. Optional autonomy (A1-A3 or its name) travels as --autonomy.",
+		description: "Validate an SDD spec target, ask for explicit execution authorization, and launch it in a fresh session. Optional mode (ask, pr or pr-reviewed) travels as --mode.",
 		parameters: {
 			type: "object",
 			required: ["target"],
-			properties: { target: { type: "string" }, autonomy: { type: "string" } },
+			properties: { target: { type: "string" }, mode: { type: "string", enum: [...RUN_MODES] } },
 			additionalProperties: false,
 		},
 		async execute(_toolCallId, params, _signal, _onUpdate, context) {
@@ -328,21 +328,23 @@ export function createWorkflowController(
 				throw new Error("launch_sdd_run requires target=<ruta|#NN|owner/repo#NN|GitHub issue URL>");
 			}
 			const target = (params as { target: string }).target.trim();
-			// Issue #102 (review #114-7): el nivel se valida con la escala antes de resolver el target.
-			let autonomy: AutonomyCode | undefined;
-			const rawAutonomy = (params as { autonomy?: unknown }).autonomy;
-			if (rawAutonomy !== undefined) {
-				if (typeof rawAutonomy !== "string") throw new Error("launch_sdd_run autonomy must be a string (A1-A3 or its name)");
-				const parsed = parseAutonomyLevel(rawAutonomy);
+			// Issue #130, CA-25: la posición del run se valida antes de resolver el target; el parámetro del dial por
+			// niveles se retiró en 6.0.0 y se rechaza en vez de ignorarlo o traducirlo.
+			if (Object.hasOwn(params, "autonomy")) throw new Error(retiredAutonomyMessage("usá mode (ask, pr o pr-reviewed)"));
+			let mode: RunMode | undefined;
+			const rawMode = (params as { mode?: unknown }).mode;
+			if (rawMode !== undefined) {
+				if (typeof rawMode !== "string") throw new Error("launch_sdd_run mode must be a string (ask, pr or pr-reviewed)");
+				const parsed = parseRunMode(rawMode);
 				if (!parsed.ok) throw new Error(parsed.message);
-				autonomy = parsed.code;
+				mode = parsed.mode;
 			}
-			const resolved = await resolveDirectRunRequest(target, context.cwd, dependencies.directRunDependencies, { autonomy });
+			const resolved = await resolveDirectRunRequest(target, context.cwd, dependencies.directRunDependencies, { mode });
 			if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
 			const authorized = await context.ui.confirm(
 				"Ejecutar ahora",
-				// Review #116-5: el confirm es la única autorización; muestra el nivel que se va a autorizar.
-				`${resolved.request.summary}${autonomy === undefined ? "" : `\nNivel: ${autonomy}`}\n\nSe abrirá una sesión hija ligada a la actual.`,
+				// Review #116-5: el confirm es la única autorización; muestra la posición del run que se va a autorizar.
+				`${resolved.request.summary}${mode === undefined ? "" : `\nPosición: ${mode}`}\n\nSe abrirá una sesión hija ligada a la actual.`,
 			);
 			if (!authorized) {
 				return {

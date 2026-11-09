@@ -769,7 +769,7 @@ test("launch_sdd_run asks explicit authorization and bridges its direct request 
 		toolContext,
 	) as { terminate?: boolean; details?: { authorized?: boolean } };
 	assert.equal(confirmations, 1);
-	// Review #116-5: el confirm es la única autorización; sin flag no muestra nivel.
+	// Review #116-5: el confirm es la única autorización; sin mode no muestra posición.
 	assert.deepEqual(messages, ["Run issue #14.\n\nSe abrirá una sesión hija ligada a la actual."]);
 	assert.equal(result.terminate, true);
 	assert.equal(result.details?.authorized, true);
@@ -787,10 +787,10 @@ test("launch_sdd_run asks explicit authorization and bridges its direct request 
 	};
 	await commands.get("__sdd-dispatch")!.handler("direct-receipt", commandContext);
 	assert.deepEqual(starts, [directRunRequest()]);
-	// Review #116-5: con --autonomy el confirm muestra el nivel que se va a autorizar.
-	const leveled = await tools.get("launch_sdd_run")!.execute("launch-2", { target: "#14", autonomy: "plan-approved" }, undefined, undefined, toolContext) as { details?: { authorized?: boolean } };
-	assert.equal(leveled.details?.authorized, true);
-	assert.equal(messages[1], "Run issue #14.\nNivel: A2\n\nSe abrirá una sesión hija ligada a la actual.");
+	// Review #116-5 e issue #130, CA-25: con mode el confirm muestra la posición del run que se va a autorizar.
+	const positioned = await tools.get("launch_sdd_run")!.execute("launch-2", { target: "#14", mode: "pr-reviewed" }, undefined, undefined, toolContext) as { details?: { authorized?: boolean } };
+	assert.equal(positioned.details?.authorized, true);
+	assert.equal(messages[1], "Run issue #14.\nPosición: pr-reviewed\n\nSe abrirá una sesión hija ligada a la actual.");
 });
 
 test("launch_grill authorizes a qualified issue target and dispatches it through a one-shot receipt", async () => {
@@ -898,12 +898,13 @@ test("#130 CA-25: beginIssueTriage materializa issue-triage sin flags de autonom
 	assert.deepEqual(started, [{ name: "chiche-spec", args: "#12 --until pr" }], "el despacho agrega solo --until pr, por el veredicto aceptado");
 });
 
-test("review #114-7: launch_sdd_run acepta autonomy opcional, lo valida con la escala y lo pasa al resolver del run directo", async () => {
-	const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+// Issue #130, CA-25 (antes review #114-7): la tool lleva la posición del run en `mode`; `autonomy` se retiró.
+test("#130 CA-25: launch_sdd_run lleva mode opcional (ask, pr, pr-reviewed), lo valida y lo pasa al resolver del run directo, y rechaza autonomy con el diagnóstico de retiro", async () => {
+	const tools = new Map<string, { description: string; parameters: unknown; execute: (...args: unknown[]) => Promise<unknown> }>();
 	const resolverCalls: unknown[] = [];
 	const pi = {
 		events: createEventBus(),
-		registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) { tools.set(tool.name, tool); },
+		registerTool(tool: { name: string; description: string; parameters: unknown; execute: (...args: unknown[]) => Promise<unknown> }) { tools.set(tool.name, tool); },
 		registerCommand() {},
 		on() {},
 		getCommands: () => [],
@@ -921,13 +922,40 @@ test("review #114-7: launch_sdd_run acepta autonomy opcional, lo valida con la e
 		startDirectRun: async () => ({ ok: true, code: "started" } as never),
 	} as never);
 	const toolContext = { hasUI: true, cwd: "/workspace/skills", sessionManager: { getSessionId: () => "origin-session" }, ui: { async confirm() { return true; } } };
-	await tools.get("launch_sdd_run")!.execute("launch-a3", { target: "#14", autonomy: "unattended" }, undefined, undefined, toolContext);
-	assert.deepEqual(resolverCalls, [{ autonomy: "A3" }]);
-	await tools.get("launch_sdd_run")!.execute("launch-plain", { target: "#14" }, undefined, undefined, toolContext);
-	assert.deepEqual(resolverCalls[1], { autonomy: undefined });
+	const tool = tools.get("launch_sdd_run")!;
+	assert.deepEqual(tool.parameters, {
+		type: "object",
+		required: ["target"],
+		properties: { target: { type: "string" }, mode: { type: "string", enum: ["ask", "pr", "pr-reviewed"] } },
+		additionalProperties: false,
+	});
+	assert.match(tool.description, /Optional mode \(ask, pr or pr-reviewed\) travels as --mode\./);
+	assert.doesNotMatch(tool.description, /autonomy/i);
+	for (const mode of ["ask", "pr", "pr-reviewed"]) {
+		await tool.execute(`launch-${mode}`, { target: "#14", mode }, undefined, undefined, toolContext);
+	}
+	assert.deepEqual(resolverCalls, [{ mode: "ask" }, { mode: "pr" }, { mode: "pr-reviewed" }]);
+	await tool.execute("launch-plain", { target: "#14" }, undefined, undefined, toolContext);
+	assert.deepEqual(resolverCalls[3], { mode: undefined });
 	await assert.rejects(
-		tools.get("launch_sdd_run")!.execute("launch-a4", { target: "#14", autonomy: "A4" }, undefined, undefined, toolContext),
-		/--autonomy A4: no soportado todavía \(v1 honra A1–A3\)/,
+		tool.execute("launch-review", { target: "#14", mode: "review" }, undefined, undefined, toolContext),
+		/^Error: --mode review: valor inválido; válidos: ask, pr, pr-reviewed$/,
 	);
-	assert.equal(resolverCalls.length, 2, "un nivel inválido no llega al resolver");
+	await assert.rejects(
+		tool.execute("launch-number", { target: "#14", mode: 3 }, undefined, undefined, toolContext),
+		/^Error: launch_sdd_run mode must be a string \(ask, pr or pr-reviewed\)$/,
+	);
+	// El parámetro del dial por niveles se retiró: no se traduce a una posición ni se ignora.
+	for (const autonomy of ["A3", "unattended", "plan-approved", "A4", 2]) {
+		await assert.rejects(
+			tool.execute("launch-autonomy", { target: "#14", autonomy }, undefined, undefined, toolContext),
+			/^Error: --autonomy se retiró en 6\.0\.0: usá mode \(ask, pr o pr-reviewed\)$/,
+			String(autonomy),
+		);
+	}
+	await assert.rejects(
+		tool.execute("launch-both", { target: "#14", mode: "pr", autonomy: "A2" }, undefined, undefined, toolContext),
+		/--autonomy se retiró en 6\.0\.0/,
+	);
+	assert.equal(resolverCalls.length, 4, "un mode inválido o un autonomy retirado no llegan al resolver");
 });
