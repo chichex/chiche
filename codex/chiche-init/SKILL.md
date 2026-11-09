@@ -444,7 +444,7 @@ La línea `Chiche-Tracking` es el marker canónico de tracking (contrato `docs/c
 ```
 <!-- autonomy-contract:end -->
 
-**Ensayo de la stop list.** Con el archivo escrito, correr el comando canónico de «`## Autonomy`» (arriba, «Ensayo de la stop list») sobre el archivo ya escrito; una fila `FAILED` conserva su `Pattern`, recibe el prefijo `FAILED (<motivo>): ` al frente de su `Reason` (idempotente: si ya lo tiene, se reemplaza y no se duplica) y se lista en `## Gaps` para que el humano la corrija. Ese prefijo es, junto con las columnas `Rehearsed` y `Umbral`, la excepción al verbatim de `## Autonomy` en `--update`.
+**Ensayo de la stop list.** Con el archivo escrito, correr el comando canónico de «`## Autonomy`» (arriba, «Ensayo de la stop list») sobre el archivo ya escrito; una fila `FAILED` conserva su `Pattern`, recibe el prefijo `FAILED (<motivo>): ` al frente de su `Reason` (idempotente: si ya lo tiene, se reemplaza y no se duplica) y se lista en `## Gaps` para que el humano la corrija. Ese prefijo es, junto con la columna `Umbral`, la excepción al verbatim de `## Autonomy` en `--update`.
 
 En `--update`: regenerar todo salvo `## Decisiones humanas`, `## Politicas de generacion` (las políticas solo cambian si el usuario eligió `Revisar` en Fase 3.5), `## Autonomy` (preservar verbatim, salvo el prefijo `FAILED` del ensayo de la stop list y la columna `Umbral` que agrega la fila `Umbrales de confianza`) y un `## Limites` sin migrar, que se preserva verbatim hasta que la fila `Stop list` lo migre; y los `[NEEDS-INPUT]` aún sin respuesta (mantenerlos, no duplicarlos).
 

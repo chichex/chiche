@@ -814,6 +814,7 @@ test("#130 CA-2: ningún chiche-init ensaya niveles: sin sección, sin pregunta 
 			["el host del ensayo", new RegExp(escapeRegExp(RETIRED_HOST))],
 			["la regla de ensayar toda fila ≥ A2", /toda fila ≥ A2[^\n]*se ensaya/],
 			["la regla «sin ensayo rige supervised»", /sin ensayo rige `supervised`/],
+			["`Rehearsed` entre las excepciones al verbatim de `--update`", /columnas `Rehearsed`/],
 		] as const) {
 			if (pattern.test(markdown)) problems.push(`${harness}/chiche-init: sigue ${label}`);
 		}
