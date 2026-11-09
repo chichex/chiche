@@ -1150,49 +1150,103 @@ test("#84 CA-10: grill_session pause y finalize escriben el handoff en <git-comm
 	assert.equal(gitStatus(linked), "", "worktree linkeado limpio después de finalize");
 });
 
-test("issue #102 CA-9: grill_session finalize con continueWithSpec y autonomy propaga --autonomy <código> a chiche-spec, y rechaza un nivel inválido", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+// Issue #130, CA-25: los args con que se encola chiche-spec son exactamente los que siguen al bloque del skill.
+function queuedSpecArgs(content: string): string {
+	const marker = "</skill>\n\n";
+	const at = content.lastIndexOf(marker);
+	assert.notEqual(at, -1, content.slice(-160));
+	return content.slice(at + marker.length);
+}
+
+// Issue #130, CA-25 (antes #102 CA-9): al encadenar la spec, el grill propaga la confianza que recibió, no un nivel.
+test("issue #130 CA-25: grill_session finalize con continueWithSpec y confidence propaga --confidence <n> a chiche-spec, rechaza lo que no es un entero de 0 a 100 y rechaza autonomy con el diagnóstico de retiro", { skip: !PI_PACKAGE_ROOT }, async (t) => {
 	const tool = tools.get("grill_session");
 	assert.ok(tool);
-	const { base, main } = repoWithLinkedWorktree("continue-spec-autonomy");
+	const properties = (tool.parameters as { properties: Record<string, Record<string, unknown>> }).properties;
+	assert.equal(properties.confidence?.type, "integer");
+	assert.equal(properties.confidence?.minimum, 0);
+	assert.equal(properties.confidence?.maximum, 100);
+	assert.equal(properties.autonomy, undefined, "el parámetro del dial por niveles se retiró del schema");
+	const { base, main } = repoWithLinkedWorktree("continue-spec-confidence");
 	t.after(() => rmSync(base, { recursive: true, force: true }));
 	const created = await tool.execute(
-		"create-continue-autonomy",
-		{ action: "create", topic: "Continuar a spec en A2", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		"create-continue-confidence",
+		{ action: "create", topic: "Continuar a spec con confianza 80", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
 		undefined,
 		undefined,
 		{ cwd: main },
 	);
 	const id = created.details.snapshot.id;
 	t.after(() => removeStoredSnapshot(id));
-	await tool.execute("configure-continue-autonomy", { action: "configure", sessionId: id, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
-	await assert.rejects(
-		tool.execute("configure-autonomy-invalid", { action: "configure", sessionId: id, autonomy: "A2" }, undefined, undefined, { cwd: main }),
-		/autonomy is valid only for finalize/,
-	);
-	// Review #114-10: sin continueWithSpec no hay a quién propagar el nivel; se rechaza en vez de ignorarse en silencio.
-	await assert.rejects(
-		tool.execute("finalize-autonomy-sin-continue", { action: "finalize", sessionId: id, autonomy: "A2", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
-		/autonomy requires continueWithSpec/,
-	);
-	await assert.rejects(
-		tool.execute("finalize-autonomy-a4", { action: "finalize", sessionId: id, continueWithSpec: true, autonomy: "A4", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
-		/--autonomy A4: no soportado todavía \(v1 honra A1–A3\)/,
-	);
-
+	await tool.execute("configure-continue-confidence", { action: "configure", sessionId: id, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
 	sentMessages = [];
+	await assert.rejects(
+		tool.execute("configure-confidence-invalid", { action: "configure", sessionId: id, confidence: 80 }, undefined, undefined, { cwd: main }),
+		/confidence is valid only for finalize/,
+	);
+	// Review #114-10: sin continueWithSpec no hay a quién propagar la confianza; se rechaza en vez de ignorarse en silencio.
+	await assert.rejects(
+		tool.execute("finalize-confidence-sin-continue", { action: "finalize", sessionId: id, confidence: 80, handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
+		/confidence requires continueWithSpec/,
+	);
+	for (const confidence of [101, -1, 7.5, "abc", "A2"]) {
+		await assert.rejects(
+			tool.execute("finalize-confidence-invalid", { action: "finalize", sessionId: id, continueWithSpec: true, confidence, handoffMarkdown: "# Grill\n\n## Handoff\nx\n" }, undefined, undefined, { cwd: main }),
+			new RegExp(`^Error: --confidence ${String(confidence).replace(".", "\\.")}: valor inválido; válidos: un entero de 0 a 100$`),
+			String(confidence),
+		);
+	}
+	// El parámetro del dial por niveles se retiró: no se traduce a una confianza ni se ignora, en ninguna acción.
+	for (const params of [
+		{ action: "finalize", sessionId: id, continueWithSpec: true, autonomy: "plan-approved", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" },
+		{ action: "finalize", sessionId: id, continueWithSpec: true, autonomy: "A3", confidence: 80, handoffMarkdown: "# Grill\n\n## Handoff\nx\n" },
+		{ action: "finalize", sessionId: id, autonomy: "A2", handoffMarkdown: "# Grill\n\n## Handoff\nx\n" },
+		{ action: "configure", sessionId: id, autonomy: "A2" },
+	]) {
+		await assert.rejects(
+			tool.execute("autonomy-retired", params, undefined, undefined, { cwd: main }),
+			/^Error: --autonomy se retiró en 6\.0\.0: usá confidence \(un entero de 0 a 100\)$/,
+			JSON.stringify(params),
+		);
+	}
+	assert.equal(sentMessages.length, 0, "ningún rechazo encola la spec");
+
 	await tool.execute(
-		"finalize-continue-autonomy",
-		{ action: "finalize", sessionId: id, continueWithSpec: true, autonomy: "plan-approved", handoffMarkdown: "# Grill — Continuar a spec en A2\n\n## Handoff\nListo.\n" },
+		"finalize-continue-confidence",
+		{ action: "finalize", sessionId: id, continueWithSpec: true, confidence: 80, handoffMarkdown: "# Grill — Continuar a spec con confianza 80\n\n## Handoff\nListo.\n" },
 		undefined,
 		undefined,
 		{ cwd: main },
 	);
 	assert.equal(sentMessages.length, 1);
-	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(id)} --autonomy A2`), sentMessages[0]!.content.slice(-120));
+	assert.equal(queuedSpecArgs(sentMessages[0]!.content), `--from-grill ${JSON.stringify(id)} --confidence 80`);
 	assertQueuedChicheSpec(sentMessages[0]!.content);
+
+	// `0` es una confianza válida (no pregunta nada) y no se pierde por ser falsy.
+	const zero = await tool.execute(
+		"create-continue-confidence-zero",
+		{ action: "create", topic: "Continuar a spec con confianza 0", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const zeroId = zero.details.snapshot.id;
+	t.after(() => removeStoredSnapshot(zeroId));
+	await tool.execute("configure-continue-confidence-zero", { action: "configure", sessionId: zeroId, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
+	sentMessages = [];
+	await tool.execute(
+		"finalize-continue-confidence-zero",
+		{ action: "finalize", sessionId: zeroId, continueWithSpec: true, confidence: 0, handoffMarkdown: "# Grill — Confianza 0\n\n## Handoff\nListo.\n" },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	assert.equal(sentMessages.length, 1);
+	assert.equal(queuedSpecArgs(sentMessages[0]!.content), `--from-grill ${JSON.stringify(zeroId)} --confidence 0`);
 });
 
-test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"pr\" propaga --autonomy A3 --until pr a chiche-spec sea cual sea el nivel del grill, y rechaza otro valor o un finalize sin continueWithSpec", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+// Issue #130, CA-25 (antes #119 CA-12): la cadena no toca la confianza ni la posición del run; `until: "pr"` viaja tal cual.
+test("issue #130 CA-25: grill_session finalize con continueWithSpec y until: \"pr\" materializa chiche-spec --from-grill <sessionId> --until pr sin forzar nada, más --confidence <n> si vino, y rechaza otro valor o un finalize sin continueWithSpec", { skip: !PI_PACKAGE_ROOT }, async (t) => {
 	const tool = tools.get("grill_session");
 	assert.ok(tool);
 	const { base, main } = repoWithLinkedWorktree("continue-spec-until");
@@ -1222,22 +1276,23 @@ test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"p
 	sentMessages = [];
 	const finalized = await tool.execute(
 		"finalize-continue-until",
-		{ action: "finalize", sessionId: id, continueWithSpec: true, until: "pr", autonomy: "plan-approved", handoffMarkdown: "# Grill — Continuar hasta el PR\n\n## Handoff\nListo.\n" },
+		{ action: "finalize", sessionId: id, continueWithSpec: true, until: "pr", confidence: 100, handoffMarkdown: "# Grill — Continuar hasta el PR\n\n## Handoff\nListo.\n" },
 		undefined,
 		undefined,
 		{ cwd: main },
 	);
 	assert.equal(sentMessages.length, 1);
-	// El grill corrió en A2 y aun así la spec recibe A3: --until pr manda sobre el nivel del grill (#119 CA-12).
-	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(id)} --autonomy A3 --until pr`), sentMessages[0]!.content.slice(-120));
+	// El grill corrió con confianza 100 y la spec recibe esa misma confianza: --until pr no la baja ni la reemplaza.
+	assert.equal(queuedSpecArgs(sentMessages[0]!.content), `--from-grill ${JSON.stringify(id)} --until pr --confidence 100`);
 	assertQueuedChicheSpec(sentMessages[0]!.content);
-	// Review #124-6: el resultado del finalize dice que el nivel recibido se reemplazó por A3.
+	// El resultado del finalize ya no habla de niveles ni de reemplazos: no hay nada que reemplazar.
 	const finalizedText = finalized.content.map((item) => ("text" in item ? item.text : "")).join("\n");
-	assert.match(finalizedText, /--until pr: chained with --autonomy A3 \(grill level A2 replaced\)/, finalizedText);
-	// Review #124-6: `until` sin `autonomy` es el caso común desde pi/grill sin --autonomy: la spec recibe A3 igual.
+	assert.match(finalizedText, /Next stage: canonical chiche-spec queued in this session\./, finalizedText);
+	assert.doesNotMatch(finalizedText, /autonomy|A3|replaced|level/, finalizedText);
+	// `until` sin `confidence` es el caso común desde pi/grill sin --confidence: la spec recibe solo --until pr.
 	const plain = await tool.execute(
 		"create-continue-until-plain",
-		{ action: "create", topic: "Continuar hasta el PR sin nivel", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		{ action: "create", topic: "Continuar hasta el PR sin confianza", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
 		undefined,
 		undefined,
 		{ cwd: main },
@@ -1248,14 +1303,14 @@ test("issue #119 CA-12: grill_session finalize con continueWithSpec y until: \"p
 	sentMessages = [];
 	const plainFinalized = await tool.execute(
 		"finalize-continue-until-plain",
-		{ action: "finalize", sessionId: plainId, continueWithSpec: true, until: "pr", handoffMarkdown: "# Grill — Sin nivel\n\n## Handoff\nListo.\n" },
+		{ action: "finalize", sessionId: plainId, continueWithSpec: true, until: "pr", handoffMarkdown: "# Grill — Sin confianza\n\n## Handoff\nListo.\n" },
 		undefined,
 		undefined,
 		{ cwd: main },
 	);
 	assert.equal(sentMessages.length, 1);
-	assert.ok(sentMessages[0]!.content.endsWith(`--from-grill ${JSON.stringify(plainId)} --autonomy A3 --until pr`), sentMessages[0]!.content.slice(-120));
-	assert.match(plainFinalized.content.map((item) => ("text" in item ? item.text : "")).join("\n"), /grill level unset replaced/);
+	assert.equal(queuedSpecArgs(sentMessages[0]!.content), `--from-grill ${JSON.stringify(plainId)} --until pr`);
+	assert.doesNotMatch(plainFinalized.content.map((item) => ("text" in item ? item.text : "")).join("\n"), /autonomy|A3|replaced|level/);
 });
 
 test("issue #103 S11: grill_session finalize con continueWithSpec encola chiche-spec --from-grill en la misma sesión", { skip: !PI_PACKAGE_ROOT }, async (t) => {

@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Markdown, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type AutonomyCode, parseAutonomyLevel, withAutonomy } from "../workflow-orchestrator/autonomy.ts";
+import { parseConfidence, retiredAutonomyMessage, withFlag } from "../workflow-orchestrator/autonomy.ts";
 import { menuItems, selectMenu, type MenuItem } from "../lib/menu.ts";
 import {
 	artifactReadDirs,
@@ -169,8 +169,8 @@ const GrillSessionParams = Type.Object({
 	summary: Type.Optional(Type.String()),
 	handoffMarkdown: Type.Optional(Type.String({ description: "Required for finalize" })),
 	continueWithSpec: Type.Optional(Type.Boolean({ description: "After finalize, materialize chiche-spec --from-grill in this session" })),
-	autonomy: Type.Optional(Type.String({ description: "Autonomy level received by this grill (A1-A3 or its name); with continueWithSpec it is propagated as --autonomy <code>, unless until replaces it by A3" })),
-	until: Type.Optional(Type.String({ description: "With continueWithSpec, \"pr\" chains chiche-spec with --autonomy A3 --until pr whatever the grill level was (issue #119, CA-12)" })),
+	confidence: Type.Optional(Type.Integer({ minimum: 0, maximum: 100, description: "Confidence this grill received with --confidence (an integer from 0 to 100); with continueWithSpec it is propagated as --confidence <n>. Omit it when the grill ran without the flag" })),
+	until: Type.Optional(Type.String({ description: "With continueWithSpec, \"pr\" chains chiche-spec with --until pr; it does not change the confidence nor the run mode (issue #130, CA-25)" })),
 });
 
 const SpecPublicationDestinationParams = Type.Object({
@@ -1479,24 +1479,25 @@ export default function grillTools(pi: ExtensionAPI) {
 			if (params.continueWithSpec && params.action !== "finalize") {
 				throw new Error("continueWithSpec is valid only for finalize");
 			}
-			// Issue #102, CA-9: grill propaga --autonomy a chiche-spec al encadenar.
-			let continuationAutonomy: AutonomyCode | undefined;
-			if (params.autonomy !== undefined) {
-				if (params.action !== "finalize") throw new Error("autonomy is valid only for finalize");
-				if (!params.continueWithSpec) throw new Error("autonomy requires continueWithSpec");
-				const parsedAutonomy = parseAutonomyLevel(params.autonomy);
-				if (!parsedAutonomy.ok) throw new Error(parsedAutonomy.message);
-				continuationAutonomy = parsedAutonomy.code;
+			// Issue #130, CA-25: el parámetro del dial por niveles se retiró en 6.0.0; se rechaza en vez de ignorarlo.
+			if (Object.hasOwn(params, "autonomy")) throw new Error(retiredAutonomyMessage("usá confidence (un entero de 0 a 100)"));
+			// Issue #130, CA-25: al encadenar, grill propaga a chiche-spec la confianza que recibió por flag.
+			let continuationConfidence: number | undefined;
+			if (params.confidence !== undefined) {
+				if (params.action !== "finalize") throw new Error("confidence is valid only for finalize");
+				if (!params.continueWithSpec) throw new Error("confidence requires continueWithSpec");
+				const parsedConfidence = parseConfidence(params.confidence);
+				if (!parsedConfidence.ok) throw new Error(parsedConfidence.message);
+				continuationConfidence = parsedConfidence.confidence;
 			}
-			// Issue #119, CA-12: `--until pr` encadena la spec en A3 sea cual sea el nivel del grill; la spec aprueba y lanza el run.
+			// Issue #119, CA-12 e issue #130, CA-25: `--until pr` encadena la spec, que aprueba y lanza el run; la cadena
+			// no toca la confianza ni la posición del run.
 			let continuationUntil: "pr" | undefined;
-			const receivedAutonomy = continuationAutonomy;
 			if (params.until !== undefined) {
 				if (params.action !== "finalize") throw new Error("until is valid only for finalize");
 				if (!params.continueWithSpec) throw new Error("until requires continueWithSpec");
 				if (params.until !== "pr") throw new Error(`--until ${params.until}: valor inválido; válido: pr`);
 				continuationUntil = "pr";
-				continuationAutonomy = "A3";
 			}
 			if (params.action === "create") {
 				if (!params.topic?.trim()) throw new Error("topic is required for create");
@@ -1630,13 +1631,13 @@ export default function grillTools(pi: ExtensionAPI) {
 					? await continueWithMaterializedSkill(
 						pi,
 						"chiche-spec",
-						`${withAutonomy(`--from-grill ${JSON.stringify(snapshot.id)}`, continuationAutonomy)}${continuationUntil ? ` --until ${continuationUntil}` : ""}`,
+						withFlag(withFlag(`--from-grill ${JSON.stringify(snapshot.id)}`, "--until", continuationUntil), "--confidence", continuationConfidence),
 						{ deliverAs: "followUp" },
 					)
 					: undefined;
 				const continuationNote = continuation
 					? continuation.ok
-						? `\nNext stage: canonical chiche-spec queued in this session.${continuationUntil ? ` --until pr: chained with --autonomy A3 (grill level ${receivedAutonomy ?? "unset"} replaced).` : ""}`
+						? "\nNext stage: canonical chiche-spec queued in this session."
 						: `\nNext stage could not be materialized: ${continuation.message}`
 					: "";
 				return {
