@@ -2108,3 +2108,68 @@ test("#93 CA-6: con el append roto, persist_sdd_spec devuelve el mismo resultado
 	assert.equal(gitStatus(main), "", "checkout principal limpio");
 	assert.equal(gitStatus(linked), "", "worktree linkeado limpio");
 });
+
+// ---------------------------------------------------------------------------
+// Issue #134, CA-13: la carpeta declarada en ## Publicacion recibe las specs locales y los handoffs.
+
+function contractWithFolder(folder: string): string {
+	return ["# Contrato de autonomia — demo", "<!-- Chiche-Tracking: version=2; type=project; generated-at=2026-11-09 -->", "", "## Comandos", "| Accion | Comando | cwd | Estado | Duracion | Notas |", "|---|---|---|---|---|---|", "", "## Publicacion", "| Clave | Valor |", "|---|---|", "| specs | auto |", `| carpeta | ${folder} |`, "", "## Verificacion autonoma", "1. node --test", ""].join("\n");
+}
+
+function commitContractWithFolder(main: string, folder: string): void {
+	mkdirSync(join(main, ".chiche"), { recursive: true });
+	writeFileSync(join(main, ".chiche", "project.md"), contractWithFolder(folder));
+	git(main, "add", ".chiche/project.md");
+	git(main, "commit", "-q", "-m", "contrato con carpeta");
+}
+
+test("#134 CA-13: con una carpeta declarada, persist_sdd_spec escribe la spec local en <carpeta>/specs, acepta un .md directo bajo ella y una ruta lógica nueva también va ahí", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const tool = tools.get("persist_sdd_spec");
+	assert.ok(tool);
+	const { base, main, common } = repoWithLinkedWorktree("declared-spec");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	const persist = (path: string, slug: string) => tool.execute(
+		`persist-declared-${slug}`,
+		{
+			mode: "interactive",
+			repository: "local/repo",
+			projectPath: main,
+			documents: [{ id: "successor", role: "successor", markdown: canonicalSpec(`Spec ${slug}`), destinations: [{ kind: "local", path }] }],
+		},
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const direct = await persist("docs/sdd/specs/directa.md", "directa");
+	assert.equal(direct.details.ok, true, JSON.stringify(direct.details.diagnostics));
+	assert.equal(readFileSync(join(main, "docs", "sdd", "specs", "directa.md"), "utf8"), canonicalSpec("Spec directa"));
+	const logical = await persist(".chiche/specs/logica.md", "logica");
+	assert.equal(logical.details.ok, true, JSON.stringify(logical.details.diagnostics));
+	assert.equal(readFileSync(join(main, "docs", "sdd", "specs", "logica.md"), "utf8"), canonicalSpec("Spec logica"), "lo nuevo va a la carpeta declarada");
+	assert.equal(existsSync(join(common, "chiche", "specs", "logica.md")), false, "nada nuevo en <git-common-dir>/chiche/specs");
+	await assert.rejects(persist("docs/otra/specs/x.md", "otra"), /Local spec destination must be one Markdown file directly under/, "una carpeta no declarada se rechaza");
+	assert.match(gitStatus(main), /\?\? docs\/sdd\/specs\/directa\.md/, "la carpeta declarada está en el árbol: git status la muestra, a elección del usuario");
+});
+
+test("#134 CA-13: con una carpeta declarada, grill_session pause escribe el handoff en <carpeta>/grills", { skip: !PI_PACKAGE_ROOT }, async (t) => {
+	const tool = tools.get("grill_session");
+	assert.ok(tool);
+	const { base, main, common } = repoWithLinkedWorktree("declared-grill");
+	t.after(() => rmSync(base, { recursive: true, force: true }));
+	commitContractWithFolder(main, "docs/sdd/");
+	const created = await tool.execute(
+		"create-declared-handoff",
+		{ action: "create", topic: "Carpeta declarada", projectPath: main, estimate: { min: 1, likely: 2, max: 3 } },
+		undefined,
+		undefined,
+		{ cwd: main },
+	);
+	const id = created.details.snapshot.id;
+	t.after(() => removeStoredSnapshot(id));
+	await tool.execute("configure-declared-handoff", { action: "configure", sessionId: id, interviewMode: "adaptive" }, undefined, undefined, { cwd: main });
+	const paused = await tool.execute("pause-declared-handoff", { action: "pause", sessionId: id, summary: "Pausa" }, undefined, undefined, { cwd: main });
+	assert.equal(dirname(paused.details.repoHandoffPath), join(main, "docs", "sdd", "grills"));
+	assert.match(readFileSync(paused.details.repoHandoffPath, "utf8"), /state=paused/);
+	assert.equal(existsSync(join(common, "chiche", "grills")), false, "nada en <git-common-dir>/chiche/grills");
+});

@@ -9,11 +9,14 @@
 // identifica por su nombre: ante el mismo nombre gana el trackeado sobre el
 // local y chiche sobre sdd. Los lugares `sdd` son solo de lectura, hasta que
 // una spec posterior retire la doble lectura. Fuera de un repo git no hay
-// common-dir y el lugar local de cada marca es el trackeado.
+// common-dir y el lugar local de cada marca es el trackeado. Desde el issue
+// #134 (CA-13), si `## Publicacion` del contrato de la raíz operativa declara
+// una `carpeta` distinta del default, `<carpeta>/<kind>` se lee primero y
+// recibe lo nuevo; con la carpeta default nada cambia.
 
 import { execFile } from "node:child_process";
 import type { Stats } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export type ArtifactKind = "grills" | "specs";
@@ -29,6 +32,12 @@ export interface ArtifactDirs {
 	legacyTracked: string;
 	/** `<git-common-dir>/sdd/<kind>`, solo lectura. */
 	legacyLocal: string;
+	/**
+	 * `<carpeta>/<kind>` cuando `## Publicacion` del contrato declara una carpeta
+	 * distinta del default (issue #134, CA-13): se lee primero y recibe lo nuevo
+	 * (`artifactWriteDir`); los cuatro lugares de siempre se siguen leyendo.
+	 */
+	declared?: string;
 }
 
 export interface ArtifactReadDir {
@@ -79,22 +88,87 @@ export function localArtifactDir(commonDir: string, kind: ArtifactKind, brand: A
 	return join(resolve(commonDir), brand, kind);
 }
 
-export async function resolveArtifactDirs(root: string, kind: ArtifactKind, runGit: GitRunner = defaultGitRunner): Promise<ArtifactDirs> {
-	const dirs = trackedArtifactDirs(root, kind);
-	const commonDir = await resolveGitCommonDir(root, runGit);
-	return commonDir
-		? { ...dirs, local: localArtifactDir(commonDir, kind), legacyLocal: localArtifactDir(commonDir, kind, "sdd") }
-		: dirs;
+export type ContractReader = (path: string) => Promise<string>;
+const defaultContractReader: ContractReader = (path) => readFile(path, "utf8");
+const PUBLICATION_DEFAULT_FOLDER = /^<git-common-dir>\/chiche\/?$/;
+
+/**
+ * La `carpeta` declarada en `## Publicacion` del contrato (issue #134, CA-13),
+ * con las mismas reglas que el comando canónico `publication-resolve`: una ruta
+ * relativa a la raíz, normalizada (sin `./` inicial ni `/` final; `.` es la
+ * raíz misma), o `null` con el literal default `<git-common-dir>/chiche/`, sin
+ * la sección o la fila, o con un valor inválido (absoluta, otro placeholder o
+ * un segmento `..`).
+ */
+export function publicationFolder(contract: string): string | null {
+	const lines = contract.replace(/\r/g, "").split("\n");
+	const start = lines.indexOf("## Publicacion");
+	if (start === -1) return null;
+	let value = "";
+	for (const line of lines.slice(start + 1)) {
+		if (line.startsWith("## ")) break;
+		const match = /^\|\s*carpeta\s*\|([^|]*)\|/.exec(line);
+		if (match) {
+			value = (match[1] ?? "").trim();
+			break;
+		}
+	}
+	if (!value || PUBLICATION_DEFAULT_FOLDER.test(value)) return null;
+	if (value.startsWith("/") || value.startsWith("<")) return null;
+	if (`/${value}/`.includes("/../")) return null;
+	const relativePath = value.replace(/^\.\//, "").replace(/\/+$/, "");
+	return relativePath === "" ? "." : relativePath;
+}
+
+/** `<carpeta>/<kind>` de la carpeta declarada en `contract`, o `undefined` con la default. */
+export function declaredArtifactDir(root: string, kind: ArtifactKind, contract: string): string | undefined {
+	const folder = publicationFolder(contract);
+	return folder === null ? undefined : join(resolve(root), folder, kind);
+}
+
+/** El contrato de la raíz operativa: `.chiche/project.md`, con fallback a `.sdd/project.md`; vacío si no hay o no se puede leer. */
+async function readContractText(root: string, readContract: ContractReader): Promise<string> {
+	for (const directory of [TRACKED_DIR.chiche, TRACKED_DIR.sdd]) {
+		try {
+			return await readContract(join(resolve(root), directory, "project.md"));
+		} catch {
+			// el siguiente lugar
+		}
+	}
+	return "";
 }
 
 /**
- * Los lugares de lectura en orden de precedencia, sin repetir un mismo
- * directorio. Un objeto con la forma vieja `{ tracked, local }` (el
+ * Los lugares de `kind` para `root`. `readContract` es el seam que lee el
+ * contrato de la raíz operativa (issue #134, CA-13): con una `carpeta`
+ * declarada, `declared` es `<carpeta>/<kind>` y `local` sigue siendo el
+ * common-dir, que se sigue leyendo.
+ */
+export async function resolveArtifactDirs(root: string, kind: ArtifactKind, runGit: GitRunner = defaultGitRunner, readContract: ContractReader = defaultContractReader): Promise<ArtifactDirs> {
+	const dirs = trackedArtifactDirs(root, kind);
+	const commonDir = await resolveGitCommonDir(root, runGit);
+	const base = commonDir
+		? { ...dirs, local: localArtifactDir(commonDir, kind), legacyLocal: localArtifactDir(commonDir, kind, "sdd") }
+		: dirs;
+	const declared = declaredArtifactDir(root, kind, await readContractText(root, readContract));
+	return declared ? { ...base, declared } : base;
+}
+
+/** Donde se escribe un artefacto nuevo: la carpeta declarada si la hay, y si no `<git-common-dir>/chiche/<kind>`. */
+export function artifactWriteDir(dirs: ArtifactDirs): string {
+	return typeof dirs.declared === "string" ? dirs.declared : dirs.local;
+}
+
+/**
+ * Los lugares de lectura en orden de precedencia (la carpeta declarada en
+ * `## Publicacion` primero, si la hay), sin repetir un mismo directorio. Un objeto con la forma vieja `{ tracked, local }` (el
  * `SddArtifactDirs` de antes del issue #103) se acepta: los lugares que faltan
  * se saltean.
  */
 export function artifactReadDirs(dirs: ArtifactDirs): ArtifactReadDir[] {
 	const ordered: ArtifactReadDir[] = [
+		// Issue #134, CA-13: la carpeta declarada va primera; vive en el árbol, así que es `tracked`.
+		...(typeof dirs.declared === "string" ? [{ path: dirs.declared, location: "tracked" as const, brand: "chiche" as const }] : []),
 		{ path: dirs.tracked, location: "tracked", brand: "chiche" },
 		{ path: dirs.legacyTracked, location: "tracked", brand: "sdd" },
 		{ path: dirs.local, location: "local", brand: "chiche" },
@@ -139,8 +213,8 @@ export async function listArtifacts(dirs: ArtifactDirs): Promise<ArtifactEntry[]
 
 /**
  * Ruta de un artefacto por nombre: el archivo existente con la misma
- * precedencia que `listArtifacts`, o `<git-common-dir>/chiche/<kind>/<name>`
- * si todavía no existe. Ejemplo: `x.md` solo en `.sdd/specs/` resuelve ahí y
+ * precedencia que `listArtifacts`, o `artifactWriteDir(dirs)/<name>` (la
+ * carpeta declarada, o `<git-common-dir>/chiche/<kind>`) si todavía no existe. Ejemplo: `x.md` solo en `.sdd/specs/` resuelve ahí y
  * se actualiza en su lugar; `nueva.md` resuelve al lugar local de chiche.
  * `statPort` es el seam para tests y para quien ya inyecta su propio `stat`.
  */
@@ -149,7 +223,7 @@ export async function resolveArtifactName(dirs: ArtifactDirs, name: string, stat
 		const path = join(directory.path, name);
 		if (await statPort(path).then((entry) => entry.isFile(), () => false)) return path;
 	}
-	return join(dirs.local, name);
+	return join(artifactWriteDir(dirs), name);
 }
 
 /** Worktrees del repo de `root` según `git worktree list --porcelain`; el primero es el principal. */

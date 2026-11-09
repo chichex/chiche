@@ -16,6 +16,7 @@ import { parseConfidence, retiredAutonomyMessage, withFlag } from "../workflow-o
 import { menuItems, selectMenu, type MenuItem } from "../lib/menu.ts";
 import {
 	artifactReadDirs,
+	artifactWriteDir,
 	isArtifactPath,
 	listArtifacts,
 	resolveArtifactDirs,
@@ -251,20 +252,24 @@ type RepoHandoffOutcome = { path: string; diagnostics: string[]; content: string
 async function writeRepoHandoff(snapshot: GrillSnapshot): Promise<RepoHandoffOutcome> {
 	try {
 		const dirs = await resolveArtifactDirs(snapshot.projectPath, "grills");
-		await mkdir(dirs.local, { recursive: true });
+		const writeDir = artifactWriteDir(dirs);
+		await mkdir(writeDir, { recursive: true });
 		const names = handoffFileNames(snapshot);
 		// El primario existente decide el nombre: el local (chiche y después sdd) y,
 		// si no hay, el del árbol. Si es de otra sesión, planGrillHandoff usa el
 		// fallback; si es de esta, la revisión local lo reemplaza en el inventario
 		// (readHandoffCandidates).
-		const readOrder = artifactReadDirs(dirs).sort((left, right) => Number(left.location === "tracked") - Number(right.location === "tracked"));
+		// Issue #134, CA-13: con una carpeta declarada en ## Publicacion el destino es esa carpeta y se mira primero.
+		const destination = resolve(writeDir);
+		const rank = (entry: { path: string; location: string }) => (resolve(entry.path) === destination ? 0 : entry.location === "local" ? 1 : 2);
+		const readOrder = artifactReadDirs(dirs).sort((left, right) => rank(left) - rank(right));
 		let existing: string | null = null;
 		for (const directory of readOrder) {
 			existing = await readFile(join(directory.path, names.primary), "utf8").catch(() => null);
 			if (existing !== null) break;
 		}
 		const plan = planGrillHandoff(snapshot, existing);
-		const path = join(dirs.local, plan.fileName);
+		const path = join(writeDir, plan.fileName);
 		await writeFileAtomic(path, plan.content);
 		return { path, diagnostics: plan.diagnostics, content: plan.content };
 	} catch (error) {
@@ -399,8 +404,9 @@ function isInside(parent: string, candidate: string): boolean {
 	return fromParent === "" || (!fromParent.startsWith("..") && !isAbsolute(fromParent));
 }
 
-// Destino local de una spec (spec #84, CA-11; issue #103, CA-1). Una ruta
-// relativa es la ruta lógica `.chiche/specs/<x>.md` o `.sdd/specs/<x>.md`: el
+// Destino local de una spec (spec #84, CA-11; issue #103, CA-1; issue #134,
+// CA-13). Una ruta relativa es la ruta lógica `.chiche/specs/<x>.md` o
+// `.sdd/specs/<x>.md`, o `<carpeta>/specs/<x>.md` con una carpeta declarada: el
 // nombre se resuelve con la precedencia de lectura (si ya existe en alguno de
 // los cuatro lugares, se actualiza en su lugar) y si no existe se escribe en
 // `<git-common-dir>/chiche/specs/`. Una ruta absoluta tiene que caer
@@ -411,7 +417,9 @@ async function confinedSpecPath(projectPath: string, dirs: ArtifactDirs, request
 	const refuse = () => new Error(`Local spec destination must be one Markdown file directly under ${artifactReadDirs(dirs).map((entry) => entry.path).join(", ")}`);
 	let candidate = resolve(isAbsolute(cleaned) ? cleaned : resolve(projectPath, cleaned));
 	if (!isAbsolute(cleaned)) {
-		if (dirname(candidate) !== resolve(dirs.tracked) && dirname(candidate) !== resolve(dirs.legacyTracked)) throw refuse();
+		// Issue #134, CA-13: un `.md` directo bajo la carpeta declarada en ## Publicacion también es una ruta válida.
+		const logicalDirs = [dirs.tracked, dirs.legacyTracked, ...(dirs.declared ? [dirs.declared] : [])].map((directory) => resolve(directory));
+		if (!logicalDirs.includes(dirname(candidate))) throw refuse();
 		if (!candidate.endsWith(".md")) throw refuse();
 		candidate = await resolveArtifactName(dirs, basename(candidate));
 	}
