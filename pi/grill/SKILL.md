@@ -6,7 +6,7 @@ compatibility: Requiere las tools ask_user_question, ask_user_questions, grill_s
 
 # Grill
 
-Desambiguá las decisiones materiales hasta alcanzar un entendimiento compartido, con la menor cantidad de interrupciones posible. El resultado es contexto confiable para escribir un spec hecho y derecho. **Nunca implementes el plan ni escribas el spec definitivo antes de finalizar el handoff.** Después de congelarlo, podés encadenar `chiche-spec` si el usuario elige esa acción.
+Desambiguá las decisiones materiales hasta alcanzar un entendimiento compartido, con la menor cantidad de interrupciones posible. El resultado es contexto confiable para escribir un spec hecho y derecho. **Nunca implementes el plan ni escribas el spec definitivo antes de finalizar el handoff.** Después de congelarlo, podés encadenar `chiche-spec` si el usuario elige esa acción o si la corrida trae `--until pr`.
 
 `grill` es el único entry point para entrevistas. Nunca escribe ni propone `CONTEXT.md`, glosarios ni ADRs: solo desambigua y produce el handoff.
 
@@ -15,14 +15,14 @@ Usá `ask_user_question` para una sola decisión, `ask_user_questions` para rond
 ## Argumentos Pi
 
 ```text
-/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--autonomy <level>] [--until pr]
+/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--confidence <n>] [--until pr]
 ```
 
 - `#NN` inicia el reconocimiento desde ese issue del repositorio actual.
 - `owner/repo#NN` o una URL canónica `https://github.com/owner/repo/issues/NN` pueden apuntar a otro proyecto. Si NO recibiste un envelope `workflow-launch`, invocá inmediatamente `launch_grill` usando sólo esa referencia calificada como target exacto y terminá el turno: la tool localiza un único checkout entre los proyectos conocidos por Pi, pide autorización y abre allí una sesión hija. No explores, no crees una sesión de grill y no interpretes la URL como path. Si la tool no está disponible, frená con el comando manual `/grill <target>`; no continúes en el cwd equivocado.
 - `--resume <sessionId>` viene de un selector o del orquestador: cargá directamente el snapshot autoritativo con `grill_session` (`action: "get"`), sin volver a abrir `select_grill_session`, y continuá en esta misma conversación.
-- `--autonomy <level>` — nivel de autonomía de esta corrida; manda sobre la fila `grill` de `## Autonomy` del contrato: `supervised` (A1) pregunta las decisiones de producto que quedan debajo del umbral y además la configuración, la frontera de bloque y el cierre; `plan-approved` (A2) pregunta solo lo que queda debajo del umbral; `unattended` (A3) no pregunta y aborta si el pedido es muy abierto. Al encadenar `/skill:chiche-spec` se le pasa el mismo flag. Ver «Niveles de autonomía», «Nivel efectivo» y «Tipo y confianza».
-- `--until pr` — hasta dónde llega la cadena: el cierre encadena la spec sin esperar la elección `Confirmar y crear spec SDD`: con A2 o A3 congela el handoff y encadena sin preguntar; con A1 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar (más ajustar y pausar), sin `Confirmar` a secas, para que el flag no se pierda en silencio. `/skill:chiche-spec --from-grill <sessionId>` recibe `--autonomy A3 --until pr`, sea cual sea el nivel con que corrió el grill, y la spec aprueba y lanza el run sin menú. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag existe solo en `grill` y `chiche-spec`: nunca llega a `chiche-run`.
+- `--confidence <n>` — confianza de esta corrida, un entero de 0 a 100; manda sobre la fila `grill` de `## Autonomy` del contrato. Las decisiones de producto con confianza `≤ <n>` se preguntan y las que la superan se asumen: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y además confirma cada paso (la configuración, la frontera de bloque y el cierre). Al encadenar `/skill:chiche-spec` se le pasa el mismo flag solo si esta corrida lo recibió. Ver «Controles de autonomía», «Controles efectivos» y «Tipo y confianza».
+- `--until pr` — hasta dónde llega la cadena: el cierre encadena la spec sin esperar la elección `Confirmar y crear spec SDD`: por debajo de 100 congela el handoff y encadena sin preguntar; con 100 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar (más ajustar y pausar), sin `Confirmar` a secas, para que el flag no se pierda en silencio. `/skill:chiche-spec --from-grill <sessionId>` recibe `--until pr`, más `--confidence <n>` solo si esta corrida lo recibió: `--until pr` no cambia por sí solo la confianza de la spec ni la posición del run, y la spec publica, aprueba y lanza el run. `--until` con cualquier otro valor aborta listando el único válido (`pr`). El flag existe solo en `grill` y `chiche-spec`: nunca llega a `chiche-run`.
 
 <!-- autonomy-controls:start -->
 **Controles de autonomía.** Son tres y cada uno hace una sola cosa. **Confianza** (`grill` y `chiche-spec`, flag `--confidence <n>`): un entero de 0 a 100 que dice qué se pregunta: `0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y confirma cada paso. **Posición del run** (`chiche-run`, flag `--mode <posición>`): dónde frena el run: `ask` frena ante dudas y ofrece el menú tras el PR; `pr` abre el PR, lanza el review y termina; `pr-reviewed` además corrige el feedback del review solo, hasta 2 rondas. **Cadena** (`grill` y `chiche-spec`, flag `--until pr`): con el flag, grill llama a la spec y la spec al run; sin el flag, cada etapa termina en lo suyo. Ningún control cambia a otro: la cadena no toca la confianza ni la posición. Sin flag rige lo que resuelve «Controles efectivos». `--confidence` o `--mode` sin valor (no hay token siguiente, o el siguiente empieza con `--`) aborta listando los valores válidos: un token que empieza con `--` nunca se lee como valor. `--autonomy` y los niveles con nombre se retiraron en 6.0.0: recibir `--autonomy` aborta antes de cualquier mutación con el diagnóstico literal `--autonomy se retiró en 6.0.0: <equivalente>`.
@@ -141,10 +141,10 @@ Validá que sea versión 1, exacto y serializable; que `kind=grill`; que `repo`,
 
 - Optimizá por **mínima interrupción**, no por máxima cantidad de preguntas. Un hueco en el pedido no es automáticamente una decisión para el usuario.
 - Clasificá cada punto abierto como hecho comprobable, supuesto de bajo riesgo o decisión material.
-- Marcá como `[ASSUMED NN %]` una decisión de producto cuya opción recomendada supere el umbral (confianza `> umbral grill`, ver «Tipo y confianza»): respaldada por el pedido, el código, convenciones del repo o un default seguro, barata y reversible. No la preguntes. Una decisión técnica no se asume ni se pregunta: va a `**Para la spec.**`.
-- Preguntá las decisiones de producto con confianza `≤ umbral grill`: típicamente las que cambian materialmente alcance o comportamiento observable, UX/API pública, datos/seguridad/privacidad, costo o efectos externos, compatibilidad o una migración irreversible, y las contradicciones reales o alternativas igual de plausibles con consecuencias relevantes; el umbral manda, no la lista.
+- Marcá como `[ASSUMED NN %]` una decisión de producto cuya opción recomendada supere la confianza de la etapa (confianza `> confianza grill`, ver «Tipo y confianza»): respaldada por el pedido, el código, convenciones del repo o un default seguro, barata y reversible. No la preguntes. Una decisión técnica no se asume ni se pregunta: va a `**Para la spec.**`.
+- Preguntá las decisiones de producto con confianza `≤ confianza grill`: típicamente las que cambian materialmente alcance o comportamiento observable, UX/API pública, datos/seguridad/privacidad, costo o efectos externos, compatibilidad o una migración irreversible, y las contradicciones reales o alternativas igual de plausibles con consecuencias relevantes; la confianza manda, no la lista.
 - No preguntes por detalles de implementación que el agente puede resolver responsablemente — nombres internos, ubicación de archivos, estructura menor de tests, copy no contractual o defaults convencionales — salvo que el usuario haya expresado una preferencia o tengan consecuencias materiales.
-- Nunca asumas en silencio: cada `[ASSUMED]` debe quedar visible con su evidencia en el mapa, persistido en el resumen y enumerado en el contrato final. El usuario puede corregirlo en cualquier momento.
+- Nunca asumas en silencio: cada `[ASSUMED]` debe quedar visible con su evidencia en el mapa, persistido en el resumen y enumerado en el contrato final. El usuario puede corregirlo en cualquier momento. Una decisión asumida por confianza (ver «Tipo y confianza») se persiste marcada `— asumida NN %` con su recomendada, nunca como si la hubiera respondido el usuario.
 - Elegí el `interviewMode` a partir del diagnóstico y configuralo sin abrir una pregunta de preferencias. Respetá un modo pedido explícitamente; preguntá por el modo solo ante instrucciones contradictorias o si el usuario pidió elegirlo.
 - En **Grillado pregunta a pregunta**, hacé exactamente una pregunta material por vez y dejá que cada respuesta moldee la siguiente. No prepares un cuestionario rígido completo.
 - En **Por rondas**, presentá juntas hasta 4 preguntas sobre decisiones materiales de la frontera de dependencias que ya estén desbloqueadas y sean realmente independientes. Recalculá la frontera recién cuando vuelva la ronda completa.
@@ -156,7 +156,7 @@ Validá que sea versión 1, exacto y serializable; que `kind=grill`; que `repo`,
 - Para cada pregunta ofrecé una respuesta recomendada y una justificación breve.
 - Habilitá siempre respuesta libre con `allowOther: true`.
 - Si un hecho se puede averiguar explorando el codebase, buscándolo en documentación local o ejecutando una comprobación segura, hacelo en vez de preguntarlo.
-- Las decisiones materiales pertenecen al usuario; las elecciones operativas de bajo impacto son responsabilidad del agente. Si el usuario pide un grill exhaustivo o sin supuestos, activá la política `explicit-only` (equivale a umbral 100: se pregunta toda decisión de producto), registrala en el `summary` y no apliques ninguna poda `[ASSUMED NN %]`: todo punto abierto sigue como decisión explícita. Esta regla prevalece sobre cualquier instrucción posterior de asumir o podar.
+- Las decisiones materiales pertenecen al usuario; las elecciones operativas de bajo impacto son responsabilidad del agente. Si el usuario pide un grill exhaustivo o sin supuestos, activá la política `explicit-only` (equivale a confianza `100`: se pregunta toda decisión de producto), registrala en el `summary` y no apliques ninguna poda `[ASSUMED NN %]`: todo punto abierto sigue como decisión explícita. Esta regla prevalece sobre cualquier instrucción posterior de asumir o podar.
 
 ## Retomar una entrevista
 
@@ -183,7 +183,7 @@ Antes de entrevistar:
 1. Explorá el codebase y resolvé todos los hechos comprobables relevantes. Los hechos los averigua el agente, nunca el usuario: si más adelante una pregunta de la frontera necesita un hecho del entorno todavía sin comprobar, se averigua sin frenar la ronda (ver **Modalidad B: Por rondas**).
 2. Buscá `CONTEXT-MAP.md`, los `CONTEXT.md` y `docs/adr/`; informá su existencia en el mapa. Leé los que sean relevantes para entender el vocabulario; nunca los modifiques.
 3. Separá explícitamente: hechos comprobados, instrucciones ya dadas por el usuario y elecciones todavía abiertas.
-4. Resolvé la política de supuestos antes de podar. Si el usuario pidió un grill exhaustivo o sin supuestos, usá `explicit-only`: no conviertas ningún punto en `[ASSUMED]` y tratá todas las elecciones abiertas como decisiones explícitas, también para la estimación. En otro caso usá `risk-pruned`, atada al umbral: convertí en `[ASSUMED NN %]` cada decisión de producto cuya recomendada supere `umbral grill` (respaldada, de bajo riesgo y reversible); una con confianza `≤ umbral grill` sigue explícita aunque sea barata de corregir.
+4. Resolvé la política de supuestos antes de podar. Si el usuario pidió un grill exhaustivo o sin supuestos, usá `explicit-only`: no conviertas ningún punto en `[ASSUMED]` y tratá todas las elecciones abiertas como decisiones explícitas, también para la estimación. En otro caso usá `risk-pruned`, atada a la confianza: convertí en `[ASSUMED NN %]` cada decisión de producto cuya recomendada supere `confianza grill` (respaldada, de bajo riesgo y reversible); una con confianza `≤ confianza grill` sigue explícita aunque sea barata de corregir.
 5. Construí el árbol con las decisiones que sigan explícitas después de aplicar la política y sus dependencias. En `risk-pruned`, no lo infles con detalles de implementación ni preferencias hipotéticas.
 6. Estimá preguntas mínimas, probables y máximas después de aplicar la política. La cifra operativa es la estimación probable y puede ser cero.
 7. Agrupá las preguntas explícitas por secciones coherentes —los bloques— y asigná una estimación a cada una.
@@ -207,7 +207,7 @@ Un bloque es una sección coherente del árbol de decisiones. La entrevista va p
 - **Orden.** El agente ordena y anuncia los bloques, sin preguntar cuál abordar primero. El usuario cambia el orden con la respuesta libre de la configuración o en cualquier momento.
 - **Dentro del bloque.** Se entrevista por rondas sobre la frontera o pregunta a pregunta, según la modalidad.
 - **Recorrido.** Una sesión recorre todos los bloques, uno tras otro.
-- **Frontera de bloque.** Al cerrar un bloque, el agente muestra un resumen corto de lo decidido, anuncia el siguiente y hace UNA pregunta con dos opciones: «Seguir con <bloque>» (recomendada) y «Cortar acá y seguir más tarde». Cortar es pausar, con la exportación de cuestionario disponible.
+- **Frontera de bloque.** Al cerrar un bloque, el agente muestra un resumen corto de lo decidido, anuncia el siguiente y hace UNA pregunta con dos opciones: «Seguir con <bloque>» (recomendada) y «Cortar acá y seguir más tarde». Cortar es pausar, con la exportación de cuestionario disponible. La pregunta existe solo con confianza `100` (ver «Tipo y confianza»): por debajo de 100 el agente muestra el resumen, anuncia el siguiente bloque y sigue sin preguntar.
 - **Último bloque.** Después del último bloque no hay frontera: se pasa al cierre.
 - **Handoff pausado.** Mientras la sesión está `paused`, cada decisión de `## Decisiones resueltas` va con el prefijo de su bloque (`<Bloque>: ...`, como `Diseño:`) y cada entrada de `## Ramas pendientes` lleva el encabezado de su bloque, para reconstruir los bloques al retomar.
 - **Conteo.** La pregunta de frontera de bloque, la configuración y la confirmación final no son preguntas de decisión y no entran en la estimación.
@@ -358,7 +358,7 @@ No dependas solamente del historial conversacional: el snapshot persistente debe
 - En `explicit-only`, mantené vacía la lista `[ASSUMED]` y no ejecutes ninguna instrucción de poda de las tres modalidades.
 - Como un supuesto no fue una pregunta, no fabriques una `interaction` ni consumas un checkpoint para persistirlo; el `summary` y el contrato son su fuente.
 - Si el usuario corrige un supuesto de forma inequívoca, aplicá la corrección, actualizá las ramas afectadas y no repreguntes. Si la corrección descubre una decisión material nueva, promovela al árbol.
-- La confirmación final acepta también todos los `[ASSUMED]` visibles; hasta entonces siguen siendo revisables.
+- Con confianza `100` no queda ningún `[ASSUMED]` (se pregunta todo) y la confirmación final aprueba las decisiones; por debajo de 100 no hay confirmación final: el handoff se congela con cada `[ASSUMED NN %]` marcado `— asumida NN %`, nunca como respondido por el usuario. Hasta el cierre siguen siendo revisables.
 
 ### Selección única y múltiple
 
@@ -445,9 +445,9 @@ Primero escribí en el chat el entendimiento compartido completo. Debe incluir:
 8. contexto recomendado para la sesión que escribirá el spec;
 9. el párrafo `**Para la spec.**` con las decisiones técnicas anotadas para la spec, o `ninguna`.
 
-Este texto es el contrato de handoff. Tiene que estar renderizado en el chat; no puede vivir solamente en una tool o archivo. La confirmación final aprueba tanto las decisiones como los `[ASSUMED]` enumerados, sin un gate separado por cada supuesto.
+Este texto es el contrato de handoff. Tiene que estar renderizado en el chat; no puede vivir solamente en una tool o archivo. No hay un gate separado por cada supuesto. Con confianza `0` no hay aborto por pedido abierto: el reconocimiento corre igual, todas las decisiones de producto quedan asumidas y el contrato las lista de menor a mayor confianza, para que lo más dudoso se vea primero.
 
-### Paso 2: confirmación autocontenida
+### Paso 2: confirmación autocontenida (solo con confianza `100`)
 
 Recién después del contrato visible, invocá `ask_user_question` con `grill: { sessionId, phase: "closure" }`, una pregunta autocontenida y estas acciones provisionales:
 
@@ -457,15 +457,17 @@ Recién después del contrato visible, invocá `ask_user_question` con `grill: {
 - **Pausar**: conserva el progreso sin finalizar.
 - **Exportar cuestionario**: escribe las decisiones pendientes o diferidas como cuestionario para un stakeholder sin agente y pausa la sesión hasta que vuelvan las respuestas (ver **Exportar cuestionario**).
 
-No incluyas acciones para implementar o construir. Con `--until pr`, **Confirmar entendimiento** no se ofrece: la única confirmación es **Confirmar y crear spec SDD**; con A2 o A3 no hay pregunta de cierre y el finalize lleva `continueWithSpec: true` y `until: "pr"` directo.
+No incluyas acciones para implementar o construir. Con `--until pr`, **Confirmar entendimiento** no se ofrece: la única confirmación es **Confirmar y crear spec SDD**.
+
+Por debajo de 100 este paso no existe: con el contrato ya visible, el handoff se congela sin preguntar, con lo decidido y lo asumido (Paso 3). Sin pregunta de cierre, con `--until pr` el finalize lleva `continueWithSpec: true` y `until: "pr"` directo.
 
 ### Paso 3: persistencia final
 
-Si el usuario confirma, con o sin encadenado:
+Si el usuario confirma, con o sin encadenado, o, por debajo de 100, sin esperar confirmación:
 
 1. Convertí el contrato visible en Markdown autocontenido siguiendo el template de **Formato del handoff**.
 2. Invocá `grill_session` con `action: "finalize"`, el resumen actualizado — incluidos los supuestos `[ASSUMED]` — y `handoffMarkdown`. Después de escribir el handoff, la tool registra `grill.finalized` en el log de eventos.
-   - Si el usuario eligió **Confirmar y crear spec SDD**, incluí `continueWithSpec: true`; la tool persiste primero y recién después encola el skill canónico materializado.
+   - Si el usuario eligió **Confirmar y crear spec SDD**, o la corrida trae `--until pr`, incluí `continueWithSpec: true`; la tool persiste primero y recién después encola el skill canónico materializado.
 3. Informá las dos rutas que devuelve la tool: el snapshot global y el handoff del repo en `<git-common-dir>/chiche/grills/`, con su ruta absoluta.
 4. Si hubo encadenado, terminá este turno después de la persistencia: el follow-up materializado de `chiche-spec --from-grill` continúa en esta misma sesión.
 
@@ -475,10 +477,11 @@ Si pide ajustar, retomá una sola rama. Una corrección inequívoca de un supues
 
 Después de finalizar:
 
-- si eligió **Confirmar entendimiento**, terminá e informá el handoff;
-- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>` (más `--autonomy <código>` si esta corrida recibió `--autonomy`: pasalo en el parámetro `autonomy` del finalize; con `--until pr`, pasá `until: "pr"` en el finalize sin esperar la elección **Confirmar y crear spec SDD** (en A1 es la única confirmación; en A2 y A3 no se pregunta) y la tool le agrega `--autonomy A3 --until pr` a `--from-grill <sessionId>`, sea cual sea el nivel con que corrió el grill);
+- si eligió **Confirmar entendimiento**, terminá e informá el handoff. Sin `--until pr` y por debajo de 100, el cierre termina con el handoff congelado y su ruta, sin encadenar la spec;
+- si eligió **Confirmar y crear spec SDD**, `grill_session finalize` con `continueWithSpec: true` entrega el skill canónico materializado con `--from-grill <sessionId>`, más `--confidence <n>` solo si esta corrida lo recibió: pasalo en el parámetro `confidence` del finalize, un entero de 0 a 100;
+- con `--until pr`, pasá `until: "pr"` en el finalize sin esperar la elección **Confirmar y crear spec SDD** (con 100 es la única confirmación; por debajo de 100 no se pregunta): la tool materializa `/skill:chiche-spec --from-grill <sessionId> --until pr`, más `--confidence <n>` solo si esta corrida lo recibió; no se le agrega ningún otro flag;
 - no leas un `SKILL.md` por un path inferido ni envíes slash commands;
-- el handoff confirmado es fuente autoritativa: no vuelvas a preguntar decisiones ya resueltas;
+- el handoff `finalized` es fuente autoritativa: no vuelvas a preguntar decisiones ya resueltas;
 - la spec sigue exigiendo `.chiche/project.md`.
 
 No implementes el plan desde este skill.

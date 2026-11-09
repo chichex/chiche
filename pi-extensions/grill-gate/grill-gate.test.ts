@@ -169,6 +169,8 @@ const BLOCKS_DOCTRINE: RegExp[] = [
 	/Una sesión recorre todos los bloques, uno tras otro/,
 	// (f)
 	/Al cerrar un bloque, el agente muestra un resumen corto de lo decidido, anuncia el siguiente y hace UNA pregunta con dos opciones: «Seguir con <bloque>» \(recomendada\) y «Cortar acá y seguir más tarde»\. Cortar es pausar, con la exportación de cuestionario disponible/,
+	// Issue #130, CA-16: la pregunta de frontera es una confirmación de paso y existe solo con confianza 100.
+	/La pregunta existe solo con confianza `100` \(ver «Tipo y confianza»\): por debajo de 100 el agente muestra el resumen, anuncia el siguiente bloque y sigue sin preguntar/,
 	// (g)
 	/Después del último bloque no hay frontera[^\n]*se pasa al cierre/,
 	// (h)
@@ -455,15 +457,198 @@ test("#119 CA-7: el template del handoff y el contrato visible del cierre termin
 	assert.deepEqual(problems, []);
 });
 
-// Review #123-4: en Pi la poda `risk-pruned` y la política `explicit-only` quedan atadas al umbral, como en los otros cuatro.
-test("review #123: en pi/grill risk-pruned asume solo decisiones de producto con confianza > umbral grill, explicit-only equivale a umbral 100 y ningún [ASSUMED] queda sin porcentaje en las reglas de poda", async () => {
+// Review #123-4 → issue #130: en Pi la poda `risk-pruned` y la política `explicit-only` quedan atadas a la confianza de la etapa, como en los otros cuatro.
+test("review #123 → #130: en pi/grill risk-pruned asume solo decisiones de producto con confianza > confianza grill, explicit-only equivale a confianza 100 y ningún [ASSUMED] queda sin porcentaje en las reglas de poda", async () => {
 	const pi = await grillSkill("pi");
 	assert.deepEqual(missing(pi, [
-		/Marcá como `\[ASSUMED NN %\]` una decisión de producto cuya opción recomendada supere el umbral \(confianza `> umbral grill`, ver «Tipo y confianza»\)/,
+		/Marcá como `\[ASSUMED NN %\]` una decisión de producto cuya opción recomendada supere la confianza de la etapa \(confianza `> confianza grill`, ver «Tipo y confianza»\)/,
 		/Una decisión técnica no se asume ni se pregunta: va a `\*\*Para la spec\.\*\*`/,
-		/Preguntá las decisiones de producto con confianza `≤ umbral grill`[^\n]*el umbral manda, no la lista/,
-		/`explicit-only` \(equivale a umbral 100: se pregunta toda decisión de producto\)/,
-		/usá `risk-pruned`, atada al umbral: convertí en `\[ASSUMED NN %\]` cada decisión de producto cuya recomendada supere `umbral grill`[^\n]*una con confianza `≤ umbral grill` sigue explícita aunque sea barata de corregir/,
+		/Preguntá las decisiones de producto con confianza `≤ confianza grill`[^\n]*la confianza manda, no la lista/,
+		/`explicit-only` \(equivale a confianza `100`: se pregunta toda decisión de producto\)/,
+		/usá `risk-pruned`, atada a la confianza: convertí en `\[ASSUMED NN %\]` cada decisión de producto cuya recomendada supere `confianza grill`[^\n]*una con confianza `≤ confianza grill` sigue explícita aunque sea barata de corregir/,
 	]).map((problem) => `pi/grill: ${problem}`), []);
 	assert.deepEqual(present(pi, [/Marcá como `\[ASSUMED\]` una opción respaldada/, /Preguntá solo decisiones que cambien materialmente/, /convertí cada elección respaldada, de bajo riesgo y reversible en `\[ASSUMED\]`/]).map((problem) => `pi/grill: ${problem}`), []);
+});
+
+// ---------------------------------------------------------------------------
+// J. Issue #130, CA-16: grill por confianza (firma, cierre, pasos solo con 100, cadena sin niveles)
+// ---------------------------------------------------------------------------
+
+// Los cuatro bloques compartidos del dial los fija autonomy-gate (byte a byte): acá se mira la prosa de afuera.
+const DIAL_SHARED_BLOCKS = ["autonomy-controls", "autonomy-resolve", "autonomy-confidence", "autonomy-contract"] as const;
+
+export function withoutDialBlocks(markdown: string): string {
+	let text = markdown;
+	for (const name of DIAL_SHARED_BLOCKS) text = text.replace(new RegExp(`<!-- ${name}:start -->\\n[\\s\\S]*?\\n<!-- ${name}:end -->`, "g"), "");
+	return text;
+}
+
+// Vocabulario del modelo de niveles, retirado en 6.0.0 (brief de la capa 2: «Palabras que no pueden quedar»).
+// Los nombres se arman a pedazos para que este archivo no los lleve escritos de corrido.
+export const RETIRED_DIAL_WORDS: RegExp[] = [
+	new RegExp(["super", "vised"].join("")),
+	new RegExp(["plan", "approved"].join("-")),
+	new RegExp(["un", "attended"].join("")),
+	/\bA[0-5]\b/,
+	new RegExp(["--auto", "nomy"].join("")),
+	/[Rr]ehearsed/,
+	/\bumbral(?:es)?\b/i,
+	/nivel efectivo/i,
+	/Niveles de autonomía/i,
+	/Nivel sugerido/i,
+	/nivel de autonomía/i,
+	/NEEDS-INPUT/,
+	/autonomizable/,
+];
+
+// Pi lleva su propia capa (fases y tools): la prosa de configuración, atajo liviano y `## Límites` vive en los otros cuatro.
+const GRILL_PROSE_HARNESSES = ["claude", "codex", "opencode", "antigravity"] as const;
+
+const GRILL_SIGNATURE: Record<Harness, string> = {
+	claude: "/grill [tema | #NN | ruta de handoff] [--confidence <n>] [--until pr]",
+	codex: "$grill [tema | #NN | ruta de handoff] [--confidence <n>] [--until pr]",
+	opencode: "/grill [tema | #NN | ruta de handoff] [--confidence <n>] [--until pr]",
+	pi: "/skill:grill [#NN | owner/repo#NN | https://github.com/owner/repo/issues/NN | --resume <sessionId>] [--confidence <n>] [--until pr]",
+	antigravity: "/grill [tema | #NN | ruta de handoff] [--confidence <n>] [--until pr]",
+};
+
+const GRILL_CHAIN_TARGET: Record<Harness, string> = {
+	claude: "ruta-del-handoff",
+	codex: "ruta-del-handoff",
+	opencode: "ruta-del-handoff",
+	pi: "sessionId",
+	antigravity: "ruta-del-handoff",
+};
+
+test("#130 CA-16: la firma de grill es [--confidence <n>] [--until pr] en los cinco harnesses, con el bullet del flag y la cadena que solo propaga lo recibido", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const skill = await grillSkill(harness);
+		const signatures = fencedBlocks(skill).filter((fence) => fence.content.split("\n").some((line) => /^(?:\/|\$|\/skill:)grill /.test(line)));
+		if (signatures.length !== 1 || signatures[0]?.content.trim() !== GRILL_SIGNATURE[harness]) problems.push(`${harness}/grill: la firma no es \`${GRILL_SIGNATURE[harness]}\` (hay: ${signatures.map((fence) => fence.content.trim()).join(" | ")})`);
+		for (const problem of missing(skill, [
+			/^- `--confidence <n>` — confianza de esta corrida, un entero de 0 a 100; manda sobre la fila `grill` de `## Autonomy` del contrato\./m,
+			/`0` no pregunta nada, `80` pregunta solo lo dudoso y `100` pregunta todo y además confirma cada paso \(la configuración, la frontera de bloque y el cierre\)/,
+			/Ver «Controles de autonomía», «Controles efectivos» y «Tipo y confianza»\./,
+			/^- `--until pr` — hasta dónde llega la cadena: [^\n]*por debajo de 100 congela el handoff y encadena sin preguntar; con 100 la confirmación ofrece `Confirmar y crear spec SDD` como única forma de confirmar/m,
+			/recibe `--until pr`, más `--confidence <n>` solo si esta corrida lo recibió: `--until pr` no cambia por sí solo la confianza de la spec ni la posición del run/,
+			/`--until` con cualquier otro valor aborta listando el único válido \(`pr`\)\. El flag existe solo en `grill` y `chiche-spec`: nunca llega a `chiche-run`\./,
+		])) problems.push(`${harness}/grill: argumentos ${problem}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+const GRILL_CLOSING_COMMON: RegExp[] = [
+	/Con confianza `0` no hay aborto por pedido abierto: el reconocimiento corre igual, todas las decisiones de producto quedan asumidas y el contrato las lista de menor a mayor confianza, para que lo más dudoso se vea primero/,
+	/[Pp]or debajo de 100 este paso no existe: con el contrato ya visible, el handoff se congela sin preguntar, con lo decidido y lo asumido/,
+	/por debajo de 100, sin esperar confirmación/,
+	/no se le agrega ningún otro flag/,
+	/Sin `--until pr` y por debajo de 100, el cierre termina con el handoff congelado y su ruta, sin encadenar la spec/,
+];
+
+// La confirmación de cuatro opciones de hoy (cinco acciones en Codex, opencode y Pi, que separan pausar de exportar), solo con 100.
+const GRILL_CLOSING_CONFIRMATION: Record<Harness, RegExp[]> = {
+	claude: [/^2\. \*\*Confirmación autocontenida \(solo con confianza `100`\)\.\*\*/m, /- `Confirmar`: [^\n]*\n\s+- `Confirmar y crear spec SDD`: [^\n]*\n\s+- `Ajustar una decisión`: [^\n]*\n\s+- `Pausar o exportar cuestionario`: /, /Con `--until pr`, `Confirmar` a secas no se ofrece: la única confirmación es `Confirmar y crear spec SDD`\./],
+	antigravity: [/^2\. \*\*Confirmación autocontenida \(solo con confianza `100`\)\.\*\*/m, /- `Confirmar`: [^\n]*\n\s+- `Confirmar y crear spec SDD`: [^\n]*\n\s+- `Ajustar una decisión`: [^\n]*\n\s+- `Pausar o exportar cuestionario`: /, /Con `--until pr`, `Confirmar` a secas no se ofrece: la única confirmación es `Confirmar y crear spec SDD`\./],
+	codex: [/^2\. Solo con confianza `100`: pedir una confirmación explícita y autocontenida: confirmar, ajustar una decisión, pausar, exportar cuestionario para un stakeholder \(ver \*\*Exportar cuestionario\*\*\) o confirmar y crear spec SDD\. Con `--until pr`, la única confirmación es confirmar y crear spec SDD \(sin confirmar a secas\)\./m],
+	opencode: [/^2\. Solo con confianza `100`: pedir una confirmación explícita y autocontenida: confirmar, ajustar una decisión, pausar, exportar cuestionario para un stakeholder \(ver \*\*Exportar cuestionario\*\*\) o confirmar y crear spec SDD\. Con `--until pr`, la única confirmación es confirmar y crear spec SDD \(sin confirmar a secas\)\./m],
+	pi: [/^### Paso 2: confirmación autocontenida \(solo con confianza `100`\)$/m, /- \*\*Confirmar entendimiento\*\*: [^\n]*\n- \*\*Confirmar y crear spec SDD\*\*: [^\n]*\n- \*\*Ajustar una decisión o supuesto\*\*: [^\n]*\n- \*\*Pausar\*\*: [^\n]*\n- \*\*Exportar cuestionario\*\*: /, /Con `--until pr`, \*\*Confirmar entendimiento\*\* no se ofrece: la única confirmación es \*\*Confirmar y crear spec SDD\*\*/],
+};
+
+test("#130 CA-16: el Cierre de grill congela el handoff sin preguntar por debajo de 100, confirma solo con 100, encadena la spec con --until pr sin agregar niveles y con 0 lista lo asumido de menor a mayor confianza", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const closing = section(await grillSkill(harness), /^(## Cierre|## Fase 3: cierre)$/);
+		if (closing === "") problems.push(`${harness}/grill: sin sección de cierre`);
+		const target = GRILL_CHAIN_TARGET[harness];
+		const chain = new RegExp(`\`${escapeRegExp(`${prefixes[harness]}chiche-spec --from-grill <${target}> --until pr`)}\`, más \`--confidence <n>\` solo si esta corrida lo recibió`);
+		for (const problem of missing(closing, [
+			...GRILL_CLOSING_COMMON,
+			...GRILL_CLOSING_CONFIRMATION[harness],
+			new RegExp(`\`--from-grill <${target}>\`, más \`--confidence <n>\` solo si esta corrida lo recibió`),
+			chain,
+		])) problems.push(`${harness}/grill: cierre ${problem}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("#130 CA-16: la configuración de grill se pregunta solo con confianza 100 en Claude Code, Codex, opencode y Antigravity, y el atajo liviano cierra sin preguntar por debajo de 100", async () => {
+	const problems: string[] = [];
+	for (const harness of GRILL_PROSE_HARNESSES) {
+		const skill = await grillSkill(harness);
+		const configuration = section(skill, /^## Configuración$/);
+		if (configuration === "") problems.push(`${harness}/grill: falta ## Configuración`);
+		for (const problem of missing(configuration, [
+			/^Solo con confianza `100` \(ver «Tipo y confianza»\) y salvo en el atajo liviano, después del mapa y antes de la primera pregunta, elegí la modalidad con /m,
+			/Por debajo de 100 la configuración no se pregunta: rige la modalidad que recomendó el reconocimiento/,
+		])) problems.push(`${harness}/grill: ## Configuración ${problem}`);
+		const shortcut = section(skill, /^### Atajo liviano \(1 a 3 preguntas\)$/);
+		for (const problem of missing(shortcut, [
+			/contrato visible — puede ser breve — antes de pedir confirmación \(con confianza `100`\) o de cerrar sin preguntar \(por debajo de 100\)/,
+			/Guardá el handoff solo si el usuario lo pide, pausa, o se encadena la spec \(que necesita la ruta\)/,
+		])) problems.push(`${harness}/grill: atajo liviano ${problem}`);
+	}
+	assert.deepEqual(problems, []);
+});
+
+// Una decisión asumida por confianza se persiste marcada, nunca como respondida: los principios y los límites
+// que prohibían persistir una recomendación sin el OK del usuario conviven con asumir por confianza.
+const GRILL_ASSUMED_PRINCIPLE = /[Uu]na decisión asumida por confianza \(ver «Tipo y confianza»\) se persiste marcada `— asumida NN %` con su recomendada, nunca como si la hubiera respondido el usuario/;
+const GRILL_ASSUMED_LIMIT = /No persist(?:as|ir) una recomendación como si el usuario la hubiera respondido: una decisión asumida por confianza se persiste marcada `— asumida NN %`, y una preguntada, recién con su respuesta/;
+const GRILL_STALE_APPROVAL: RegExp[] = [
+	/ninguna recomendación se persiste como decisión antes del OK del usuario/,
+	/No persist(?:as|ir) recomendaciones como decisiones antes de la aprobación del usuario/,
+	/La confirmación final acepta también todos los `\[ASSUMED\]` visibles/,
+	/La confirmación final aprueba tanto las decisiones como los `\[ASSUMED\]` enumerados/,
+];
+
+test("#130 CA-16: los principios y límites de grill conviven con asumir por confianza: lo asumido se persiste marcado «— asumida NN %», nunca como respondido por el usuario", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const skill = await grillSkill(harness);
+		for (const problem of missing(section(skill, /^## Principios$/), [GRILL_ASSUMED_PRINCIPLE])) problems.push(`${harness}/grill: ## Principios ${problem}`);
+		for (const problem of present(skill, GRILL_STALE_APPROVAL)) problems.push(`${harness}/grill: ${problem}`);
+	}
+	for (const harness of GRILL_PROSE_HARNESSES) {
+		for (const problem of missing(section(await grillSkill(harness), /^## Límites$/), [GRILL_ASSUMED_LIMIT])) problems.push(`${harness}/grill: ## Límites ${problem}`);
+	}
+	// Pi no tiene `## Límites`: la regla vive en «Persistencia de supuestos» y en el contrato visible del cierre.
+	const pi = await grillSkill("pi");
+	for (const problem of missing(pi, [
+		/Con confianza `100` no queda ningún `\[ASSUMED\]` \(se pregunta todo\) y la confirmación final aprueba las decisiones; por debajo de 100 no hay confirmación final: el handoff se congela con cada `\[ASSUMED NN %\]` marcado `— asumida NN %`, nunca como respondido por el usuario/,
+	])) problems.push(`pi/grill: ${problem}`);
+	assert.deepEqual(problems, []);
+});
+
+test("#130 CA-25 (texto): en pi/grill el finalize de grill_session lleva confidence en lugar del nivel y until: \"pr\" materializa --from-grill <sessionId> --until pr sin forzar nada", async () => {
+	const pi = await grillSkill("pi");
+	assert.deepEqual(missing(pi, [
+		/más `--confidence <n>` solo si esta corrida lo recibió: pasalo en el parámetro `confidence` del finalize, un entero de 0 a 100/,
+		/con `--until pr`, pasá `until: "pr"` en el finalize sin esperar la elección \*\*Confirmar y crear spec SDD\*\* \(con 100 es la única confirmación; por debajo de 100 no se pregunta\)/,
+		/la tool materializa `\/skill:chiche-spec --from-grill <sessionId> --until pr`, más `--confidence <n>` solo si esta corrida lo recibió; no se le agrega ningún otro flag/,
+		/Sin pregunta de cierre, con `--until pr` el finalize lleva `continueWithSpec: true` y `until: "pr"` directo/,
+	]).map((problem) => `pi/grill: ${problem}`), []);
+	assert.deepEqual(present(pi, [/parámetro `autonomy` del finalize/]).map((problem) => `pi/grill: ${problem}`), []);
+});
+
+test("#130 CA-14 (grill): fuera de los bloques compartidos del dial, ningún grill/SKILL.md nombra niveles, --autonomy, umbrales ni [NEEDS-INPUT]", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const lines = withoutDialBlocks(await grillSkill(harness)).split("\n");
+		lines.forEach((line, index) => {
+			for (const problem of present(line, RETIRED_DIAL_WORDS)) problems.push(`${harness}/grill/SKILL.md (línea ${index + 1} sin los bloques): ${problem}`);
+		});
+	}
+	assert.deepEqual(problems, []);
+});
+
+test("autotest: el detector del dial retirado marca el vocabulario viejo, deja pasar el nuevo y withoutDialBlocks saca solo los bloques compartidos", () => {
+	const retired = [["super", "vised"].join(""), ["plan", "approved"].join("-"), ["un", "attended"].join(""), "con A2 o A3", `${["--auto", "nomy"].join("")} <level>`, "Rehearsed", ["un", "rehearsed"].join(""), "umbral grill", "debajo del umbral", "nivel efectivo", "«Niveles de autonomía»", "**Nivel sugerido.**", "cualquier nivel de autonomía", "[NEEDS-INPUT]", "pedido no autonomizable"];
+	for (const phrase of retired) assert.ok(present(phrase, RETIRED_DIAL_WORDS).length > 0, `detecta: ${phrase}`);
+	for (const phrase of ["confianza grill", "con confianza `≤ confianza spec`", "`--confidence <n>`", "`--mode pr-reviewed`", "«Controles de autonomía»", "«Controles efectivos»", "**Opción sugerida.**", "por debajo de 100", "`## Autonomy` del contrato", "Modalidad A: Grillado pregunta a pregunta"]) {
+		assert.deepEqual(present(phrase, RETIRED_DIAL_WORDS), [], `acepta: ${phrase}`);
+	}
+	const markdown = ["antes", "<!-- autonomy-resolve:start -->", `${["un", "attended"].join("")} o A3`, "<!-- autonomy-resolve:end -->", "<!-- grill-blocks:start -->", "bloque propio", "<!-- grill-blocks:end -->", "después"].join("\n");
+	assert.equal(withoutDialBlocks(markdown), ["antes", "", "<!-- grill-blocks:start -->", "bloque propio", "<!-- grill-blocks:end -->", "después"].join("\n"));
 });
