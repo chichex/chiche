@@ -15,7 +15,7 @@ Tres ideas fuerza:
 ## Argumentos
 
 ```text
-/chiche-land [<stack#> | <PR#> | <URL de PR> ...] [--method merge|squash|rebase] [--wait N] [--dry-run] [--clean-only] [--autonomy <level>]
+/chiche-land [<stack#> | <PR#> | <URL de PR> ...] [--method merge|squash|rebase] [--wait N] [--dry-run] [--clean-only]
 ```
 
 - Cada target es un stack, un PR o la URL de un PR. Un PR sin stack es un stack de uno. Un `<PR#>` dentro de un stack significa «hasta ese PR inclusive» (lo que hace `gh stack merge <PR>`): aterrizan ese PR y los de abajo, y el plan lista exactamente qué PRs aterrizan. Varios targets se procesan en secuencia, cada uno con su propio gate: un fallo no bloquea a los demás targets independientes. Los PRs de fork (`isCrossRepository`) se rechazan con diagnóstico.
@@ -23,8 +23,7 @@ Tres ideas fuerza:
 - `--wait N` — minutos de espera máxima por checks pendientes o por la cola de merge. Default 20.
 - `--dry-run` — imprime el plan y termina sin mutar nada.
 - `--clean-only` (sin targets) — salta el merge y va directo a checkout principal → limpieza local → barrido → reporte (Fases 5 a 8). Es incompatible con targets, `--method` y `--wait`; con `--dry-run` imprime qué limpiaría y termina.
-- No existe `--yes`, y `--autonomy` solo acepta `supervised`: la confirmación del plan es siempre humana.
-- `--autonomy <level>` — se acepta por uniformidad y aborta con cualquier valor distinto de `supervised`/`A1`: la confirmación del plan es siempre humana. Lee la fila `land` del contrato solo para la traza. Ver «Niveles de autonomía» y «Nivel efectivo».
+- No existe `--yes`: la confirmación del plan es siempre humana y ningún control de autonomía la saltea (ver «Controles de autonomía» y «Controles efectivos»).
 
 Los gates usan la tool de preguntas del harness (`question`). Donde la tool no cubre la forma del gate —más opciones de las que admite, selección múltiple— o no existe, formular el mismo gate en texto plano, terminar el turno y esperar la respuesta.
 
