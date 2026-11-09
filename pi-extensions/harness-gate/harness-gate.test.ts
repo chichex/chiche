@@ -76,9 +76,9 @@ const SDD_RUN_DIRTY_CHECKOUT_DOCTRINE = [
 const FEEDBACK_REMEDIATION_DOCTRINE = [
 	/## Fase 6 — Seguimiento y resolución automática del feedback del PR/,
 	/Run completo[\s\S]*PR creado/,
-	// Issue #102 CA-11: con A2 o A3 no se pregunta; «Por nivel» fija la conducta.
-	/Con A2 o A3 no se pregunta: ver «Por nivel»/,
-	/\*\*Por nivel\.\*\*[^\n]*`plan-approved` \(A2\)[^\n]*termina sin esperar[^\n]*`unattended` \(A3\)[^\n]*tope de 2 ciclos de corrección[^\n]*30 minutos sin feedback nuevo[^\n]*`SEGUIMIENTO DE FEEDBACK DETENIDO`/,
+	// Issue #102 CA-11, issue #130 CA-20: con `pr` o `pr-reviewed` no se pregunta; «Por posición» fija la conducta.
+	/Con `pr` o `pr-reviewed` no se pregunta: ver «Por posición»/,
+	/\*\*Por posición\.\*\*[^\n]*Con `pr` no se pregunta[^\n]*termina sin esperar[^\n]*Con `pr-reviewed` no se pregunta[^\n]*hasta 2 rondas[^\n]*30 minutos sin feedback nuevo[^\n]*`Feedback resuelto`[^\n]*`SEGUIMIENTO DE FEEDBACK DETENIDO`/,
 	/ID estable \+ `updatedAt`/,
 	/threads por `thread\.id` \+ `isResolved`/,
 	/conversaci[oó]n[\s\S]*reviews[\s\S]*comentarios inline/,
@@ -223,8 +223,8 @@ const SDD_SPEC_DELIVERY_DOCTRINE = [
 const SDD_RUN_STACK_DOCTRINE = [
 	// CA-3: preflight
 	/`## Plan de entrega` de 2 o más capas[\s\S]*`gh` ≥ 2\.90\.0[\s\S]*`git` ≥ 2\.36[\s\S]*`github\/gh-stack`[\s\S]*`gh extension list`/,
-	/interactivo[\s\S]*`gh extension install github\/gh-stack` ahí mismo/,
-	/con A2 o A3 frena antes de ramificar[\s\S]*comando exacto/,
+	/con `ask`, ofrecer `gh extension install github\/gh-stack` ahí mismo/,
+	/con `pr` o `pr-reviewed` frena antes de ramificar[\s\S]*comando exacto/,
 	/una sola capa[\s\S]*nada cambia/i,
 	// CA-4: ramificado
 	/`gh stack init -b <base> sdd\/<slug>\/1-<etapa>`[\s\S]*`\.\.\/<repo>-sdd-<slug>`/,
@@ -683,8 +683,8 @@ test("chiche-run imprime el plan y sigue, desvía sin preguntar y ofrece code re
 		if (harness !== "claude") {
 			assert.doesNotMatch(markdown, /subagent_type/, `${harness}/chiche-run/SKILL.md no debe depender de subagentes de Claude`);
 		}
-		// Hallazgo 2: con A2 o A3 la política de dependencias `preguntar` no puede frenar.
-		assert.match(markdown, /`preguntar` → [^\n]*con A2 o A3, no agregar la dep/, `${harness}/chiche-run/SKILL.md no frena con A2 o A3 ante deps 'preguntar'`);
+		// Hallazgo 2: con `pr` o `pr-reviewed` la política de dependencias `preguntar` no puede frenar.
+		assert.match(markdown, /`preguntar` → [^\n]*con `pr` o `pr-reviewed`, no agregar la dep/, `${harness}/chiche-run/SKILL.md no frena con pr o pr-reviewed ante deps 'preguntar'`);
 	}
 	const claude = await readRepoFile("claude/chiche-run/SKILL.md");
 	assert.match(claude, /subagent_type: "reviewer"/, "Claude lanza el review con el subagente reviewer");
@@ -2180,4 +2180,221 @@ test("review #123: la Fase 3 de chiche-spec es técnica (lo de producto es fuga)
 	const contractRow = (await readRepoFile(".chiche/project.md")).split("\n").find((line) => line.startsWith("| gate anti-drift SDD |")) ?? "";
 	if (!/la primera opcion, marcada `\(Recomendado\)`, es `chiche-run --autonomy A3` solo con `k = 0`, `f = 0` y `a = 0`, y `chiche-run` en otro caso/.test(contractRow)) problems.push("contrato: la fila de harness-gate describe la regla del menú distinto que la doctrina");
 	assert.deepEqual(problems, []);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #130, capa 2 (CA-19 y CA-20): la posición del run. `chiche-run` deja `--autonomy` y los niveles con nombre y
+// pasa a `--mode <ask|pr|pr-reviewed>`; la conducta de `ask`, `pr` y `pr-reviewed` es, regla por regla, la de A1, A2 y
+// A3. Reemplazan a los tests del run que vivían en autonomy-gate (CA-8 y CA-11 del issue #102, review #114-5/6 y
+// CA-13 del issue #119), con el vocabulario nuevo.
+
+const RUN_SUBAGENT_HARNESSES: readonly Harness[] = ["claude", "antigravity", "pi"];
+const RUN_SUBAGENT_TITLE = "Run con subagente (solo con pr-reviewed y sin --inline)";
+// Lo que cada harness suma después de `[--inline]`, donde ya existía: Claude Code fija modelo y effort; Antigravity
+// fija el modelo y acepta `--effort` solo para descartarlo (por eso está en la firma y no en el atajo de la Fase 0); y
+// Codex, opencode y Pi nada (los dos primeros corren inline; en Pi el hijo hereda la sesión).
+const RUN_SIGNATURE_TAIL: Record<Harness, string> = { claude: " [--model M] [--effort E]", codex: "", opencode: "", pi: "", antigravity: " [--model M] [--effort E]" };
+const RUN_SHORTCUT_TAIL: Record<Harness, string> = { ...RUN_SIGNATURE_TAIL, antigravity: " [--model M]" };
+const RUN_INLINE_HARNESS_NAME: Partial<Record<Harness, string>> = { codex: "Codex", opencode: "opencode" };
+
+// Sección por título (niveles 2 a 4), hasta el próximo heading del mismo nivel o superior; los headings dentro de un
+// fence no cuentan.
+function runSection(markdown: string, heading: RegExp): string {
+	const lines = markdown.split("\n");
+	let fence = false;
+	let start = -1;
+	let level = 0;
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index] ?? "";
+		if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+		if (fence) continue;
+		const match = /^(#{2,4}) (.*)$/.exec(line);
+		if (!match) continue;
+		const depth = match[1]?.length ?? 0;
+		if (start === -1) {
+			if (heading.test(match[2] ?? "")) {
+				start = index;
+				level = depth;
+			}
+			continue;
+		}
+		if (depth <= level) return lines.slice(start, index).join("\n");
+	}
+	return start === -1 ? "" : lines.slice(start).join("\n");
+}
+
+function missingIn(text: string, patterns: RegExp[]): string[] {
+	return patterns.filter((pattern) => !pattern.test(text)).map((pattern) => `falta ${pattern}`);
+}
+
+// Los bloques `autonomy-controls` y `autonomy-resolve` son compartidos (los gatea autonomy-gate) y nombran los niveles
+// viejos a propósito, en el mapa de equivalentes de `--autonomy`.
+function withoutAutonomyBlocks(markdown: string): string {
+	return markdown.replace(/<!-- (autonomy-[a-z]+):start -->\n[\s\S]*?\n<!-- \1:end -->/g, (block) => block.replace(/[^\n]/g, ""));
+}
+
+test("#130 CA-19: la firma de chiche-run lleva [--mode <ask|pr|pr-reviewed>] [--inline], --inline/--model/--effort exigen pr-reviewed con su diagnóstico literal, «Run con subagente» se titula por la posición en Claude Code, Antigravity y Pi, y Codex y opencode corren pr-reviewed inline", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const prefix = escapeRegExp(prefixes[harness]);
+		const args = runSection(markdown, /^Argumentos$/);
+		const signature = fencedBlocks(args)[0]?.content ?? "";
+		if (!signature.endsWith(` [--no-pr] [--base <branch>] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SIGNATURE_TAIL[harness]}`)) problems.push(`${file}: la firma no termina en [--no-pr] [--base <branch>] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SIGNATURE_TAIL[harness]}: ${signature}`);
+		const shortcut = `Atajo: ${prefixes[harness]}chiche-run <spec|#NN> [--no-pr] [--mode <ask|pr|pr-reviewed>] [--inline]${RUN_SHORTCUT_TAIL[harness]} saltea este menu.`;
+		if (!runSection(markdown, /^Fase 0 — /).includes(shortcut)) problems.push(`${file}: la Fase 0 no trae '${shortcut}'`);
+		problems.push(...missingIn(args, [
+			new RegExp(`^- \`--mode <ask\\|pr\\|pr-reviewed>\` — posición del run en esta corrida; manda sobre la fila \`run\` de \`## Autonomy\` del contrato\\. \`ask\` pregunta ante choques del plan y desviaciones de alcance y ofrece el menú post-PR; \`pr\` corre hasta el PR sin preguntar \\(encadena \`${prefix}chiche-spec <target>\` sin flags y \`${prefix}chiche-init --defaults\` si faltan precondiciones, no frena ante choques del plan con políticas y resuelve desviaciones con sesgo mínimo seguro\\), lanza el \`Code review\` y termina; \`pr-reviewed\` [^\\n]*hasta 2 rondas \\(Fase 6\\)\\. Ver «Controles de autonomía» y «Controles efectivos»\\.$`, "m"),
+			/^- `--inline` — solo con `pr-reviewed` \(por flag o por contrato\): [^\n]*Con otra posición aborta con `--inline exige --mode pr-reviewed`\.$/m,
+		]).map((problem) => `${file} ## Argumentos: ${problem}`));
+		const inlineName = RUN_INLINE_HARNESS_NAME[harness];
+		if (inlineName) {
+			problems.push(...missingIn(args, [
+				new RegExp(`En ${inlineName} no hay subagentes: con \`pr-reviewed\` el run corre inline en esta sesión con la conducta de \`pr\` más la corrección automática del feedback de la Fase 6, hasta 2 rondas`),
+				new RegExp(`\`run: pr-reviewed · corre inline en ${inlineName}\``),
+				/`--model` y `--effort` abortan con `--model\/--effort: este harness corre pr-reviewed inline`/,
+				/^- `--mode <ask\|pr\|pr-reviewed>` — [^\n]*`pr-reviewed` corre inline con la conducta de `pr` más la corrección automática del feedback del review, hasta 2 rondas \(Fase 6\)\./m,
+			]).map((problem) => `${file} ## Argumentos: ${problem}`));
+			if (/^## Run con subagente/m.test(markdown)) problems.push(`${file}: no tiene subagentes y no debe ganar «Run con subagente»`);
+			if (/exigen --mode pr-reviewed/.test(markdown)) problems.push(`${file}: --model/--effort no existen acá: el único diagnóstico es el de pr-reviewed inline`);
+			continue;
+		}
+		const headings = markdown.split("\n").filter((line) => line.startsWith("## Run con subagente"));
+		if (headings.length !== 1 || headings[0] !== `## ${RUN_SUBAGENT_TITLE}`) problems.push(`${file}: el heading no es literalmente '## ${RUN_SUBAGENT_TITLE}': ${headings.join(" / ")}`);
+		const subagent = runSection(markdown, /^Run con subagente /);
+		problems.push(...missingIn(subagent, [
+			/^Con posición `pr-reviewed` y sin `--inline`, la sesión es \*\*lanzadora, no corredora\*\*/m,
+			/corre la Fase 6 de `pr-reviewed` él mismo/,
+			/Con `--inline` nada de esta sección aplica: el run corre en esta sesión con la conducta de `pr-reviewed`/,
+			/con la doctrina de `pr-reviewed`: sin preguntar/,
+			new RegExp(`encadenaría en background \`${prefix}chiche-init --defaults\` o \`${prefix}chiche-spec <target>\` sobre algo que nadie revisó`),
+			new RegExp(`^1\\. \\*\\*Contrato\\*\\* \\(Fase 1, paso 1\\): [^\\n]*Si no existe: correr \`${prefix}chiche-init --defaults\` y seguir\\.$`, "m"),
+			new RegExp(`^2\\. \\*\\*Spec\\*\\* \\(Fase 1, pasos 2 y 3\\): [^\\n]*Si no: encadenar \`${prefix}chiche-spec <target>\` en esta sesión, sin flags, y lanzar sobre la spec resultante`, "m"),
+			new RegExp(`\`${prefix}chiche-run <target> --mode pr-reviewed --inline\` \\(más \`--no-pr\`/\`--base\` si vinieron\\)`),
+			/^- Con `ask` o `pr`, o con `--inline`, nada de lo anterior aparece y el run corre en esta sesión\.$/m,
+		]).map((problem) => `${file} «Run con subagente»: ${problem}`));
+		if (harness === "pi") {
+			problems.push(...missingIn(subagent, [/tool `subagent`/, /agent: "implementer"/, /background: true/, /PI_SUBAGENT_DEPTH=1/, /En Pi no existen `--model` ni `--effort`/]).map((problem) => `${file}: ${problem}`));
+			// CA-25 (el código lo cambia otra unidad): la tool de Pi lleva `mode`, no `autonomy`.
+			if (!/invocá inmediatamente `launch_sdd_run` con ese target exacto, más `mode: <posición>` si vino `--mode <posición>`, y terminá el turno/.test(args)) problems.push(`${file}: launch_sdd_run no lleva mode: <posición>`);
+			if (/exigen --mode pr-reviewed/.test(markdown)) problems.push(`${file}: en Pi no existen --model ni --effort y no hay diagnóstico que dar`);
+			continue;
+		}
+		// Pi no nombra al subagente en «Ownership y tareas»: su lanzador delega con la tool `subagent` y el hijo no anida.
+		problems.push(...missingIn(runSection(markdown, /^Ownership y tareas$/), [
+			/lanzado por «Run con subagente» en `pr-reviewed`\) conserva ownership/,
+			/^- La sesión que lanza en `pr-reviewed` sin `--inline` no es el agente que corre/m,
+		]).map((problem) => `${file} Ownership y tareas: ${problem}`));
+		problems.push(...missingIn(args, [/[Ss]olo (?:son válidos|es válido) con `pr-reviewed` \(por flag o por contrato\); con otra posición abort(?:an|a) con `--model\/--effort exigen --mode pr-reviewed`/]).map((problem) => `${file} ## Argumentos: ${problem}`));
+		problems.push(...missingIn(subagent, [
+			/^- `pr-reviewed` no pregunta: `model` es `--model` si vino y, si no, el escalón derivado/m,
+			/solo (?:son válidos|es válido) con `pr-reviewed`: con otra posición el run aborta con `--model\/--effort exigen --mode pr-reviewed` antes de cualquier mutación/,
+		]).map((problem) => `${file} «Run con subagente»: ${problem}`));
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-19: la conducta de ask, pr y pr-reviewed es la de A1, A2 y A3 en los cinco harnesses: precondiciones y encadenamiento, choques del plan con políticas, desviaciones de alcance, preflight de stack, snapshot de la Fase 5 y MUST DO", async () => {
+	const { prefixes } = parseInteractionTable(await readRepoFile("docs/harness-interaction-differences.md"));
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		const prefix = escapeRegExp(prefixes[harness]);
+		problems.push(...missingIn(runSection(markdown, /^Fase 1 — /), [
+			new RegExp(`^1\\. \\*\\*Contrato\\*\\*: [^\\n]*Si no existe en ninguno de los dos: con \`ask\` → ofrecer \`${prefix}chiche-init\` ahí mismo; con \`pr\` o \`pr-reviewed\` → correr \`${prefix}chiche-init --defaults\` y seguir\\.`, "m"),
+			new RegExp(`^2\\. \\*\\*Spec\\*\\*: [^\\n]*Pedido libre sin spec → frenar: ofrecer \`${prefix}chiche-spec <pedido>\` \\(\`ask\`\\) o encadenar \`${prefix}chiche-spec <pedido>\` sin flags \\(\`pr\` o \`pr-reviewed\`\\)\\. La spec encadenada pregunta lo que pida su propia confianza: la posición del run no la cambia\\. NO improvisar una spec`, "m"),
+		]).map((problem) => `${file} Fase 1: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 2 — /), [
+			/si la spec entera no cabe, frenar y preguntar: [^\n]*; con `pr` o `pr-reviewed` → seguir y que el gate del cierre juzgue\./,
+			/`preguntar` → frenar y preguntar antes de implementar; con `pr` o `pr-reviewed`, no agregar la dep: replantear sin ella o dejarla como FALLA honesta\./,
+		]).map((problem) => `${file} Fase 2: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 3 — /), [
+			/^4\. \*\*Desviaciones\*\*: [^\n]*si cambia el alcance, con `ask` → preguntar con [^\n]* y editar la spec según la respuesta; con `pr` o `pr-reviewed` → abortar honesto con el estado committeado en el branch\./m,
+		]).map((problem) => `${file} Fase 3: ${problem}`));
+		problems.push(...missingIn(delimitedDoctrine(markdown, "chiche-run-flow"), [
+			/si cambia el alcance, preguntar \(con `pr` o `pr-reviewed`, abortar honesto con el estado committeado en el branch\)\./,
+			/La oferta existe solo en `ask`: con `pr` se lanza `Code review` y la corrida termina; con `pr-reviewed` corren `Code review` y `Resolver feedback automáticamente` sin preguntar \(ver «Por posición» en la Fase 6\)\./,
+		]).map((problem) => `${file} chiche-run-flow: ${problem}`));
+		problems.push(...missingIn(delimitedDoctrine(markdown, "chiche-run-stack"), [
+			/Si falta la extensión: con `ask`, ofrecer `gh extension install github\/gh-stack` ahí mismo y seguir si se instala; con `pr` o `pr-reviewed` frena antes de ramificar e imprime el comando exacto\. Una versión vieja de `gh` o de `git` frena en las tres posiciones, con el diagnóstico\./,
+		]).map((problem) => `${file} chiche-run-stack: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^Fase 5 — /), [
+			/si la posición es `ask` o `pr-reviewed` y la corrida creó un PR \(con `pr` se lanza el review y la corrida termina\)/,
+		]).map((problem) => `${file} Fase 5: ${problem}`));
+		problems.push(...missingIn(runSection(markdown, /^MUST DO$/), [
+			new RegExp(`^- Exigir spec y contrato antes de tocar código; con \`pr\` o \`pr-reviewed\` encadenarlos \\(\`${prefix}chiche-spec <target>\` sin flags y \`${prefix}chiche-init --defaults\`\\), con \`ask\` ofrecerlos\\.$`, "m"),
+			/^- Después de un `Run completo` con PR en `ask`, ofrecer la remediación opt-in/m,
+		]).map((problem) => `${file} MUST DO: ${problem}`));
+		if (harness === "codex" && !/^En Codex, [^\n]*Con `pr` o `pr-reviewed`, saltear únicamente los gates que este skill declara salteables; nunca saltear permisos para efectos externos\.$/m.test(markdown)) problems.push(`${file}: la capa de Codex no acota qué gates se saltean con pr o pr-reviewed`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-19 (#119 CA-13): lanzado desde chiche-spec --until pr, chiche-run arranca en la posición del contrato, no vuelve a encadenar la spec, su traza repite until: pr y sigue sin aceptar --until, en los cinco harnesses", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const markdown = await readRepoFile(file);
+		problems.push(...missingIn(runSection(markdown, /^Fase 1 — /), [
+			/^2\. \*\*Spec\*\*: [^\n]*Cuando esta sesión viene de `[^`]*chiche-spec --until pr` \(la señal es el contexto de la sesión, o la línea del prompt que el lanzador le pasa al subagente[^\n]*el target ya es una spec `approved` y no se encadena `[^`]*chiche-spec` otra vez; la traza del run repite `until: pr` después de `leído de <fuente>`\./m,
+			/^2\. \*\*Spec\*\*: [^\n]*Este skill no acepta `--until`: `chiche-spec` lo consume y lanza el run sin flags, así que el run arranca en la posición del contrato\.$/m,
+		]).map((problem) => `${file} Fase 1: ${problem}`));
+		const signature = fencedBlocks(runSection(markdown, /^Argumentos$/))[0]?.content ?? "";
+		if (/--until/.test(signature)) problems.push(`${file}: la firma no debe ganar --until`);
+		if (!RUN_SUBAGENT_HARNESSES.includes(harness)) continue;
+		if (!/Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, el target ya es una spec `approved`: no se encadena `[^`]*chiche-spec` otra vez/.test(runSection(markdown, /^Precondiciones del lanzador$/))) problems.push(`${file}: las precondiciones del lanzador no cierran el doble encadenado`);
+		if (!/^- Cuando esta sesión viene de `[^`]*chiche-spec --until pr`, la traza suma `until: pr` después de `leído de <fuente>`, y el prompt del subagente lleva una línea que lo dice para que su traza lo repita/m.test(runSection(markdown, /^Traza$/))) problems.push(`${file}: la traza del lanzador no suma until: pr después de leído de <fuente>`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("#130 CA-20: la Fase 6 de chiche-run fija la conducta por posición en los cinco harnesses: ask ofrece el menú, pr lanza el review y termina, y pr-reviewed corrige solo, hasta 2 rondas, con el tope de 30 minutos y los reportes Feedback resuelto y SEGUIMIENTO DE FEEDBACK DETENIDO", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		const phase6 = runSection(await readRepoFile(file), /^Fase 6 — /);
+		problems.push(...missingIn(phase6, [
+			/^1\. \*\*Baseline sin carrera\*\*: con posición `ask` o `pr-reviewed`, inmediatamente después de crear el PR/m,
+			/Con `pr` o `pr-reviewed` no se pregunta: ver «Por posición»\. Tampoco ofrecerla con `--no-pr`/,
+			/^\*\*Por posición\.\*\* Con `ask` rige el menú del paso 2\. Con `pr` no se pregunta: se lanza `Code review` \(con la rama de este harness\) y la corrida termina sin esperar; los findings los lee el humano\. Con `pr-reviewed` no se pregunta: se ejecutan `Code review` y `Resolver feedback automáticamente` y el run corrige el feedback del review solo, hasta 2 rondas; al tercer lote de feedback se dejan los threads abiertos y se reporta\./m,
+			/Corre en el mismo agente que corrió el run \(el `implementer` delegado, o la sesión con `--inline`\); el lanzador solo releva/,
+			/Sin `\.github\/workflows\/claude-review\.yml`, el review corre en ese mismo agente con el code review nativo \(`[^`]*code-review[^`]*` sobre el PR\), sin lanzar otro subagente/,
+			/[Ss]i el code review nativo no está disponible[^\n]*avisar y seguir, sin bloquear el run/,
+			/El snapshot del paso 1 y la conservación del worktree aplican también en `pr-reviewed`\./,
+			/La espera tiene tope: 30 minutos sin feedback nuevo terminan el seguimiento: `Feedback resuelto` si todo finding válido quedó atendido y `SEGUIMIENTO DE FEEDBACK DETENIDO` solo con trabajo pendiente; al cortar por el tope de 2 rondas se emite `SEGUIMIENTO DE FEEDBACK DETENIDO` con los threads abiertos listados\. En los dos casos se limpia el worktree si está limpio\.$/m,
+			/^Al salir, emitir `Feedback resuelto` solo si todo finding válido detectado quedó atendido y no hay bloqueos; [^\n]*usar `SEGUIMIENTO DE FEEDBACK DETENIDO`\./m,
+		]).map((problem) => `${file} Fase 6: ${problem}`));
+		if (/ciclos de corrección|tope de 2 ciclos|Por nivel/.test(phase6)) problems.push(`${file} Fase 6: sigue contando ciclos o hablando de niveles`);
+		// Review #114-5/6: sin GHA, `pr` corre el review nativo inline donde no hay subagente que lo corra.
+		if ((harness === "codex" || harness === "opencode") && !/Con `pr` y sin GHA, el review nativo corre inline \(`[^`]*code-review <PR>`\) y la corrida termina\./.test(phase6)) problems.push(`${file}: pr sin GHA no corre el review nativo inline`);
+		if (harness === "pi" && !/Con `pr` y sin GHA ni la tool `subagent`, el review nativo corre inline \(`\/skill:code-review <PR>`\) y la corrida termina\./.test(phase6)) problems.push(`${file}: pr sin GHA ni subagent no corre el review nativo inline`);
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+// Los nombres de nivel, `--autonomy` y el vocabulario del resolver viejo no pueden quedar fuera de los bloques
+// compartidos. El aborto por fuga de `chiche-spec` tampoco: desde 6.0.0 una fuga se trata por confianza y nunca aborta.
+const RUN_RETIRED_WORDS = /supervised|plan-approved|unattended|\bA[0-5]\b|--autonomy|Rehearsed|unrehearsed|umbral grill|umbral spec|nivel efectivo|Niveles de autonomía|Nivel efectivo|Nivel sugerido|Por nivel|nivel de autonomía|ciclos de corrección|decisión de producto sin cerrar/g;
+
+export function retiredRunWordProblems(file: string, markdown: string): string[] {
+	const problems: string[] = [];
+	withoutAutonomyBlocks(markdown).split("\n").forEach((line, index) => {
+		const hits = [...new Set(line.match(RUN_RETIRED_WORDS) ?? [])];
+		if (hits.length > 0) problems.push(`${file}:${index + 1}: ${hits.join(", ")}`);
+	});
+	return problems;
+}
+
+test("#130 CA-19: fuera de los bloques autonomy-*, ningún chiche-run nombra un nivel, --autonomy, el nivel efectivo ni el aborto por fuga; el autotest prueba que el chequeo ve una línea vieja y saltea los bloques", async () => {
+	const problems: string[] = [];
+	for (const harness of HARNESSES) {
+		const file = `${harness}/chiche-run/SKILL.md`;
+		problems.push(...retiredRunWordProblems(file, await readRepoFile(file)));
+	}
+	assert.deepEqual(problems, [], problems.join("\n"));
+	const synthetic = ["uno", "<!-- autonomy-resolve:start -->", "`unattended` o `A3` → `usá --mode pr-reviewed`", "<!-- autonomy-resolve:end -->", "con A2 o A3 frena", "ALTA 4 / MEDIA 1", "`--autonomy A3`"].join("\n");
+	assert.deepEqual(retiredRunWordProblems("x.md", synthetic), ["x.md:5: A2, A3", "x.md:7: --autonomy, A3"]);
 });
