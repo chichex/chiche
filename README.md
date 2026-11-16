@@ -1,5 +1,9 @@
 # chiche
 
+> 🇬🇧 [Read this in English](./README.en.md)
+
+chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — con tres controles, en el contrato o por corrida: la confianza de `grill` y `chiche-spec` (de 0 a 100: qué te pregunta), la posición del run (`ask`, `pr` o `pr-reviewed`: dónde frena) y la cadena (`--until pr`: si para entre etapas) — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
+
 > **Aviso: chiche se va a dar de baja el 31 de diciembre de 2026.** Hasta esa fecha sigue funcionando. Ese día el repo se archiva (queda de solo lectura).
 >
 > El sucesor es **[omi-code](https://github.com/chichex/omi-code)**. omi-code cubre los subagentes (`scout`, `planner`, `reviewer` y `worker`), el triage de issues y las vistas de PRs. Lee `AGENTS.md`, no `.chiche/project.md`.
@@ -7,10 +11,6 @@
 > **No tienen reemplazo en omi-code:** `grill`, `chiche-spec`, `chiche-run`, `chiche-land`, `chiche-init`, `tdd`, `coding-policies` y `design-system`. Si los usás, a partir del 31/12 se terminan.
 >
 > Para sacarlo de tu máquina, mirá [Cómo desinstalarlo](#cómo-desinstalarlo).
-
-> 🇬🇧 [Read this in English](./README.en.md)
-
-chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — con tres controles, en el contrato o por corrida: la confianza de `grill` y `chiche-spec` (de 0 a 100: qué te pregunta), la posición del run (`ask`, `pr` o `pr-reviewed`: dónde frena) y la cadena (`--until pr`: si para entre etapas) — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
 
 Los skills son piezas de conocimiento reutilizable que un agente carga bajo demanda: cada carpeta es un skill con su `SKILL.md` (frontmatter `name` + `description` que decide cuándo aplica) y, opcionalmente, archivos de referencia que el skill lee cuando los necesita.
 
@@ -324,7 +324,7 @@ Hacelo en cada harness donde lo hayas instalado. Los comandos de plugin y de Pi 
   ```
 
   Si declaraste el marketplace o el plugin en `~/.claude/settings.json`, sacá `enabledPlugins["chiche@chichex"]` y `extraKnownMarketplaces.chichex`. Después `/reload-plugins` o reiniciá la sesión.
-- **Codex:** si lo instalaste como plugin: `codex plugin remove chiche@chichex` y `codex plugin marketplace remove chichex`. Si lo instalaste con `install.sh`, ver «Copias hechas con `install.sh`» abajo y sacá de `${CODEX_HOME:-~/.codex}/config.toml` el bloque que va de `# >>> chichex/chiche: prefer Codex over Pi >>>` a `# <<< chichex/chiche: prefer Codex over Pi <<<` (el de una instalación vieja usa `chichex/skills` en vez de `chichex/chiche`).
+- **Codex:** si lo instalaste como plugin: `codex plugin remove chiche@chichex` y `codex plugin marketplace remove chichex`. Si lo instalaste con `install.sh`, ver «Copias hechas con `install.sh`» abajo y sacá de `${CODEX_HOME:-~/.codex}/config.toml` el bloque que va de `# >>> chichex/chiche: prefer Codex over Pi >>>` a `# <<< chichex/chiche: prefer Codex over Pi <<<` (una instalación anterior al renombre del repo lleva el nombre viejo del repo en esas dos líneas).
 - **opencode:** no hay plugin. Ver «Copias hechas con `install.sh`». Si agregaste `chiche-spec`, `chiche-run` y los otros skills a `permission.skill` de `opencode.json`, sacalos.
 - **Pi:** `pi remove git:github.com/chichex/chiche`. Con `pi list` ves la fuente exacta con la que lo instalaste.
 - **Antigravity:** no hay plugin. Ver «Copias hechas con `install.sh`»; los skills viven en `${ANTIGRAVITY_SKILLS_DIR:-~/.gemini/config/skills}`. Los permisos o agentes que hayas configurado a mano en Antigravity no los toca este repo: sacalos vos.
