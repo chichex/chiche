@@ -323,10 +323,10 @@ Hacelo en cada harness donde lo hayas instalado. Los comandos de plugin y de Pi 
   claude plugin marketplace remove chichex
   ```
 
-  Si declaraste el marketplace o el plugin en `~/.claude/settings.json`, sacá `enabledPlugins["chiche@chichex"]` y `extraKnownMarketplaces.chichex`. Después `/reload-plugins` o reiniciá la sesión.
+  Si declaraste el marketplace o el plugin en `~/.claude/settings.json`, sacá `enabledPlugins["chiche@chichex"]` y `extraKnownMarketplaces.chichex`. Después `/reload-plugins` o reiniciá la sesión. Si además lo instalaste con `./install.sh claude`, borrá también `~/.claude/agents/implementer.md` y `~/.claude/agents/reviewer.md`: los copia el instalador y no figuran en ningún manifest.
 - **Codex:** si lo instalaste como plugin: `codex plugin remove chiche@chichex` y `codex plugin marketplace remove chichex`. Si lo instalaste con `install.sh`, ver «Copias hechas con `install.sh`» abajo y sacá de `${CODEX_HOME:-~/.codex}/config.toml` el bloque que va de `# >>> chichex/chiche: prefer Codex over Pi >>>` a `# <<< chichex/chiche: prefer Codex over Pi <<<` (una instalación anterior al renombre del repo lleva el nombre viejo del repo en esas dos líneas).
 - **opencode:** no hay plugin. Ver «Copias hechas con `install.sh`». Si agregaste `chiche-spec`, `chiche-run` y los otros skills a `permission.skill` de `opencode.json`, sacalos.
-- **Pi:** `pi remove git:github.com/chichex/chiche`. Con `pi list` ves la fuente exacta con la que lo instalaste.
+- **Pi:** `pi remove git:github.com/chichex/chiche`. Con `pi list` ves la fuente exacta con la que lo instalaste. Si lo instalaste con la vía legacy (`./install.sh pi`), corré desde el checkout `./install.sh pi-clean --confirm`: borra las copias de `~/.agents/skills`, `~/.pi/agent/extensions` y `~/.pi/agent/themes`, y reconcilia el bloque de Codex en `config.toml`.
 - **Antigravity:** no hay plugin. Ver «Copias hechas con `install.sh`»; los skills viven en `${ANTIGRAVITY_SKILLS_DIR:-~/.gemini/config/skills}`. Los permisos o agentes que hayas configurado a mano en Antigravity no los toca este repo: sacalos vos.
 
 **Copias hechas con `install.sh`.** `install.sh` no tiene desinstalador (solo `pi-clean`, para Pi). Cada carpeta de destino guarda la lista de lo que instaló en `.chiche-managed` (o `.chichex-skills-managed`, si es de una instalación vieja). Borrá las carpetas que figuran ahí y después el manifest. Ejemplo para Antigravity (cambiá `dest` por la carpeta de cada herramienta: `${CODEX_HOME:-~/.codex}/skills`, `~/.config/opencode/skills`, `~/.claude/skills`):
