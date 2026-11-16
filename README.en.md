@@ -1,5 +1,13 @@
 # chiche
 
+> **Notice: chiche will be retired on December 31, 2026.** It keeps working until then. On that day the repo is archived (read-only).
+>
+> The successor is **[omi-code](https://github.com/chichex/omi-code)**. omi-code covers subagents (`scout`, `planner`, `reviewer` and `worker`), issue triage and PR views. It reads `AGENTS.md`, not `.chiche/project.md`.
+>
+> **No replacement in omi-code:** `grill`, `chiche-spec`, `chiche-run`, `chiche-land`, `chiche-init`, `tdd`, `coding-policies` and `design-system`.
+>
+> To uninstall, see [Cómo desinstalarlo](./README.md#cómo-desinstalarlo) in the Spanish README. Uninstalling does not delete `.chiche/` or `.sdd/` from your repos.
+
 > 🇦🇷 [Leer en español](./README.md)
 
 **You choose how much the agent decides.** chiche is a graduated-autonomy harness for coding agents: the same skill set runs in **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** and **[Google Antigravity](https://antigravity.google)**, and each project's contract sets how far the agent goes on its own with three controls, in the contract or per run: the confidence of `grill` and `chiche-spec` (0 to 100: what it asks you), the run position (`ask`, `pr` or `pr-reviewed`: where it stops) and the chain (`--until pr`: whether it stops between stages). Under the hood it is **Spec-Driven Development (SDD)**: contract → verifiable spec → execution → close, so "done" is defined by something verifiable rather than by a feeling.
