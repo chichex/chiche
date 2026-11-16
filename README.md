@@ -4,6 +4,14 @@
 
 chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — con tres controles, en el contrato o por corrida: la confianza de `grill` y `chiche-spec` (de 0 a 100: qué te pregunta), la posición del run (`ask`, `pr` o `pr-reviewed`: dónde frena) y la cadena (`--until pr`: si para entre etapas) — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
 
+> **Aviso: chiche se va a dar de baja el 31 de diciembre de 2026.** Hasta esa fecha sigue funcionando. Ese día el repo se archiva (queda de solo lectura).
+>
+> El sucesor es **[omi-code](https://github.com/chichex/omi-code)**. omi-code cubre los subagentes (`scout`, `planner`, `reviewer` y `worker`), el triage de issues y las vistas de PRs. Lee `AGENTS.md`, no `.chiche/project.md`.
+>
+> **No tienen reemplazo en omi-code:** `grill`, `chiche-spec`, `chiche-run`, `chiche-land`, `chiche-init`, `tdd`, `coding-policies` y `design-system`. Si los usás, a partir del 31/12 se terminan.
+>
+> Para sacarlo de tu máquina, mirá [Cómo desinstalarlo](#cómo-desinstalarlo).
+
 Los skills son piezas de conocimiento reutilizable que un agente carga bajo demanda: cada carpeta es un skill con su `SKILL.md` (frontmatter `name` + `description` que decide cuándo aplica) y, opcionalmente, archivos de referencia que el skill lee cuando los necesita.
 
 ## El flujo chiche
@@ -303,6 +311,34 @@ En OpenCode, si `permission.skill` usa una allowlist, habilitá también el nomb
 Para encadenar desde `issue-triage`, también deben estar instalados y habilitados `grill`, `chiche-spec` y `chiche-run`. Si la carga del skill elegido falla o queda denegada, el triage muestra el comando exacto y termina sin ejecutar el stage. Copiar los skills no cambia esos permisos; si no aparecen en la sesión abierta, abrí una nueva.
 
 **Alternativa legacy/manual de Pi:** `./install.sh pi` se conserva para compatibilidad, pero el Pi Package es la vía recomendada. Corré el instalador sólo con autorización explícita, porque actualiza el checkout y reemplaza las copias globales administradas; después ejecutá `/reload`. Las sesiones ya abiertas no reciben el código nuevo hasta recargar. No lo uses si el package nativo sigue instalado. Las instalaciones de Claude Code, Codex y OpenCode no cambian. Para la prueba interactiva usá una sesión persistida y repos descartables; los stages reales requieren un provider local/falso o consumo de proveedor explícitamente autorizado. El smoke autónomo usa configuración temporal y no ejecuta providers.
+
+## Cómo desinstalarlo
+
+Hacelo en cada harness donde lo hayas instalado. Los comandos de plugin y de Pi son los de la sección [Instalación](#instalación).
+
+- **Claude Code:**
+
+  ```bash
+  claude plugin uninstall chiche@chichex
+  claude plugin marketplace remove chichex
+  ```
+
+  Si declaraste el marketplace o el plugin en `~/.claude/settings.json`, sacá `enabledPlugins["chiche@chichex"]` y `extraKnownMarketplaces.chichex`. Después `/reload-plugins` o reiniciá la sesión. Si además lo instalaste con `./install.sh claude`, borrá también `~/.claude/agents/implementer.md` y `~/.claude/agents/reviewer.md`: los copia el instalador y no figuran en ningún manifest.
+- **Codex:** si lo instalaste como plugin: `codex plugin remove chiche@chichex` y `codex plugin marketplace remove chichex`. Si lo instalaste con `install.sh`, ver «Copias hechas con `install.sh`» abajo y sacá de `${CODEX_HOME:-~/.codex}/config.toml` el bloque que va de `# >>> chichex/chiche: prefer Codex over Pi >>>` a `# <<< chichex/chiche: prefer Codex over Pi <<<` (una instalación anterior al renombre del repo lleva el nombre viejo del repo en esas dos líneas).
+- **opencode:** no hay plugin. Ver «Copias hechas con `install.sh`». Si agregaste `chiche-spec`, `chiche-run` y los otros skills a `permission.skill` de `opencode.json`, sacalos.
+- **Pi:** `pi remove git:github.com/chichex/chiche`. Con `pi list` ves la fuente exacta con la que lo instalaste. Si lo instalaste con la vía legacy (`./install.sh pi`), corré desde el checkout `./install.sh pi-clean --confirm`: borra las copias de `~/.agents/skills`, `~/.pi/agent/extensions` y `~/.pi/agent/themes`, y reconcilia el bloque de Codex en `config.toml`.
+- **Antigravity:** no hay plugin. Ver «Copias hechas con `install.sh`»; los skills viven en `${ANTIGRAVITY_SKILLS_DIR:-~/.gemini/config/skills}`. Los permisos o agentes que hayas configurado a mano en Antigravity no los toca este repo: sacalos vos.
+
+**Copias hechas con `install.sh`.** `install.sh` no tiene desinstalador (solo `pi-clean`, para Pi). Cada carpeta de destino guarda la lista de lo que instaló en `.chiche-managed` (o `.chichex-skills-managed`, si es de una instalación vieja). Borrá las carpetas que figuran ahí y después el manifest. Ejemplo para Antigravity (cambiá `dest` por la carpeta de cada herramienta: `${CODEX_HOME:-~/.codex}/skills`, `~/.config/opencode/skills`, `~/.claude/skills`):
+
+```bash
+dest="${ANTIGRAVITY_SKILLS_DIR:-$HOME/.gemini/config/skills}"
+cat "$dest/.chiche-managed" "$dest/.chichex-skills-managed" 2>/dev/null   # revisá la lista antes de borrar
+```
+
+Si la lista es la que esperás, borrá cada carpeta nombrada con `rm -rf "$dest/<nombre>"` y los manifests con `rm -f "$dest/.chiche-managed" "$dest/.chichex-skills-managed"`.
+
+**Desinstalar no borra `.chiche/` ni `.sdd/`** de tus repos (contratos, specs y grills), ni los borradores de `<git-common-dir>/chiche/`, ni las sesiones y snapshots de Pi. Esos archivos son tuyos: borralos a mano si ya no los querés.
 
 ## Versiones y releases
 
