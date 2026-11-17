@@ -4,11 +4,11 @@
 
 chiche es un harness de autonomía graduada para agentes de código: vos elegís cuánto decide el agente en cada proyecto — con tres controles, en el contrato o por corrida: la confianza de `grill` y `chiche-spec` (de 0 a 100: qué te pregunta), la posición del run (`ask`, `pr` o `pr-reviewed`: dónde frena) y la cadena (`--until pr`: si para entre etapas) — y el mismo set de skills corre en **[Codex](https://developers.openai.com/codex/)**, **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)**, **[opencode](https://opencode.ai)**, **[Pi](https://github.com/badlogic/pi-mono)** y **[Google Antigravity](https://antigravity.google)**. Por detrás es **Spec-Driven Development (SDD)**: contrato → spec verificable → ejecución → cierre, para que "terminado" lo defina algo verificable y no la sensación.
 
-> **Aviso: chiche se va a dar de baja el 31 de diciembre de 2026.** Hasta esa fecha sigue funcionando. Ese día el repo se archiva (queda de solo lectura).
+> **Aviso: chiche está pronto a deprecarse.** La fecha prevista de baja es el 31 de diciembre de 2026. Hasta entonces sigue funcionando. Cuando se dé de baja, el repo se archiva (queda de solo lectura).
 >
-> El sucesor es **[omi-code](https://github.com/chichex/omi-code)**. omi-code cubre los subagentes (`scout`, `planner`, `reviewer` y `worker`), el triage de issues y las vistas de PRs. Lee `AGENTS.md`, no `.chiche/project.md`.
+> Todavía no hay un sucesor confirmado. Una posibilidad es **omi-code**, una herramienta en desarrollo que todavía no es pública. Hoy cubre los subagentes (`scout`, `planner`, `reviewer` y `worker`), el triage de issues y las vistas de PRs, y lee `AGENTS.md`, no `.chiche/project.md`. No está definido si va a estar lista para esa fecha.
 >
-> **No tienen reemplazo en omi-code:** `grill`, `chiche-spec`, `chiche-run`, `chiche-land`, `chiche-init`, `tdd`, `coding-policies` y `design-system`. Si los usás, a partir del 31/12 se terminan.
+> **Hoy omi-code no cubre:** `grill`, `chiche-spec`, `chiche-run`, `chiche-land`, `chiche-init`, `tdd`, `coding-policies` y `design-system`. Si los usás, tené en cuenta que se terminan con la baja.
 >
 > Para sacarlo de tu máquina, mirá [Cómo desinstalarlo](#cómo-desinstalarlo).
 
